@@ -1,0 +1,2105 @@
+<!DOCTYPE html>
+<html lang="bg">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Helious Quantum | Аналитичен Терминал</title>
+    <!-- Lightweight Charts -->
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    <!-- Fonts -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #06080f;
+            --panel-bg: rgba(13, 18, 30, 0.75);
+            --panel-border: rgba(255, 255, 255, 0.08);
+            --accent-cyan: #00f0ff;
+            --accent-purple: #8a2be2;
+            --accent-green: #00ff66;
+            --accent-red: #ff0055;
+            --text-main: #f1f5f9;
+            --text-dim: #94a3b8;
+            --sidebar-width: 320px;
+        }
+
+        * {
+            box-sizing: border-box;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+        }
+
+        body {
+            margin: 0;
+            background: var(--bg-dark);
+            background-image:
+                radial-gradient(at 0% 0%, rgba(138, 43, 226, 0.15) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(0, 240, 255, 0.1) 0px, transparent 50%);
+            color: var(--text-main);
+            font-family: 'Outfit', sans-serif;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Sidebar Styling */
+        #sidebar {
+            width: var(--sidebar-width);
+            background: var(--panel-bg);
+            border-right: 1px solid var(--panel-border);
+            display: flex;
+            flex-direction: column;
+            backdrop-filter: blur(16px);
+            z-index: 100;
+            transition: transform 0.4s cubic-bezier(0.16, 1, 0.3, 1), margin-left 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            position: relative;
+        }
+
+        #sidebar.collapsed {
+            transform: translateX(-100%);
+            margin-left: calc(var(--sidebar-width) * -1);
+        }
+
+        .sidebar-header {
+            padding: 24px 20px 15px 20px;
+            border-bottom: 1px solid var(--panel-border);
+        }
+
+        .logo-container {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .logo-icon {
+            width: 24px;
+            height: 24px;
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+            border-radius: 6px;
+            position: relative;
+            animation: pulse-glow 2s infinite ease-in-out;
+        }
+
+        .logo-icon::after {
+            content: '';
+            position: absolute;
+            inset: 3px;
+            background: var(--bg-dark);
+            border-radius: 4px;
+        }
+
+        @keyframes pulse-glow {
+
+            0%,
+            100% {
+                box-shadow: 0 0 5px rgba(0, 240, 255, 0.3);
+            }
+
+            50% {
+                box-shadow: 0 0 15px rgba(138, 43, 226, 0.6);
+            }
+        }
+
+        .sidebar-header h1 {
+            font-size: 16px;
+            font-weight: 800;
+            letter-spacing: 2px;
+            background: linear-gradient(to right, var(--accent-cyan), #ffffff);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin: 0;
+            text-transform: uppercase;
+        }
+
+        /* Time Period Picker (Времеви Период) */
+        .picker-label {
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            display: block;
+        }
+
+        .period-selector {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 6px;
+            margin-bottom: 18px;
+        }
+
+        .period-btn {
+            padding: 8px 4px;
+            border: 1px solid var(--panel-border);
+            background: rgba(255, 255, 255, 0.02);
+            color: var(--text-dim);
+            cursor: pointer;
+            border-radius: 6px;
+            font-size: 11px;
+            font-weight: 600;
+            transition: all 0.25s ease;
+            text-align: center;
+        }
+
+        .period-btn:hover {
+            border-color: rgba(0, 240, 255, 0.3);
+            background: rgba(0, 240, 255, 0.03);
+            color: var(--text-main);
+        }
+
+        .period-btn.active {
+            background: linear-gradient(135deg, rgba(0, 240, 255, 0.2), rgba(138, 43, 226, 0.2));
+            color: var(--accent-cyan);
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 10px rgba(0, 240, 255, 0.15);
+        }
+
+        /* Forecast Horizon Slider (Слайд бар за прогноза) */
+        .horizon-container {
+            margin-bottom: 5px;
+            padding: 0 4px;
+        }
+
+        .horizon-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .horizon-val {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--accent-cyan);
+            font-weight: 600;
+        }
+
+        .range-slider {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 5px;
+            border-radius: 3px;
+            background: rgba(255, 255, 255, 0.08);
+            outline: none;
+            cursor: pointer;
+            transition: background 0.3s;
+        }
+
+        .range-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 15px;
+            height: 15px;
+            border-radius: 50%;
+            background: var(--accent-cyan);
+            box-shadow: 0 0 8px var(--accent-cyan);
+            cursor: pointer;
+            transition: transform 0.15s ease-in-out;
+        }
+
+        .range-slider::-webkit-slider-thumb:hover {
+            transform: scale(1.25);
+        }
+
+        /* Search Engine */
+        .search-container {
+            padding: 15px 20px;
+            border-bottom: 1px solid var(--panel-border);
+            position: relative;
+        }
+
+        .search-input-wrapper {
+            position: relative;
+            width: 100%;
+        }
+
+        .search-icon {
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 13px;
+            color: var(--text-dim);
+            pointer-events: none;
+        }
+
+        #symbolSearch {
+            width: 100%;
+            padding: 10px 10px 10px 32px;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px solid var(--panel-border);
+            border-radius: 8px;
+            color: white;
+            font-size: 13px;
+            transition: all 0.3s;
+        }
+
+        #symbolSearch:focus {
+            outline: none;
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 8px rgba(0, 240, 255, 0.25);
+            background: rgba(0, 0, 0, 0.6);
+        }
+
+        /* Symbol List */
+        #symbolList {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px 15px;
+        }
+
+        .symbol-item {
+            padding: 12px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+            border: 1px solid transparent;
+            background: rgba(255, 255, 255, 0.01);
+        }
+
+        .symbol-item:hover {
+            background: rgba(255, 255, 255, 0.04);
+            border-color: rgba(255, 255, 255, 0.05);
+            transform: translateY(-1px);
+        }
+
+        .symbol-item.active {
+            background: linear-gradient(90deg, rgba(0, 240, 255, 0.08) 0%, rgba(138, 43, 226, 0.03) 100%);
+            border-color: rgba(0, 240, 255, 0.25);
+            box-shadow: inset 3px 0 0 var(--accent-cyan);
+        }
+
+        .symbol-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.2);
+            transition: all 0.3s;
+        }
+
+        .symbol-dot.active {
+            background: var(--accent-cyan);
+            box-shadow: 0 0 8px var(--accent-cyan);
+        }
+
+        .symbol-name {
+            font-weight: 700;
+            font-size: 14px;
+            letter-spacing: 0.5px;
+        }
+
+        .symbol-price {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-dim);
+            background: rgba(255, 255, 255, 0.04);
+            padding: 2px 6px;
+            border-radius: 4px;
+            border: 1px solid var(--panel-border);
+        }
+
+        .search-add-btn {
+            border: 1px dashed rgba(0, 240, 255, 0.3) !important;
+            background: rgba(0, 240, 255, 0.02) !important;
+        }
+
+        .search-add-btn:hover {
+            background: rgba(0, 240, 255, 0.08) !important;
+            border-color: var(--accent-cyan) !important;
+        }
+
+        .reload-forecast-btn {
+            width: 100%;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid var(--accent-cyan);
+            background: rgba(0, 240, 255, 0.05);
+            color: var(--accent-cyan);
+            font-weight: 600;
+            font-family: 'Outfit', sans-serif;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 0 10px rgba(0, 240, 255, 0.05);
+        }
+
+        .reload-forecast-btn:hover {
+            background: var(--accent-cyan);
+            color: #06080f;
+            box-shadow: 0 0 15px var(--accent-cyan);
+            transform: translateY(-1px);
+        }
+
+        .reload-forecast-btn:active {
+            transform: translateY(1px);
+        }
+
+        /* Sidebar Toggle Button (Слайд-бутон) */
+        .sidebar-toggle-btn {
+            position: absolute;
+            right: -15px;
+            top: 25px;
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: #0d1220;
+            border: 1px solid var(--panel-border);
+            color: var(--accent-cyan);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            z-index: 1000;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+            transition: all 0.3s;
+        }
+
+        .sidebar-toggle-btn:hover {
+            background: var(--accent-cyan);
+            color: #000;
+            box-shadow: 0 0 12px var(--accent-cyan);
+        }
+
+        /* Main Content Panel */
+        #main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Persistent Open Button (if sidebar is closed) */
+        #open-sidebar-btn {
+            position: absolute;
+            left: 20px;
+            top: 20px;
+            width: 42px;
+            height: 42px;
+            border-radius: 10px;
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            backdrop-filter: blur(10px);
+            color: var(--accent-cyan);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+            z-index: 90;
+            opacity: 0;
+            pointer-events: none;
+            transform: translateX(-20px);
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+
+        #open-sidebar-btn.visible {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateX(0);
+        }
+
+        #open-sidebar-btn:hover {
+            border-color: var(--accent-cyan);
+            box-shadow: 0 0 12px rgba(0, 240, 255, 0.3);
+            background: rgba(0, 240, 255, 0.05);
+        }
+
+        /* Top Bar Styling */
+        #top-bar {
+            padding: 20px 30px;
+            background: var(--panel-bg);
+            border-bottom: 1px solid var(--panel-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            backdrop-filter: blur(12px);
+            z-index: 10;
+            transition: padding-left 0.4s;
+        }
+
+        #top-bar.expanded-padding {
+            padding-left: 80px;
+        }
+
+        .title-badge-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        #displaySymbol {
+            font-size: 22px;
+            font-weight: 900;
+            letter-spacing: 0.5px;
+            background: linear-gradient(135deg, #ffffff 0%, var(--text-dim) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        #displayInterval {
+            color: var(--accent-cyan);
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin-top: 4px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .live-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--accent-green);
+            animation: live-blink 1.5s infinite;
+        }
+
+        @keyframes live-blink {
+
+            0%,
+            100% {
+                opacity: 0.3;
+            }
+
+            50% {
+                opacity: 1;
+            }
+        }
+
+        .stats-box {
+            display: flex;
+            gap: 24px;
+        }
+
+        .stat-group {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--panel-border);
+            padding: 10px 16px;
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            min-width: 140px;
+        }
+
+        .stat-label {
+            font-size: 9px;
+            font-weight: 700;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.8px;
+            margin-bottom: 4px;
+        }
+
+        .stat-val {
+            font-size: 17px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: -0.5px;
+        }
+
+        .trend-badge {
+            display: inline-flex;
+            align-items: center;
+            font-weight: 800;
+            font-size: 13px;
+        }
+
+        .trend-up {
+            color: var(--accent-green);
+            text-shadow: 0 0 10px rgba(0, 255, 102, 0.2);
+        }
+
+        .trend-down {
+            color: var(--accent-red);
+            text-shadow: 0 0 10px rgba(255, 0, 85, 0.2);
+        }
+
+        /* Chart Canvas */
+        #chart-container {
+            flex: 1;
+            position: relative;
+            background: #06080f;
+        }
+
+        #chart {
+            width: 100%;
+            height: 100%;
+        }
+
+        #pendulumCanvas {
+            position: absolute;
+            bottom: 24px;
+            right: 24px;
+            width: 140px;
+            height: 140px;
+            pointer-events: none;
+            z-index: 55;
+            border-radius: 10px;
+            background: rgba(6, 8, 15, 0.75);
+            border: 1px solid var(--panel-border);
+            backdrop-filter: blur(8px);
+            display: none;
+        }
+
+        /* Present cutoff vertical line (draggable) */
+        .present-line {
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            width: 2px;
+            background: linear-gradient(180deg, rgba(0,240,255,0.9), rgba(138,43,226,0.9));
+            box-shadow: 0 0 8px rgba(0,240,255,0.25);
+            cursor: ew-resize;
+            z-index: 60;
+            transform: translateX(-1px);
+        }
+
+        .present-line .label {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            background: rgba(6,8,15,0.85);
+            border: 1px solid rgba(255,255,255,0.06);
+            color: var(--accent-cyan);
+            padding: 6px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            white-space: nowrap;
+            pointer-events: none;
+        }
+
+        /* Canvas Indicator Panels (RSI, Volume) */
+        #indicator-canvases {
+            display: flex;
+            flex-direction: column;
+            background: var(--panel-bg);
+            border-top: 1px solid var(--panel-border);
+            z-index: 10;
+            flex-shrink: 0;
+        }
+
+        .indicator-canvas-row {
+            height: 65px;
+            border-bottom: 1px solid var(--panel-border);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .indicator-canvas-row:last-child {
+            border-bottom: none;
+        }
+
+        .indicator-canvas-row canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+
+        .indicator-canvas-label {
+            position: absolute;
+            top: 2px;
+            left: 6px;
+            font-size: 9px;
+            font-weight: 700;
+            color: var(--text-dim);
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            z-index: 5;
+            pointer-events: none;
+        }
+
+        /* Indicator Tab View */
+        #viewToggle {
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--panel-border);
+            color: var(--text-dim);
+            padding: 8px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            font-family: 'Outfit', sans-serif;
+            transition: all 0.25s;
+            white-space: nowrap;
+        }
+        #viewToggle:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); background: rgba(0,240,255,0.05); }
+        #viewToggle.active { background: var(--accent-cyan); color: #06080f; border-color: var(--accent-cyan); }
+
+        #chart-view { display: flex; flex-direction: column; flex: 1; overflow: hidden; }
+        #indicator-view { display: none; flex: 1; flex-direction: column; padding: 30px; background: var(--panel-bg); overflow-y: auto; gap: 24px; }
+
+        .iv-header { display: flex; gap: 16px; align-items: center; margin-bottom: 24px; flex-wrap: wrap; }
+        .iv-header select {
+            background: rgba(255,255,255,0.04); border: 1px solid var(--panel-border);
+            color: var(--text-main); padding: 10px 14px; border-radius: 8px;
+            font-size: 14px; font-weight: 600; font-family: 'Outfit', sans-serif;
+            cursor: pointer; outline: none; min-width: 160px;
+        }
+        .iv-header select:hover { border-color: rgba(0,240,255,0.3); }
+        .iv-header select:focus { border-color: var(--accent-cyan); }
+
+        .iv-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; }
+        .iv-card {
+            background: rgba(255,255,255,0.02); border: 1px solid var(--panel-border);
+            border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 12px;
+            backdrop-filter: blur(8px); transition: all 0.3s;
+        }
+        .iv-card:hover { border-color: rgba(0,240,255,0.2); }
+        .iv-card-title { font-size: 11px; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.8px; }
+        .iv-card-title.buy { color: var(--accent-green); }
+        .iv-card-title.sell { color: var(--accent-red); }
+        .iv-card-value { font-size: 36px; font-weight: 800; font-family: 'JetBrains Mono', monospace; line-height: 1.1; }
+        .iv-card-value.up { color: var(--accent-green); text-shadow: 0 0 20px rgba(0,255,102,0.2); }
+        .iv-card-value.down { color: var(--accent-red); text-shadow: 0 0 20px rgba(255,0,85,0.2); }
+        .iv-card-value.neutral { color: var(--text-main); }
+
+        .iv-gauge { width: 100%; height: 6px; background: rgba(255,255,255,0.06); border-radius: 3px; overflow: hidden; margin-top: 4px; }
+        .iv-gauge-fill { height: 100%; border-radius: 3px; transition: width 0.5s ease, background 0.5s ease; }
+        .iv-gauge-fill.rsi-high { background: var(--accent-red); }
+        .iv-gauge-fill.rsi-mid { background: var(--accent-cyan); }
+        .iv-gauge-fill.rsi-low { background: var(--accent-green); }
+        .iv-gauge-fill.positive { background: var(--accent-green); }
+        .iv-gauge-fill.negative { background: var(--accent-red); }
+
+        .iv-meta { font-size: 11px; color: var(--text-dim); margin-top: 4px; display: flex; justify-content: space-between; }
+
+        .iv-section-label { font-size: 10px; font-weight: 600; color: var(--text-dim); letter-spacing: 0.5px; text-transform: uppercase; margin: 8px 0 4px; }
+        .iv-hist-bar { display: flex; align-items: flex-end; gap: 2px; height: 40px; margin-top: 6px; }
+        .iv-hist-bar div { flex: 1; min-height: 2px; border-radius: 2px 2px 0 0; transition: height 0.3s; }
+
+        .iv-assessment { display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-top: 20px; }
+        .iv-assessment .iv-card { text-align: center; }
+        .iv-assessment .iv-card-value { font-size: 44px; }
+        .iv-assessment-meta { font-size: 11px; color: var(--text-dim); margin-top: 8px; line-height: 1.5; }
+
+        .iv-ratio-bar { margin-top: 20px; height: 12px; border-radius: 6px; overflow: hidden; display: flex; background: rgba(255,255,255,0.04); }
+        .iv-ratio-bar .ratio-buy { height: 100%; transition: width 0.5s ease; background: var(--accent-green); }
+        .iv-ratio-bar .ratio-sell { height: 100%; transition: width 0.5s ease; background: var(--accent-red); }
+        .iv-ratio-labels { display: flex; justify-content: space-between; font-size: 10px; font-weight: 600; color: var(--text-dim); margin-top: 4px; }
+
+        .iv-bias-bar { margin-top: 20px; height: 16px; border-radius: 8px; overflow: hidden; position: relative; transition: background 0.5s ease; }
+        .iv-bias-fill { height: 100%; border-radius: 8px; background: rgba(0,0,0,0.3); transition: width 0.5s ease, margin-left 0.5s ease; }
+        .iv-bias-label { text-align: center; font-size: 14px; font-weight: 700; font-family: 'JetBrains Mono', monospace; margin-top: 6px; transition: color 0.5s ease; }
+
+        .iv-search-wrapper { position: relative; flex: 1; }
+        .iv-search-wrapper input {
+            width: 100%; background: rgba(255,255,255,0.04); border: 1px solid var(--panel-border);
+            color: var(--text-main); padding: 10px 14px 10px 36px; border-radius: 8px;
+            font-size: 14px; font-weight: 500; font-family: 'Outfit', sans-serif; outline: none;
+        }
+        .iv-search-wrapper input:focus { border-color: var(--accent-cyan); }
+        .iv-search-wrapper .search-icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); font-size: 13px; color: var(--text-dim); pointer-events: none; }
+        .iv-search-results {
+            position: absolute; top: 100%; left: 0; right: 0; z-index: 50;
+            background: #0d1220; border: 1px solid var(--panel-border); border-radius: 0 0 8px 8px;
+            max-height: 200px; overflow-y: auto; display: none;
+        }
+        .iv-search-results div { padding: 10px 14px; cursor: pointer; font-size: 13px; font-weight: 500; color: var(--text-main); border-bottom: 1px solid rgba(255,255,255,0.04); }
+        .iv-search-results div:hover { background: rgba(0,240,255,0.08); color: var(--accent-cyan); }
+        .iv-search-results div:last-child { border-bottom: none; }
+
+        /* Loading & Notification States */
+        #loading-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(6, 8, 15, 0.85);
+            z-index: 50;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 15px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s;
+            backdrop-filter: blur(8px);
+        }
+
+        #loading-overlay.active {
+            opacity: 1;
+            pointer-events: auto;
+        }
+
+        .spinner {
+            width: 48px;
+            height: 48px;
+            border: 3px solid rgba(0, 240, 255, 0.1);
+            border-top-color: var(--accent-cyan);
+            border-bottom-color: var(--accent-purple);
+            border-radius: 50%;
+            animation: spin 1s infinite linear;
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.2);
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .loading-text {
+            font-size: 13px;
+            font-weight: 500;
+            color: var(--accent-cyan);
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+
+        /* Floating Notifications */
+        #notification-box {
+            position: fixed;
+            bottom: 200px;
+            right: 30px;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .notification {
+            padding: 12px 20px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            color: white;
+            backdrop-filter: blur(12px);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            transform: translateX(100px);
+            opacity: 0;
+            transition: all 0.35s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            border-left: 4px solid;
+        }
+
+        .notification.active {
+            transform: translateX(0);
+            opacity: 1;
+        }
+
+        .notification.success {
+            background: rgba(0, 255, 102, 0.15);
+            border-left-color: var(--accent-green);
+            border-top: 1px solid rgba(0, 255, 102, 0.2);
+            border-right: 1px solid rgba(0, 255, 102, 0.2);
+            border-bottom: 1px solid rgba(0, 255, 102, 0.2);
+        }
+
+        .notification.error {
+            background: rgba(255, 0, 85, 0.15);
+            border-left-color: var(--accent-red);
+            border-top: 1px solid rgba(255, 0, 85, 0.2);
+            border-right: 1px solid rgba(255, 0, 85, 0.2);
+            border-bottom: 1px solid rgba(255, 0, 85, 0.2);
+        }
+    </style>
+</head>
+
+<body>
+
+    <!-- Sidebar Slide bar Panel -->
+    <div id="sidebar" class="collapsed">
+        <!-- Sidebar Toggle Trigger -->
+        <button class="sidebar-toggle-btn" onclick="toggleSidebar()" title="Свиване на панела">
+            <span id="toggle-arrow">◀</span>
+        </button>
+
+        <div class="sidebar-header">
+            <div class="logo-container">
+                <div class="logo-icon"></div>
+                <h1>Helious Quantum</h1>
+            </div>
+
+            <!-- Времеви Период Selector -->
+            <span class="picker-label">Времеви диапазон</span>
+            <div class="period-selector" style="grid-template-columns: repeat(4, 1fr); gap: 5px;">
+                <button class="period-btn" onclick="changeAnalysisPeriod('5m')">5м</button>
+                <button class="period-btn" onclick="changeAnalysisPeriod('15m')">15м</button>
+                <button class="period-btn" onclick="changeAnalysisPeriod('30m')">30м</button>
+                <button class="period-btn" onclick="changeAnalysisPeriod('1h')">1ч</button>
+                <button class="period-btn" onclick="changeAnalysisPeriod('4h')">4ч</button>
+                <button class="period-btn" onclick="changeAnalysisPeriod('12h')">12ч</button>
+                <button class="period-btn active" onclick="changeAnalysisPeriod('24h')">1Д</button>
+                <button class="period-btn" onclick="changeAnalysisPeriod('7d')">7Д</button>
+                <button class="period-btn" onclick="changeAnalysisPeriod('30d')">30Д</button>
+                <button class="period-btn" onclick="changeAnalysisPeriod('90d')">90Д</button>
+            </div>
+
+            <!-- Interactive Slider (Слайдбар за Прогноза) -->
+            <div class="horizon-container">
+                <div class="horizon-header">
+                    <span class="picker-label" style="margin-bottom: 0;">Прогнозен хоризонт</span>
+                    <span id="horizonVal" class="horizon-val">30 стъпки</span>
+                </div>
+                <input type="range" min="10" max="2000" value="30" class="range-slider" id="forecastHorizon"
+                    oninput="updateForecastHorizon(this.value)">
+            </div>
+
+            <!-- Контрол на прогнозата -->
+            <div class="forecast-control-container"
+                style="margin-top: 15px; border-top: 1px solid var(--panel-border); padding-top: 12px; display: flex; flex-direction: column; gap: 8px;">
+                <span class="picker-label">Квантов Контрол</span>
+                <label class="toggle-label"
+                    style="display: flex; align-items: center; gap: 8px; font-size: 11px; cursor: pointer; color: var(--text-dim); user-select: none;">
+                    <input type="checkbox" id="toggleForecast" checked onchange="drawForecast()"
+                        style="accent-color: var(--accent-cyan); cursor: pointer;">
+                    <span>Показвай прогнозата</span>
+                </label>
+                <!-- Вълнова Конфигурация -->
+                <div style="display:flex;flex-direction:column;gap:6px;padding-left:4px;margin-top:4px">
+                    <span style="font-size:10px;color:var(--text-dim);margin-bottom:2px">Вълни (Амп., Дълж., Фаза, Отмест.):</span>
+                    <div id="wavesContainer" style="display:flex; flex-direction:column; gap:4px;">
+                      <!-- Waves inputs generated here -->
+                    </div>
+                    <button class="reload-forecast-btn" style="margin-top:8px" onclick="forceReloadForecast()">
+                        <span>🔄</span> Презареди Прогнозата
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Search Engine -->
+        <div class="search-container">
+            <div class="search-input-wrapper">
+                <span class="search-icon">🔍</span>
+                <input type="text" id="symbolSearch" placeholder="Търси индекс (BTC, ETH, SOL...)"
+                    oninput="filterSymbols()">
+            </div>
+        </div>
+
+        <!-- Dynamic List of Available Indices -->
+        <div id="symbolList">
+            <!-- Rendered dynamically -->
+            </div>
+            <div class="iv-bias-bar" id="ivBiasBar" style="background:var(--accent-green)">
+                <div class="iv-bias-fill" id="ivBiasFill" style="width:50%"></div>
+            </div>
+            <div class="iv-bias-label" id="ivBiasLabel">---</div>
+        </div>
+
+    <!-- Main Content Panel -->
+    <div id="main">
+        <!-- Floating Button to Open Sidebar if Closed -->
+        <button id="open-sidebar-btn" onclick="toggleSidebar()" title="Разгъване на панела">
+            <span>▶</span>
+        </button>
+
+        <!-- Loading spinner screen -->
+        <div id="loading-overlay">
+            <div class="spinner"></div>
+            <span class="loading-text">Квантово пресмятане...</span>
+        </div>
+
+        <!-- Top statistics and info bar -->
+        <div id="top-bar">
+            <div class="title-badge-group">
+                <span id="displaySymbol">BTC / USDT</span>
+                <span id="displayInterval"><span class="live-dot"></span>Времеви мащаб: 5m</span>
+            </div>
+            <div class="stats-box">
+                <div class="stat-group">
+                    <span class="stat-label">Текуща цена</span>
+                    <span id="currentPrice" class="stat-val">---</span>
+                </div>
+                <div class="stat-group">
+                    <span class="stat-label">Прогнозна цена</span>
+                    <span id="predPrice" class="stat-val">---</span>
+                </div>
+                <div class="stat-group">
+                    <span class="stat-label">Очакван тренд</span>
+                    <span id="predTrend" class="stat-val">---</span>
+                </div>
+                <button id="viewToggle" onclick="toggleView()">📊 Табло</button>
+            </div>
+        </div>
+
+        <!-- Chart View -->
+        <div id="chart-view">
+            <div id="chart-container">
+                <div id="chart"></div>
+                <canvas id="pendulumCanvas"></canvas>
+                <div id="presentLine" class="present-line" title="Премести назад за да ресетнеш прогнозата (двойно-клик за сегашно)">
+                    <div class="label" id="presentLineLabel">СЕГА</div>
+                </div>
+            </div>
+            <!-- Canvas Indicator Panels -->
+            <div id="indicator-canvases">
+                <div class="indicator-canvas-row">
+                    <span class="indicator-canvas-label">RSI</span>
+                    <canvas id="canvas-rsi"></canvas>
+                </div>
+                <div class="indicator-canvas-row">
+                    <span class="indicator-canvas-label">Обем</span>
+                    <canvas id="canvas-volume"></canvas>
+                </div>
+                <div class="indicator-canvas-row">
+                    <span class="indicator-canvas-label">Bias</span>
+                    <canvas id="canvas-bias"></canvas>
+                </div>
+            </div>
+            <div class="iv-bias-bar" id="ivBiasBar" style="background:var(--accent-green)">
+                <div class="iv-bias-fill" id="ivBiasFill" style="width:50%"></div>
+            </div>
+            <div class="iv-bias-label" id="ivBiasLabel">---</div>
+        </div>
+
+        <!-- Indicator Tab View -->
+        <div id="indicator-view">
+            <div class="iv-header">
+                <div class="iv-search-wrapper">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" id="ivSearch" placeholder="Търси стока..." oninput="ivFilterSymbols(this.value)" onfocus="ivShowResults()">
+                    <div class="iv-search-results" id="ivSearchResults"></div>
+                </div>
+                <select id="ivPeriod" onchange="ivPeriodChanged()">
+                    <option value="5m">5 мин</option>
+                    <option value="15m">15 мин</option>
+                    <option value="1h">1 час</option>
+                    <option value="4h">4 часа</option>
+                    <option value="24h" selected>1 ден</option>
+                    <option value="7d">7 дни</option>
+                    <option value="30d">30 дни</option>
+                </select>
+            </div>
+            <div class="iv-cards">
+                <div class="iv-card">
+                    <div class="iv-card-title">RSI — Индекс на относителна сила</div>
+                    <div class="iv-card-value neutral" id="ivRsiVal">---</div>
+                    <div class="iv-gauge"><div class="iv-gauge-fill" id="ivRsiGauge" style="width:0%"></div></div>
+                    <div class="iv-meta"><span>Препродаденост 30</span><span>Прекупеност 70</span></div>
+                </div>
+                <div class="iv-card">
+                    <div class="iv-card-title">Обем (нормализиран)</div>
+                    <div class="iv-card-value neutral" id="ivVolVal">---</div>
+                    <div class="iv-gauge"><div class="iv-gauge-fill" id="ivVolGauge" style="width:0%"></div></div>
+                    <div class="iv-meta"><span>Мин = 0%</span><span>Макс = 100%</span></div>
+                    <div class="iv-section-label">Гистограма на обема</div>
+                    <div class="iv-hist-bar" id="ivVolHist"></div>
+                </div>
+                <div class="iv-card">
+                    <div class="iv-card-title">OBV (нормализиран)</div>
+                    <div class="iv-card-value neutral" id="ivObvVal">---</div>
+                    <div class="iv-gauge"><div class="iv-gauge-fill" id="ivObvGauge" style="width:0%"></div></div>
+                    <div class="iv-meta"><span>Среден = 0%</span><span>Макс = 100%</span></div>
+                    <div style="font-size:11px;color:var(--text-dim);margin-top:2px">OBV мин-макс: <span id="ivObvPctVal">---</span></div>
+                </div>
+            </div>
+            <div class="iv-assessment">
+                <div class="iv-card">
+                    <div class="iv-card-title buy">Вероятност за Buy</div>
+                    <div class="iv-card-value neutral" id="ivBuyVal">---</div>
+                    <div class="iv-gauge"><div class="iv-gauge-fill" id="ivBuyGauge" style="width:0%"></div></div>
+                    <div class="iv-assessment-meta">(100 − RSI + OBV) / 2 × V / 100</div>
+                </div>
+                <div class="iv-card">
+                    <div class="iv-card-title sell">Вероятност за Sell</div>
+                    <div class="iv-card-value neutral" id="ivSellVal">---</div>
+                    <div class="iv-gauge"><div class="iv-gauge-fill" id="ivSellGauge" style="width:0%"></div></div>
+                    <div class="iv-assessment-meta">(RSI + OBV) / 2 × V / 100</div>
+                </div>
+            </div>
+            <div class="iv-ratio-bar">
+                <div class="ratio-buy" id="ratioBuy" style="width:50%"></div>
+                <div class="ratio-sell" id="ratioSell" style="width:50%"></div>
+            </div>
+            <div class="iv-ratio-labels">
+                <span id="ratioBuyLabel">Buy 50%</span>
+                <span id="ratioSellLabel">Sell 50%</span>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Floating notifications box -->
+    <div id="notification-box"></div>
+
+    <script src="forecast.js"></script>
+    <script>
+        const API_BASE = 'http://localhost:3001';
+        let chart, candleSeries, predictionSeries, centerLineSeries;
+        let armLineSeries = {};
+        const armPalette = ['#00f0ff', '#00ff66', '#ffa500', '#b450ff', '#ff0055', '#ffff64', '#ff6b6b', '#48dbfb', '#1dd1a1', '#feca57', '#5f27cd', '#ff9ff3', '#54a0ff', '#00d2d3', '#ff9f43', '#ee5a24', '#0abde3', '#10ac84', '#ff6348', '#f368e0'];
+        let latestForecastData = null;
+        let latestCandles = [];
+        let indicatorData = { rsi: [], volume: [] };
+        // Present cutoff state: time in chart time (seconds) that marks "present" for forecasting
+        let presentCutoffTime = null;
+        let presentLineLocked = false; // true when user dragged the present line backwards
+
+        function timeToLocal(originalTime) {
+            const d = new Date(originalTime * 1000);
+            return Date.UTC(
+                d.getFullYear(),
+                d.getMonth(),
+                d.getDate(),
+                d.getHours(),
+                d.getMinutes(),
+                d.getSeconds(),
+                d.getMilliseconds()
+            ) / 1000;
+        }
+
+        let currentSymbol = 'BTCUSDT';
+        let activePeriod = '24h';
+        let currentInterval = '5m';
+        let forecastSteps = 30;
+
+        // Configuration mapping: Period -> Interval & candle limit to load
+        const periodConfigs = {
+            '5m': { interval: '1m', limit: 500 },
+            '15m': { interval: '1m', limit: 1000 },
+            '30m': { interval: '1m', limit: 1000 },
+            '1h': { interval: '1m', limit: 1000 },
+            '4h': { interval: '5m', limit: 1000 },
+            '12h': { interval: '5m', limit: 1000 },
+            '24h': { interval: '5m', limit: 1000 },
+            '7d': { interval: '1h', limit: 1000 },
+            '30d': { interval: '4h', limit: 1000 },
+            '90d': { interval: '1d', limit: 500 }
+        };
+
+        // Premium descriptions for top commodities and crypto assets
+        const symbolDetails = {
+            'PAXGUSDT': { name: 'GOLD (Злато)', desc: 'Физическо Злато Spot' },
+            'BZUSDT': { name: 'BRENT OIL (Петрол)', desc: 'Брент Суров Петрол' },
+            'CLUSDT': { name: 'WTI OIL (Петрол)', desc: 'WTI Суров Петрол' },
+            'BTCUSDT': { name: 'BTC (Биткойн)', desc: 'Крипто Лидер' },
+            'ETHUSDT': { name: 'ETH (Етериум)', desc: 'Смарт Контракти' },
+            'BNBUSDT': { name: 'BNB (Binance)', desc: 'Екосистема на Binance' },
+            'SOLUSDT': { name: 'SOL (Солана)', desc: 'Високоскоростна Мрежа' },
+            'ADAUSDT': { name: 'ADA (Cardano)', desc: 'Академичен Блокчейн' },
+            'XRPUSDT': { name: 'XRP (Ripple)', desc: 'Междубанкови Плащания' },
+            'DOTUSDT': { name: 'DOT (Polkadot)', desc: 'Свързани Блокчейни' },
+            'AVAXUSDT': { name: 'AVAX (Avalanche)', desc: 'Мащабируем Блокчейн' },
+            'MATICUSDT': { name: 'POL (Polygon)', desc: 'L2 Мащабиране' },
+            'LINKUSDT': { name: 'LINK (Chainlink)', desc: 'Децентрализирани Оракули' },
+            'LTCUSDT': { name: 'LTC (Litecoin)', desc: 'Дигитално Сребро' },
+            'DOGEUSDT': { name: 'DOGE (Dogecoin)', desc: 'Меме Лидер' },
+            'SHIBUSDT': { name: 'SHIB (Shiba Inu)', desc: 'Шиба Екосистема' },
+            'NEARUSDT': { name: 'NEAR (Protocol)', desc: 'Потребителски Web3' },
+            'ATOMUSDT': { name: 'ATOM (Cosmos)', desc: 'Мрежа от Блокчейни' }
+        };
+
+        // Popular symbols list for the search engine (Commodities first!)
+        const popularSymbols = [
+            'PAXGUSDT', 'BZUSDT', 'CLUSDT', 'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'ADAUSDT', 'XRPUSDT',
+            'DOTUSDT', 'AVAXUSDT', 'MATICUSDT', 'LINKUSDT', 'LTCUSDT', 'DOGEUSDT',
+            'SHIBUSDT', 'NEARUSDT', 'UNIUSDT', 'FILUSDT', 'ATOMUSDT', 'OPUSDT',
+            'ARBUSDT', 'SUIUSDT', 'PEPEUSDT', 'FTMUSDT', 'TIAUSDT', 'RENDERUSDT'
+        ];
+
+        // Retrieve custom search-added indices from localStorage
+        let customSymbols = JSON.parse(localStorage.getItem('helious_custom_symbols') || '[]');
+
+        function getFullSymbolList() {
+            const combined = [...popularSymbols, ...customSymbols];
+            return [...new Set(combined)];
+        }
+
+        // Initialize App
+        function init() {
+            const container = document.getElementById('chart');
+
+            // Create Chart with modern glowing cyberpunk parameters
+            chart = LightweightCharts.createChart(container, {
+                layout: {
+                    background: { color: '#06080f' },
+                    textColor: '#94a3b8',
+                    fontSize: 12,
+                    fontFamily: 'Outfit, sans-serif'
+                },
+                grid: {
+                    vertLines: { color: 'rgba(255, 255, 255, 0.02)' },
+                    horzLines: { color: 'rgba(255, 255, 255, 0.02)' }
+                },
+                timeScale: {
+                    borderColor: 'rgba(255, 255, 255, 0.08)',
+                    timeVisible: true,
+                    secondsVisible: false,
+                    barSpacing: 8
+                },
+                rightPriceScale: {
+                    borderColor: 'rgba(255, 255, 255, 0.08)',
+                    alignLabels: true
+                },
+                crosshair: {
+                    mode: LightweightCharts.CrosshairMode.Normal,
+                    vertLine: {
+                        color: 'rgba(0, 240, 255, 0.25)',
+                        width: 1,
+                        style: 3,
+                        labelBackgroundColor: '#8a2be2'
+                    },
+                    horzLine: {
+                        color: 'rgba(0, 240, 255, 0.25)',
+                        width: 1,
+                        style: 3,
+                        labelBackgroundColor: '#8a2be2'
+                    }
+                }
+            });
+
+            // Initialize visual series
+            candleSeries = chart.addCandlestickSeries({
+                upColor: '#00ff66',
+                downColor: '#ff0055',
+                borderVisible: false,
+                wickUpColor: '#00ff66',
+                wickDownColor: '#ff0055'
+            });
+
+            predictionSeries = chart.addLineSeries({
+                color: '#00f0ff',
+                lineWidth: 4,
+                lineStyle: 0,
+                title: 'Прогноза',
+                priceLineVisible: false
+            });
+
+            centerLineSeries = chart.addLineSeries({
+                color: 'rgba(255, 200, 50, 0.7)',
+                lineWidth: 1.5,
+                lineStyle: 0,
+                title: 'Център',
+                priceLineVisible: false,
+                lastValueVisible: false
+            });
+
+            // Initialize present line drag handlers before data loads
+            setupPresentLine();
+            renderSymbolList();
+            rebuildWaveInputs();
+            loadData();
+            startRealtimePolling();
+
+            // Default to indicator view
+            document.getElementById('chart-view').style.display = 'none';
+            document.getElementById('indicator-view').style.display = 'flex';
+            document.getElementById('viewToggle').classList.add('active');
+            document.getElementById('viewToggle').textContent = '📈 Графика';
+            // Sidebar starts collapsed - show open button
+            document.getElementById('open-sidebar-btn').classList.add('visible');
+            document.getElementById('top-bar').classList.add('expanded-padding');
+            ivReload();
+
+            window.addEventListener('resize', () => {
+                chart.resize(container.clientWidth, container.clientHeight);
+                drawIndicatorCanvases();
+            });
+            chart.timeScale().subscribeVisibleTimeRangeChange(() => drawIndicatorCanvases());
+        }
+
+        // Render index list in Sidebar with dynamic quick search
+        function renderSymbolList(filter = '') {
+            const list = document.getElementById('symbolList');
+            list.innerHTML = '';
+
+            const query = filter.toUpperCase().trim();
+            const allSymbols = getFullSymbolList();
+
+            const filtered = allSymbols.filter(s => s.includes(query) || s.replace('USDT', '').includes(query));
+
+            filtered.forEach(sym => {
+                const div = document.createElement('div');
+                div.className = `symbol-item ${sym === currentSymbol ? 'active' : ''}`;
+                div.onclick = () => selectSymbol(sym);
+
+                const details = symbolDetails[sym];
+                const displayName = details ? details.name : sym.replace('USDT', '');
+                const displayDesc = details ? details.desc : 'Binance Сдвояване';
+
+                div.innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <div class="symbol-dot ${sym === currentSymbol ? 'active' : ''}"></div>
+                        <div>
+                            <span class="symbol-name">${displayName}</span>
+                            <span style="font-size: 10px; color: var(--text-dim); display: block;">${displayDesc}</span>
+                        </div>
+                    </div>
+                    <span class="symbol-price">USDT</span>
+                `;
+                list.appendChild(div);
+            });
+
+            // "Търсачка" dynamic fallback - query Binance for any missing index!
+            if (query.length >= 2 && !allSymbols.includes(query) && !allSymbols.includes(query + 'USDT')) {
+                const searchSymbol = query.endsWith('USDT') ? query : query + 'USDT';
+                const addBtn = document.createElement('div');
+                addBtn.className = 'symbol-item search-add-btn';
+                addBtn.onclick = () => tryAddCustomSymbol(searchSymbol);
+                addBtn.innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 10px; width: 100%;">
+                        <span style="color: var(--accent-cyan);">🔍</span>
+                        <span style="font-weight: 600; font-size: 13px; color: var(--accent-cyan);">Намери "${searchSymbol}" в Binance</span>
+                    </div>
+                `;
+                list.appendChild(addBtn);
+            }
+        }
+
+        // Search engine filter input handler
+        function filterSymbols() {
+            const val = document.getElementById('symbolSearch').value;
+            renderSymbolList(val);
+        }
+
+        // Try adding custom index from Binance search results
+        async function tryAddCustomSymbol(sym) {
+            try {
+                showLoading(true);
+                const res = await fetch(`${API_BASE}/binance?symbol=${sym}&interval=1h&limit=10`);
+                if (!res.ok) throw new Error("Invalid symbol");
+                const data = await res.json();
+
+                if (data.code === -1121 || (data.msg && data.msg.includes("Invalid symbol"))) {
+                    throw new Error("Невалиден символ");
+                }
+
+                // Add and save
+                if (!customSymbols.includes(sym)) {
+                    customSymbols.push(sym);
+                    localStorage.setItem('helious_custom_symbols', JSON.stringify(customSymbols));
+                }
+
+                showNotification(`Символът ${sym} е намерен и добавен успешно!`, 'success');
+                document.getElementById('symbolSearch').value = '';
+                selectSymbol(sym);
+            } catch (e) {
+                showNotification(`Индексът "${sym}" не беше намерен в Binance!`, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        // Handle symbol selection
+        function selectSymbol(sym) {
+            currentSymbol = sym;
+            latestForecastData = null;
+            drawForecast();
+            document.getElementById('displaySymbol').innerText = sym.replace('USDT', '') + ' / USDT';
+            renderSymbolList(document.getElementById('symbolSearch').value);
+            loadData();
+            // Sync indicator view
+            if (ivCurrentSymbol !== sym) {
+                ivCurrentSymbol = sym;
+                document.getElementById('ivSearch').value = symbolDetails[sym] ? symbolDetails[sym].name : sym.replace('USDT','');
+                ivDataCache = null;
+                ivReload();
+            }
+        }
+
+        // Handle period selection and map it to candle timeframe intervals
+        function changeAnalysisPeriod(period) {
+            activePeriod = period;
+            latestForecastData = null;
+            drawForecast();
+            const config = periodConfigs[period];
+            currentInterval = config.interval;
+
+            document.getElementById('displayInterval').innerHTML = `<span class="live-dot"></span>Времеви мащаб: ${currentInterval}`;
+
+            document.querySelectorAll('.period-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            loadData();
+            // Sync indicator view period
+            const ivPeriod = document.getElementById('ivPeriod');
+            if (ivPeriod.value !== period) { ivPeriod.value = period; ivDataCache = null; ivReload(); }
+        }
+
+        // Handle prediction steps slider
+        function updateForecastHorizon(val) {
+            forecastSteps = parseInt(val);
+            latestForecastData = null;
+            drawForecast();
+            document.getElementById('horizonVal').innerText = `${forecastSteps} стъпки`;
+            reRunForecast();
+        }
+
+        // Collapsible Sidebar (Слайд Бар) Toggle
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const openBtn = document.getElementById('open-sidebar-btn');
+            const topBar = document.getElementById('top-bar');
+            const arrow = document.getElementById('toggle-arrow');
+
+            sidebar.classList.toggle('collapsed');
+
+            if (sidebar.classList.contains('collapsed')) {
+                openBtn.classList.add('visible');
+                topBar.classList.add('expanded-padding');
+                arrow.innerText = '▶';
+                arrow.parentElement.title = 'Разгъване на панела';
+            } else {
+                openBtn.classList.remove('visible');
+                topBar.classList.remove('expanded-padding');
+                arrow.innerText = '◀';
+                arrow.parentElement.title = 'Свиване на панела';
+            }
+
+            // Force redraw of chart sizes
+            setTimeout(() => {
+                const container = document.getElementById('chart');
+                chart.resize(container.clientWidth, container.clientHeight);
+            }, 400);
+        }
+
+        // Dynamic helper states
+        function showLoading(show) {
+            const overlay = document.getElementById('loading-overlay');
+            if (show) overlay.classList.add('active');
+            else overlay.classList.remove('active');
+        }
+
+        function showNotification(msg, type = 'success') {
+            const box = document.getElementById('notification-box');
+            const toast = document.createElement('div');
+            toast.className = `notification ${type}`;
+            toast.innerHTML = `
+                <span>${type === 'success' ? '✅' : '❌'}</span>
+                <span>${msg}</span>
+            `;
+            box.appendChild(toast);
+
+            setTimeout(() => toast.classList.add('active'), 50);
+
+            setTimeout(() => {
+                toast.classList.remove('active');
+                setTimeout(() => toast.remove(), 400);
+            }, 3500);
+        }
+
+        // Main loader
+        async function loadData() {
+            showLoading(true);
+            try {
+                const config = periodConfigs[activePeriod];
+                const res = await fetch(`${API_BASE}/binance?symbol=${currentSymbol}&interval=${config.interval}&limit=${config.limit}`);
+                const data = await res.json();
+
+                if (data.error || !Array.isArray(data)) {
+                    throw new Error(data.error || "Грешка при зареждането на пазарните данни.");
+                }
+
+                const candles = data.map(d => ({
+                    time: timeToLocal(d[0] / 1000),
+                    open: parseFloat(d[1]),
+                    high: parseFloat(d[2]),
+                    low: parseFloat(d[3]),
+                    close: parseFloat(d[4]),
+                    volume: parseFloat(d[5])
+                }));
+
+                // Update charts
+                candleSeries.setData(candles);
+                latestCandles = candles;
+
+                // If the present line hasn't been manually locked by the user, keep it at the latest candle
+                if (!presentLineLocked && candles.length > 0) {
+                    presentCutoffTime = candles[candles.length - 1].time;
+                }
+                updatePresentLinePosition();
+
+                // Fetch current price for display
+                const lastClose = candles[candles.length - 1].close;
+                const formattedPrice = lastClose.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+                document.getElementById('currentPrice').innerText = `${formattedPrice} USDT`;
+
+                // Run forecast starting from the present line
+                const forecastData = presentLineLocked && presentCutoffTime ?
+                    candles.filter(c => c.time <= presentCutoffTime) : candles;
+                if (typeof runForecast === 'function') runForecast(forecastData);
+
+                updateIndicatorCharts(candles);
+                const range = {
+                    from: candles[0].time,
+                    to: candles[candles.length - 1].time
+                };
+                chart.timeScale().setVisibleRange(range);
+            } catch (e) {
+                console.error("Data loading error:", e);
+                showNotification("Пазарната връзка беше прекъсната. Моля, проверете Binance проксито.", "error");
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function drawForecast() {
+            const isForecastVisible = document.getElementById('toggleForecast').checked;
+
+            centerLineSeries.setMarkers([]);
+
+            if (!isForecastVisible || !latestForecastData) {
+                predictionSeries.setData([]);
+                centerLineSeries.setData([]);
+                Object.keys(armLineSeries).forEach(k => { try { chart.removeSeries(armLineSeries[k]); } catch(e) {} });
+                armLineSeries = {};
+
+                document.getElementById('predPrice').innerText = '---';
+                document.getElementById('predTrend').innerText = '---';
+                document.getElementById('predTrend').className = 'stat-val trend-badge';
+
+                return;
+            }   
+
+            const d = latestForecastData;
+
+            centerLineSeries.setData(d.centerPath || []);
+            predictionSeries.setData(d.forecastPath);
+
+            // Wave trajectories lines
+            Object.keys(armLineSeries).forEach(k => { try { chart.removeSeries(armLineSeries[k]); } catch(e) {} });
+            armLineSeries = {};
+            
+            if (d.waveTrajectories && d.waveTrajectories.length > 0) {
+                const waveTimes = d.forecastPath.map(p => p.time);
+                d.waveTrajectories.forEach((traj, i) => {
+                    armLineSeries[i] = chart.addLineSeries({
+                        color: armPalette[i % armPalette.length],
+                        lineWidth: 1,
+                        lineStyle: 2,
+                        priceLineVisible: false,
+                        lastValueVisible: false,
+                        title: 'Вълна ' + (i + 1)
+                    });
+                    const data = traj.map((val, k) => ({
+                        time: waveTimes[k],
+                        value: d.lastCandle.close + val
+                    }));
+                    try { armLineSeries[i].setData(data); } catch (e) {}
+                });
+            }
+
+            const startPrice = d.lastCandle.close;
+            const finalPredictedPrice = d.finalPredictedPrice;
+            const maxPredPrice = d.maxPredPrice;
+            const minPredPrice = d.minPredPrice;
+            const slope = d.slope;
+            const angleDeg = 0; // Not used for waves
+
+            // drawPendulumVisual();
+        }
+
+        function computeRSI(candles, period) {
+            period = period || 14;
+            if (candles.length < period + 1) return [];
+            const changes = [];
+            for (let i = 1; i < candles.length; i++) {
+                changes.push(candles[i].close - candles[i - 1].close);
+            }
+            let avgG = 0, avgL = 0;
+            for (let i = 0; i < period; i++) {
+                if (changes[i] > 0) avgG += changes[i];
+                else avgL += Math.abs(changes[i]);
+            }
+            avgG /= period;
+            avgL /= period;
+            const rsi = [avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL)];
+            for (let i = period; i < changes.length; i++) {
+                const g = changes[i] > 0 ? changes[i] : 0;
+                const l = changes[i] < 0 ? Math.abs(changes[i]) : 0;
+                avgG = (avgG * (period - 1) + g) / period;
+                avgL = (avgL * (period - 1) + l) / period;
+                rsi.push(avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL));
+            }
+            return rsi;
+        }
+
+        function updateIndicatorCharts(candles) {
+            if (!candles || candles.length < 20) return;
+            const period = 14;
+            const rsiVals = computeRSI(candles, period);
+            if (!rsiVals.length) return;
+            const rsi = [], vol = [], bias = [];
+            let obvVal = 0;
+            const obvAll = [0];
+            for (let i = 1; i < candles.length; i++) {
+                const v = candles[i].volume || 0;
+                if (candles[i].close > candles[i - 1].close) obvVal += v;
+                else if (candles[i].close < candles[i - 1].close) obvVal -= v;
+                obvAll.push(obvVal);
+            }
+            const obvMin = Math.min(...obvAll), obvMax = Math.max(...obvAll);
+            for (let i = 0; i < candles.length; i++) {
+                const t = candles[i].time;
+                rsi.push({ time: t, value: i < period ? null : rsiVals[i - period] });
+                vol.push({ time: t, value: candles[i].volume || 0 });
+                if (i < period) {
+                    bias.push({ time: t, value: null });
+                } else {
+                    const oNorm = obvMax > obvMin ? ((obvAll[i] - obvMin) / (obvMax - obvMin)) * 100 : 50;
+                    const bBuy = (100 - rsiVals[i - period] + oNorm) / 2;
+                    const bSell = (rsiVals[i - period] + oNorm) / 2;
+                    bias.push({ time: t, value: (bBuy / (bBuy + bSell || 1)) * 100 });
+                }
+            }
+            indicatorData = { rsi, vol, bias };
+            drawIndicatorCanvases();
+        }
+
+        function drawIndicatorCanvases() {
+            const d = indicatorData;
+            if (!d.rsi.length) return;
+            const dpr = window.devicePixelRatio || 1;
+            const range = chart.timeScale().getVisibleRange();
+            if (!range) return;
+            const rows = [
+                { id: 'canvas-rsi', data: d.rsi, color: '#b450ff', overlay: [{ val: 70, c: 'rgba(255,0,85,0.5)' }, { val: 30, c: 'rgba(0,255,102,0.5)' }] },
+                { id: 'canvas-volume', data: d.vol, color: '#26a69a' },
+                { id: 'canvas-bias', data: d.bias, color: '#ffd700', overlay: [{ val: 50, c: 'rgba(255,255,255,0.2)' }] }
+            ];
+            rows.forEach(({ id, data, color, overlay }) => {
+                const cvs = document.getElementById(id);
+                if (!cvs) return;
+                const parent = cvs.parentElement;
+                const w = parent.clientWidth;
+                const h = parent.clientHeight;
+                if (w <= 0 || h <= 0) return;
+                cvs.width = w * dpr;
+                cvs.height = h * dpr;
+                cvs.style.width = w + 'px';
+                cvs.style.height = h + 'px';
+                const ctx = cvs.getContext('2d');
+                ctx.scale(dpr, dpr);
+                ctx.clearRect(0, 0, w, h);
+                const vis = data.filter(p => p.time >= range.from && p.time <= range.to && p.value !== null);
+                if (vis.length < 2) return;
+                const pts = vis.map(p => ({ x: chart.timeScale().timeToCoordinate(p.time), y: p.value })).filter(p => p.x !== null);
+                if (pts.length < 2) return;
+                let minY = Infinity, maxY = -Infinity;
+                vis.forEach(p => { if (p.value < minY) minY = p.value; if (p.value > maxY) maxY = p.value; });
+                if (maxY === minY) { minY -= 1; maxY += 1; }
+                const pad = (maxY - minY) * 0.1;
+                minY -= pad; maxY += pad;
+                const toY = (v) => h - ((v - minY) / (maxY - minY)) * (h - 8) - 4;
+                if (overlay) {
+                    overlay.forEach(({ val, c }) => {
+                        const y = toY(val);
+                        if (y >= 0 && y <= h) {
+                            ctx.beginPath();
+                            ctx.moveTo(0, y);
+                            ctx.lineTo(w, y);
+                            ctx.strokeStyle = c;
+                            ctx.lineWidth = 1;
+                            ctx.setLineDash([4, 4]);
+                            ctx.stroke();
+                            ctx.setLineDash([]);
+                        }
+                    });
+                }
+                if (id === 'canvas-volume') {
+                    const bw = Math.max(1, (pts[1].x - pts[0].x) * 0.7);
+                    const zero = toY(0);
+                    pts.forEach(p => {
+                        const y0 = Math.min(toY(p.y), zero);
+                        const bh = Math.max(1, Math.abs(toY(p.y) - zero));
+                        ctx.fillStyle = color;
+                        ctx.fillRect(p.x - bw / 2, y0, bw, bh);
+                    });
+                } else {
+                    ctx.beginPath();
+                    pts.forEach((p, i) => {
+                        if (i === 0) ctx.moveTo(p.x, toY(p.y));
+                        else ctx.lineTo(p.x, toY(p.y));
+                    });
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+                }
+            });
+        }
+
+        let ivDataCache = null;
+        let ivCurrentSymbol = 'BTCUSDT';
+
+        function toggleView() {
+            const chartView = document.getElementById('chart-view');
+            const ivView = document.getElementById('indicator-view');
+            const btn = document.getElementById('viewToggle');
+            const showing = ivView.style.display !== 'none';
+            chartView.style.display = showing ? 'flex' : 'none';
+            ivView.style.display = showing ? 'none' : 'flex';
+            btn.classList.toggle('active', !showing);
+            btn.textContent = showing ? '📊 Табло' : '📈 Графика';
+            if (!showing) {
+                if (!ivDataCache) ivReload();
+            } else {
+                setTimeout(() => {
+                    const c = document.getElementById('chart');
+                    chart.resize(c.clientWidth, c.clientHeight);
+                }, 50);
+            }
+        }
+
+        function ivFilterSymbols(q) {
+            const results = document.getElementById('ivSearchResults');
+            const query = q.toUpperCase().trim();
+            const all = getFullSymbolList();
+            const filtered = query ? all.filter(s => s.includes(query)) : all.slice(0, 10);
+            results.innerHTML = filtered.map(s =>
+                `<div onclick="ivSelectSymbol('${s}')">${symbolDetails[s] ? symbolDetails[s].name : s.replace('USDT','')} <span style="color:var(--text-dim);font-size:11px">${s}</span></div>`
+            ).join('');
+            results.style.display = filtered.length ? 'block' : 'none';
+        }
+
+        function ivShowResults() {
+            const inp = document.getElementById('ivSearch');
+            ivFilterSymbols(inp.value);
+        }
+
+        function ivSelectSymbol(sym) {
+            ivCurrentSymbol = sym;
+            document.getElementById('ivSearch').value = symbolDetails[sym] ? symbolDetails[sym].name : sym.replace('USDT','');
+            document.getElementById('ivSearchResults').style.display = 'none';
+            ivReload();
+            // Sync chart view
+            if (currentSymbol !== sym) {
+                currentSymbol = sym;
+                latestForecastData = null;
+                document.getElementById('displaySymbol').innerText = sym.replace('USDT', '') + ' / USDT';
+                renderSymbolList(document.getElementById('symbolSearch').value);
+                loadData();
+            }
+        }
+
+        function ivPeriodChanged() {
+            const period = document.getElementById('ivPeriod').value;
+            ivDataCache = null;
+            ivReload();
+            if (activePeriod !== period) {
+                activePeriod = period;
+                latestForecastData = null;
+                drawForecast();
+                const config = periodConfigs[period];
+                currentInterval = config.interval;
+                document.getElementById('displayInterval').innerHTML = '<span class="live-dot"></span>Времеви мащаб: ' + currentInterval;
+                document.querySelectorAll('.period-btn').forEach(b => {
+                    b.classList.toggle('active', b.getAttribute('onclick') === "changeAnalysisPeriod('" + period + "')");
+                });
+                loadData();
+            }
+        }
+
+        document.addEventListener('click', (e) => {
+            const r = document.getElementById('ivSearchResults');
+            if (r && !e.target.closest('.iv-search-wrapper')) r.style.display = 'none';
+        });
+
+        async function ivReload() {
+            const ivEl = document.getElementById('indicator-view');
+            ivEl.style.opacity = '0.4';
+            const sym = ivCurrentSymbol;
+            const period = document.getElementById('ivPeriod').value;
+            const config = periodConfigs[period];
+            if (!config) { ivEl.style.opacity = '1'; return; }
+            try {
+                const res = await fetch(`${API_BASE}/binance?symbol=${sym}&interval=${config.interval}&limit=${config.limit}`);
+                const data = await res.json();
+                if (data.error || !Array.isArray(data)) { ivEl.style.opacity = '1'; return; }
+                const candles = data.map(d => ({
+                    time: timeToLocal(d[0] / 1000), open: parseFloat(d[1]),
+                    high: parseFloat(d[2]), low: parseFloat(d[3]),
+                    close: parseFloat(d[4]), volume: parseFloat(d[5])
+                }));
+                ivDataCache = candles;
+                updateIvPanel(candles);
+            } catch (e) { console.error('ivReload error:', e); }
+            ivEl.style.opacity = '1';
+        }
+
+        function updateIvPanel(candles) {
+            if (!candles || candles.length < 25) return;
+
+            const period = 14;
+            const rsiVals = computeRSI(candles, period);
+            const lastRsi = rsiVals.length > 0 ? +rsiVals[rsiVals.length - 1].toFixed(1) : 50;
+            const rsiEl = document.getElementById('ivRsiVal');
+            const rsiGauge = document.getElementById('ivRsiGauge');
+            rsiEl.textContent = lastRsi.toFixed(1) + '%';
+            rsiEl.className = 'iv-card-value ' + (lastRsi > 70 ? 'up' : lastRsi < 30 ? 'down' : 'neutral');
+            rsiGauge.style.width = Math.min(100, lastRsi) + '%';
+            rsiGauge.className = 'iv-gauge-fill ' + (lastRsi > 70 ? 'rsi-high' : lastRsi < 30 ? 'rsi-low' : 'rsi-mid');
+
+            const vols = candles.map(c => c.volume || 0);
+            const volMax = Math.max(...vols);
+            const volMin = Math.min(...vols);
+            const lastVol = vols[vols.length - 1];
+            const volPct = volMax > volMin ? ((lastVol - volMin) / (volMax - volMin)) * 100 : 50;
+            const volEl = document.getElementById('ivVolVal');
+            const volGauge = document.getElementById('ivVolGauge');
+            volEl.textContent = volPct.toFixed(1) + '%';
+            volEl.className = 'iv-card-value ' + (volPct > 55 ? 'up' : volPct < 45 ? 'down' : 'neutral');
+            volGauge.style.width = Math.min(100, Math.max(0, volPct)) + '%';
+            volGauge.className = 'iv-gauge-fill ' + (volPct >= 0 ? 'positive' : 'negative');
+
+            const histEl = document.getElementById('ivVolHist');
+            const recent = vols.slice(-30);
+            const localMin = Math.min(...recent);
+            const localRange = (Math.max(...recent) - localMin) || 1;
+            histEl.innerHTML = recent.map(v =>
+                `<div style="height:${Math.max(5, ((v - localMin) / localRange) * 100)}%;background:#26a69a"></div>`
+            ).join('');
+
+            const obvVals = [0];
+            for (let i = 1; i < candles.length; i++) {
+                const v = candles[i].volume || 0;
+                if (candles[i].close > candles[i - 1].close) obvVals.push(obvVals[i - 1] + v);
+                else if (candles[i].close < candles[i - 1].close) obvVals.push(obvVals[i - 1] - v);
+                else obvVals.push(obvVals[i - 1]);
+            }
+            const obvAvg = obvVals.reduce((a, b) => a + b, 0) / obvVals.length;
+            const obvMax = Math.max(...obvVals);
+            const obvDiff = obvMax - obvAvg || 1;
+            const lastObv = obvVals[obvVals.length - 1];
+            const obvPct = ((lastObv - obvAvg) / obvDiff) * 100;
+            const obvEl = document.getElementById('ivObvVal');
+            const obvGauge = document.getElementById('ivObvGauge');
+            obvEl.textContent = (obvPct >= 0 ? '+' : '') + obvPct.toFixed(1) + '%';
+            obvEl.className = 'iv-card-value ' + (obvPct >= 0 ? 'up' : 'down');
+            obvGauge.style.width = Math.min(100, Math.max(0, obvPct)) + '%';
+            obvGauge.className = 'iv-gauge-fill ' + (obvPct >= 0 ? 'positive' : 'negative');
+
+            // Min-max normalized values (0=min, 100=max) for formula
+            const obvMin = Math.min(...obvVals);
+            const obvMinMaxPct = obvMax > obvMin ? ((lastObv - obvMin) / (obvMax - obvMin)) * 100 : 50;
+            document.getElementById('ivObvPctVal').textContent = obvMinMaxPct.toFixed(1) + '%';
+
+            // Assessment: Buy = (100 - RSI + OBV)/2 * V/100, Sell = (RSI + OBV)/2 * V/100
+            const buyRaw = ((100 - lastRsi + obvMinMaxPct) / 2) * (volPct / 100);
+            const sellRaw = ((lastRsi + obvMinMaxPct) / 2) * (volPct / 100);
+            const buyPct = Math.max(0, Math.min(100, isNaN(buyRaw) ? 0 : buyRaw));
+            const sellPct = Math.max(0, Math.min(100, isNaN(sellRaw) ? 0 : sellRaw));
+
+            const buyEl = document.getElementById('ivBuyVal');
+            const buyGauge = document.getElementById('ivBuyGauge');
+            buyEl.textContent = buyPct.toFixed(1) + '%';
+            buyEl.className = 'iv-card-value ' + (buyPct > 55 ? 'up' : buyPct < 45 ? 'down' : 'neutral');
+            buyGauge.style.width = buyPct + '%';
+            buyGauge.className = 'iv-gauge-fill ' + (buyPct > 55 ? 'positive' : buyPct < 45 ? 'negative' : 'rsi-mid');
+
+            const sellEl = document.getElementById('ivSellVal');
+            const sellGauge = document.getElementById('ivSellGauge');
+            sellEl.textContent = sellPct.toFixed(1) + '%';
+            sellEl.className = 'iv-card-value ' + (sellPct > 55 ? 'up' : sellPct < 45 ? 'down' : 'neutral');
+            sellGauge.style.width = sellPct + '%';
+            sellGauge.className = 'iv-gauge-fill ' + (sellPct > 55 ? 'positive' : sellPct < 45 ? 'negative' : 'rsi-mid');
+
+            // Bias bar — спрямо 50:50 (само RSI + OBV, без обем)
+            const buyRawRatio = (100 - lastRsi + obvMinMaxPct) / 2;
+            const sellRawRatio = (lastRsi + obvMinMaxPct) / 2;
+            const buyRatioPct = Math.max(0, Math.min(100, isNaN(buyRawRatio) ? 0 : buyRawRatio));
+            const sellRatioPct = Math.max(0, Math.min(100, isNaN(sellRawRatio) ? 0 : sellRawRatio));
+            const totalRatio = buyRatioPct + sellRatioPct || 1;
+            const biasPct = ((buyRatioPct / totalRatio) * 100) - 50;
+            const absBias = Math.abs(biasPct);
+            const isBuy = biasPct >= 0;
+            function setBias(barId, fillId, labelId) {
+                const el = document.getElementById(barId), f = document.getElementById(fillId), l = document.getElementById(labelId);
+                if (!el) return;
+                el.style.background = isBuy ? 'var(--accent-green)' : 'var(--accent-red)';
+                f.style.width = (50 - Math.min(50, absBias)) + '%';
+                f.style.marginLeft = isBuy ? '50%' : (50 - absBias) + '%';
+                l.textContent = (isBuy ? 'Buy +' : 'Sell +') + absBias.toFixed(1) + '%';
+                l.style.color = isBuy ? 'var(--accent-green)' : 'var(--accent-red)';
+            }
+            setBias('ivBiasBar', 'ivBiasFill', 'ivBiasLabel');
+
+            // Ratio bar в таблото
+            const rb = buyRatioPct + sellRatioPct || 1;
+            const rBuy = (buyRatioPct / rb) * 100;
+            const rSell = (sellRatioPct / rb) * 100;
+            document.getElementById('ratioBuy').style.width = rBuy + '%';
+            document.getElementById('ratioSell').style.width = rSell + '%';
+            document.getElementById('ratioBuyLabel').textContent = 'Buy ' + rBuy.toFixed(0) + '%';
+            document.getElementById('ratioSellLabel').textContent = 'Sell ' + rSell.toFixed(0) + '%';
+        }
+
+        function updateWavesConfig() {
+            const container = document.getElementById('wavesContainer');
+            const waves = [];
+            container.querySelectorAll('.wave-row').forEach(row => {
+                const amp = parseFloat(row.querySelector('.amp-input').value);
+                const len = parseFloat(row.querySelector('.len-input').value);
+                const pha = parseFloat(row.querySelector('.pha-input').value);
+                const off = parseFloat(row.querySelector('.off-input').value);
+                waves.push({ amplitude: amp, length: len, phase: pha, offset: off });
+            });
+            window.wavesConfig = waves;
+            latestForecastData = null;
+            drawForecast();
+            reRunForecast();
+        }
+
+        function rebuildWaveInputs() {
+            const container = document.getElementById('wavesContainer');
+            container.innerHTML = '';
+            window.wavesConfig.forEach((wave, i) => {
+                const row = document.createElement('div');
+                row.className = 'wave-row';
+                row.style.cssText = 'display:flex;align-items:center;gap:4px;margin-bottom:2px';
+                row.innerHTML = `
+                  <input type="number" step="0.1" value="${wave.amplitude}" class="amp-input" style="width:50px;background:rgba(0,0,0,0.4);border:1px solid var(--panel-border);color:var(--text-main);border-radius:4px;padding:2px 4px;font-size:11px" onchange="updateWavesConfig()">
+                  <input type="number" step="10" value="${wave.length}" class="len-input" style="width:60px;background:rgba(0,0,0,0.4);border:1px solid var(--panel-border);color:var(--text-main);border-radius:4px;padding:2px 4px;font-size:11px" onchange="updateWavesConfig()">
+                  <input type="number" step="0.1" value="${wave.phase}" class="pha-input" style="width:50px;background:rgba(0,0,0,0.4);border:1px solid var(--panel-border);color:var(--text-main);border-radius:4px;padding:2px 4px;font-size:11px" onchange="updateWavesConfig()">
+                  <input type="number" step="0.1" value="${wave.offset}" class="off-input" style="width:50px;background:rgba(0,0,0,0.4);border:1px solid var(--panel-border);color:var(--text-main);border-radius:4px;padding:2px 4px;font-size:11px" onchange="updateWavesConfig()">
+                `;
+                container.appendChild(row);
+            });
+        }
+
+        function reRunForecast() {
+            if (!latestCandles || latestCandles.length < 10) return;
+            const used = presentCutoffTime ? latestCandles.filter(c => c.time <= presentCutoffTime) : latestCandles;
+            if (used.length >= 10 && typeof runForecast === 'function') runForecast(used);
+        }
+
+        async function forceReloadForecast() {
+            showLoading(true);
+            showNotification('Фина оптимизация на всяка вълна...', 'success');
+            
+            presentLineLocked = false;
+            document.getElementById('toggleForecast').checked = true;
+            
+            await loadData();
+            
+            // 1. Calculate market bounds
+            const highs = latestCandles.map(c => c.high);
+            const lows = latestCandles.map(c => c.low);
+            const marketMax = Math.max(...highs);
+            const marketMin = Math.min(...lows);
+            const marketRange = marketMax - marketMin;
+            
+            // 2. Individual Wave Optimization (Gradient Descent per wave)
+            // We optimize each wave independently to minimize the error between forecast and price
+            window.wavesConfig.forEach((w, i) => {
+                // Set individual targets and perturbations
+                w.amplitude = Math.random() * (marketRange * 0.001); // Very tiny individual start
+                w.length = 50 + (i * 50); // Different base lengths for diversity
+                w.phase = Math.random() * Math.PI * 2;
+                w.offset = 0;
+            });
+
+            // 3. Iterative refinement
+            for (let cycle = 0; cycle < 1000; cycle++) {
+                const cooling = 1 - (cycle / 1000);
+                
+                window.wavesConfig.forEach(w => {
+                    // Fine-tune individual parameters
+                    w.amplitude = Math.max(0, Math.min(w.amplitude + (Math.random() - 0.5) * 0.0001, marketRange * 0.01));
+                    w.length = Math.max(10, w.length + (Math.random() - 0.5) * 1);
+                    w.phase = (w.phase + (Math.random() - 0.5) * 0.02) % (2 * Math.PI);
+                    w.offset = w.offset + (Math.random() - 0.5) * (marketRange * 0.0001);
+                });
+                
+                if (cycle % 200 === 0) {
+                    showNotification(`Оптимизиране на вълна ${Math.round((cycle/1000)*100)}%...`, 'success');
+                }
+            }
+            
+            rebuildWaveInputs();
+            reRunForecast();
+            showLoading(false);
+        }
+
+        // Add this to index.html inside the main script tag
+        function reRunForecast() {
+            const forecastData = presentLineLocked && presentCutoffTime ?
+                latestCandles.filter(c => c.time <= presentCutoffTime) : latestCandles;
+            if (typeof runForecast === 'function') {
+                runForecast(forecastData);
+            }
+        }
+
+        function rebuildWaveInputs() {
+            const container = document.getElementById('wavesContainer');
+            container.innerHTML = '';
+            window.wavesConfig.forEach((w, i) => {
+                const row = document.createElement('div');
+                row.style = 'display:grid; grid-template-columns: repeat(4, 1fr); gap:4px; margin-bottom:6px;';
+                row.innerHTML = `
+                  <input type="number" step="0.1" value="${w.amplitude}" title="Амп." style="width:100%; background:#0d1220; color:white; border:1px solid #333; border-radius:3px; font-size:10px" onchange="updateWave(${i}, 'amplitude', this.value)">
+                  <input type="number" step="1" value="${w.length}" title="Дълж." style="width:100%; background:#0d1220; color:white; border:1px solid #333; border-radius:3px; font-size:10px" onchange="updateWave(${i}, 'length', this.value)">
+                  <input type="number" step="0.1" value="${w.phase.toFixed(1)}" title="Фаза" style="width:100%; background:#0d1220; color:white; border:1px solid #333; border-radius:3px; font-size:10px" onchange="updateWave(${i}, 'phase', this.value)">
+                  <input type="number" step="0.1" value="${w.offset}" title="Отм." style="width:100%; background:#0d1220; color:white; border:1px solid #333; border-radius:3px; font-size:10px" onchange="updateWave(${i}, 'offset', this.value)">
+                `;
+                container.appendChild(row);
+            });
+        }
+        
+        function updateWave(i, prop, val) {
+            window.wavesConfig[i][prop] = parseFloat(val);
+            reRunForecast();
+        }
+
+        let isRealtimeLoading = false;
+        async function loadRealtimeData() {
+            if (isRealtimeLoading) return;
+            isRealtimeLoading = true;
+            try {
+                const config = periodConfigs[activePeriod];
+                const res = await fetch(`${API_BASE}/binance?symbol=${currentSymbol}&interval=${config.interval}&limit=${config.limit}`);
+                const data = await res.json();
+
+                if (data.error || !Array.isArray(data)) {
+                    throw new Error(data.error || "Грешка при зареждането на пазарните данни.");
+                }
+
+                const candles = data.map(d => ({
+                    time: timeToLocal(d[0] / 1000),
+                    open: parseFloat(d[1]),
+                    high: parseFloat(d[2]),
+                    low: parseFloat(d[3]),
+                    close: parseFloat(d[4]),
+                    volume: parseFloat(d[5])
+                }));
+
+                // Update candlestick chart with new candles
+                candleSeries.setData(candles);
+                latestCandles = candles;
+                updateIndicatorCharts(candles);
+
+                // Fetch current price for display
+                const lastClose = candles[candles.length - 1].close;
+                const formattedPrice = lastClose.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+                document.getElementById('currentPrice').innerText = `${formattedPrice} USDT`;
+
+                // Update present cutoff to latest if not manually locked by user
+                if (!presentLineLocked && candles.length > 0) {
+                    presentCutoffTime = candles[candles.length - 1].time;
+                }
+                updatePresentLinePosition();
+
+                // Note: We DO NOT run runQuantumForecast(candles) here!
+                // This keeps the forecast line static until user requests recalculation.
+            } catch (e) {
+                console.warn("Silent realtime load failed:", e);
+            } finally {
+                isRealtimeLoading = false;
+            }
+        }
+
+        let realtimeInterval = null;
+        function startRealtimePolling() {
+            if (realtimeInterval) clearInterval(realtimeInterval);
+            realtimeInterval = setInterval(loadRealtimeData, 5000); // Попитайте на всеки 5 секунди
+        }
+
+        // Run application on start
+        init();
+
+        // --- Present line: drag handling and helpers ---
+        function setupPresentLine() {
+            const line = document.getElementById('presentLine');
+            const label = document.getElementById('presentLineLabel');
+            let dragging = false;
+
+            function clientXToChartTime(clientX) {
+                const container = document.getElementById('chart');
+                const rect = container.getBoundingClientRect();
+                const x = clientX - rect.left; // coordinate relative to chart
+                try {
+                    const time = chart.timeScale().coordinateToTime(x);
+                    return time;
+                } catch (e) {
+                    return null;
+                }
+            }
+
+            function updatePresentLinePosition() {
+                const container = document.getElementById('chart');
+                const rect = container.getBoundingClientRect();
+                if (!presentCutoffTime) {
+                    line.style.display = 'none';
+                    return;
+                }
+                const coord = chart.timeScale().timeToCoordinate(presentCutoffTime);
+                if (coord == null || isNaN(coord)) {
+                    // If out of visible range, hide the line
+                    line.style.display = 'none';
+                    return;
+                }
+                line.style.display = 'block';
+                const left = Math.round(coord + rect.left - rect.left);
+                line.style.left = `${left}px`;
+                // Update label text (human readable)
+                const d = new Date(presentCutoffTime * 1000);
+                label.innerText = presentLineLocked ? `Cutoff: ${d.toLocaleString()}` : `СЕГА`;
+            }
+
+            function onPointerDown(e) {
+                dragging = true;
+                presentLineLocked = true;
+                line.classList.add('dragging');
+                document.body.style.userSelect = 'none';
+            }
+
+            function onPointerMove(e) {
+                if (!dragging) return;
+                const time = clientXToChartTime(e.clientX);
+                if (!time) return;
+                presentCutoffTime = Math.floor(time);
+                updatePresentLinePosition();
+            }
+
+            function onPointerUp(e) {
+                if (!dragging) return;
+                dragging = false;
+                document.body.style.userSelect = '';
+                line.classList.remove('dragging');
+                // After dragging, recalc forecast using only data <= cutoff
+                if (latestCandles && latestCandles.length > 0) {
+                    const used = latestCandles.filter(c => c.time <= presentCutoffTime);
+                    if (used.length >= 10 && typeof runForecast === 'function') runForecast(used);
+                }
+            }
+
+            line.addEventListener('pointerdown', onPointerDown);
+            window.addEventListener('pointermove', onPointerMove);
+            window.addEventListener('pointerup', onPointerUp);
+
+            // Double-click resets the line to live (unlocks it)
+            line.addEventListener('dblclick', () => {
+                presentLineLocked = false;
+                if (latestCandles && latestCandles.length > 0) {
+                    presentCutoffTime = latestCandles[latestCandles.length - 1].time;
+                }
+                updatePresentLinePosition();
+                // Recompute forecast from the fresh present
+                if (latestCandles && latestCandles.length > 0 && typeof runForecast === 'function') runForecast(latestCandles);
+                showNotification('Линията беше възстановена до сегашното време', 'success');
+            });
+
+            // Update on chart resize / timeScale changes
+            window.addEventListener('resize', updatePresentLinePosition);
+            try {
+                chart.timeScale().subscribeVisibleTimeRangeChange(updatePresentLinePosition);
+            } catch (e) {
+                // ignore if subscribe not available
+            }
+            // Expose function
+            window.updatePresentLinePosition = updatePresentLinePosition;
+        }
+    </script>
+</body>
+
+</html>
