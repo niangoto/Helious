@@ -1037,11 +1037,27 @@
     <script>
         const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
         const API_BASE = isLocal ? 'http://localhost:3001' : '';
-        const BINANCE_API = 'https://api.binance.com';
+        const BINANCE_SPOT = 'https://api.binance.com';
+        const BINANCE_FUTURES = 'https://fapi.binance.com';
 
-        function klinesUrl(symbol, interval, limit) {
-            if (API_BASE) return `${API_BASE}/binance?symbol=${symbol}&interval=${interval}&limit=${limit}`;
-            return `${BINANCE_API}/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+        async function fetchKlines(symbol, interval, limit) {
+            if (API_BASE) {
+                const r = await fetch(`${API_BASE}/binance?symbol=${symbol}&interval=${interval}&limit=${limit}`);
+                return r.json();
+            }
+            // Try Spot API, fallback to Futures API
+            try {
+                const r = await fetch(`${BINANCE_SPOT}/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
+                if (r.ok) {
+                    const txt = await r.text();
+                    const d = JSON.parse(txt);
+                    if (d.code === -1121) throw new Error('Invalid symbol on spot');
+                    return JSON.parse(txt);
+                }
+            } catch (e) {}
+            // Fallback to Futures API
+            const r = await fetch(`${BINANCE_FUTURES}/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
+            return r.json();
         }
         let chart, candleSeries, predictionSeries, centerLineSeries;
         let armLineSeries = {};
@@ -1274,7 +1290,7 @@
         async function tryAddCustomSymbol(sym) {
             try {
                 showLoading(true);
-                const res = await fetch(klinesUrl(sym, '1h', 10));
+                const res = await fetchKlines(sym, '1h', 10);
                 if (!res.ok) throw new Error("Invalid symbol");
                 const data = await res.json();
 
@@ -1403,8 +1419,7 @@
             showLoading(true);
             try {
                 const config = periodConfigs[activePeriod];
-                const res = await fetch(klinesUrl(currentSymbol, config.interval, config.limit));
-                const data = await res.json();
+                const data = await fetchKlines(currentSymbol, config.interval, config.limit);
 
                 if (data.error || !Array.isArray(data)) {
                     throw new Error(data.error || "Грешка при зареждането на пазарните данни.");
@@ -1719,8 +1734,7 @@
             const config = periodConfigs[period];
             if (!config) { ivEl.style.opacity = '1'; return; }
             try {
-                const res = await fetch(klinesUrl(sym, config.interval, config.limit));
-                const data = await res.json();
+                const data = await fetchKlines(sym, config.interval, config.limit);
                 if (data.error || !Array.isArray(data)) { ivEl.style.opacity = '1'; return; }
                 const candles = data.map(d => ({
                     time: timeToLocal(d[0] / 1000), open: parseFloat(d[1]),
@@ -1964,8 +1978,7 @@
             isRealtimeLoading = true;
             try {
                 const config = periodConfigs[activePeriod];
-                const res = await fetch(klinesUrl(currentSymbol, config.interval, config.limit));
-                const data = await res.json();
+                const data = await fetchKlines(currentSymbol, config.interval, config.limit);
 
                 if (data.error || !Array.isArray(data)) {
                     throw new Error(data.error || "Грешка при зареждането на пазарните данни.");
