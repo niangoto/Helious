@@ -1025,7 +1025,14 @@
 
     <script src="forecast.js"></script>
     <script>
-        const API_BASE = 'http://localhost:3001';
+        const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+        const API_BASE = isLocal ? 'http://localhost:3001' : '';
+        const CORS_PROXY = 'https://corsproxy.io/?';
+
+        function klinesUrl(symbol, interval, limit) {
+            const binanceUrl = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+            return API_BASE ? `${API_BASE}/binance?symbol=${symbol}&interval=${interval}&limit=${limit}` : CORS_PROXY + encodeURIComponent(binanceUrl);
+        }
         let chart, candleSeries, predictionSeries, centerLineSeries;
         let armLineSeries = {};
         const armPalette = ['#00f0ff', '#00ff66', '#ffa500', '#b450ff', '#ff0055', '#ffff64', '#ff6b6b', '#48dbfb', '#1dd1a1', '#feca57', '#5f27cd', '#ff9ff3', '#54a0ff', '#00d2d3', '#ff9f43', '#ee5a24', '#0abde3', '#10ac84', '#ff6348', '#f368e0'];
@@ -1257,7 +1264,7 @@
         async function tryAddCustomSymbol(sym) {
             try {
                 showLoading(true);
-                const res = await fetch(`${API_BASE}/binance?symbol=${sym}&interval=1h&limit=10`);
+                const res = await fetch(klinesUrl(sym, '1h', 10));
                 if (!res.ok) throw new Error("Invalid symbol");
                 const data = await res.json();
 
@@ -1386,7 +1393,7 @@
             showLoading(true);
             try {
                 const config = periodConfigs[activePeriod];
-                const res = await fetch(`${API_BASE}/binance?symbol=${currentSymbol}&interval=${config.interval}&limit=${config.limit}`);
+                const res = await fetch(klinesUrl(currentSymbol, config.interval, config.limit));
                 const data = await res.json();
 
                 if (data.error || !Array.isArray(data)) {
@@ -1701,7 +1708,7 @@
             const config = periodConfigs[period];
             if (!config) { ivEl.style.opacity = '1'; return; }
             try {
-                const res = await fetch(`${API_BASE}/binance?symbol=${sym}&interval=${config.interval}&limit=${config.limit}`);
+                const res = await fetch(klinesUrl(sym, config.interval, config.limit));
                 const data = await res.json();
                 if (data.error || !Array.isArray(data)) { ivEl.style.opacity = '1'; return; }
                 const candles = data.map(d => ({
@@ -1773,8 +1780,8 @@
             document.getElementById('ivObvPctVal').textContent = obvMinMaxPct.toFixed(1) + '%';
 
             // Assessment: Buy = (100 - RSI + OBV)/2 * V/100, Sell = (RSI + OBV)/2 * V/100
-            const buyRaw = ((100 - lastRsi + obvMinMaxPct) / 2) * (volPct / 100);
-            const sellRaw = ((lastRsi + obvMinMaxPct) / 2) * (volPct / 100);
+            const buyRaw = ((100 - lastRsi + obvPct) / 2) * (volPct / 100);
+            const sellRaw = ((lastRsi + obvPct) / 2) * (volPct / 100);
             const buyPct = Math.max(0, Math.min(100, isNaN(buyRaw) ? 0 : buyRaw));
             const sellPct = Math.max(0, Math.min(100, isNaN(sellRaw) ? 0 : sellRaw));
 
@@ -1793,8 +1800,8 @@
             sellGauge.className = 'iv-gauge-fill ' + (sellPct > 55 ? 'positive' : sellPct < 45 ? 'negative' : 'rsi-mid');
 
             // Bias bar — спрямо 50:50 (само RSI + OBV, без обем)
-            const buyRawRatio = (100 - lastRsi + obvMinMaxPct) / 2;
-            const sellRawRatio = (lastRsi + obvMinMaxPct) / 2;
+            const buyRawRatio = (100 - lastRsi + obvPct) / 2;
+            const sellRawRatio = (lastRsi + obvPct) / 2;
             const buyRatioPct = Math.max(0, Math.min(100, isNaN(buyRawRatio) ? 0 : buyRawRatio));
             const sellRatioPct = Math.max(0, Math.min(100, isNaN(sellRawRatio) ? 0 : sellRawRatio));
             const totalRatio = buyRatioPct + sellRatioPct || 1;
@@ -1945,7 +1952,7 @@
             isRealtimeLoading = true;
             try {
                 const config = periodConfigs[activePeriod];
-                const res = await fetch(`${API_BASE}/binance?symbol=${currentSymbol}&interval=${config.interval}&limit=${config.limit}`);
+                const res = await fetch(klinesUrl(currentSymbol, config.interval, config.limit));
                 const data = await res.json();
 
                 if (data.error || !Array.isArray(data)) {
