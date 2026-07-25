@@ -863,6 +863,12 @@
                         style="accent-color: var(--accent-cyan); cursor: pointer;">
                     <span>Показвай прогнозата</span>
                 </label>
+                <label class="toggle-label"
+                    style="display: flex; align-items: center; gap: 8px; font-size: 11px; cursor: pointer; color: var(--text-dim); user-select: none;">
+                    <input type="checkbox" id="toggleWaves" onchange="drawForecast()"
+                        style="accent-color: var(--accent-cyan); cursor: pointer;">
+                    <span>Показвай вълните</span>
+                </label>
                 <!-- Вълнова Конфигурация -->
                 <div style="display:flex;flex-direction:column;gap:6px;padding-left:4px;margin-top:4px">
                     <span style="font-size:10px;color:var(--text-dim);margin-bottom:2px">Вълни (Амп., Дълж., Фаза, Отмест.):</span>
@@ -1005,7 +1011,7 @@
                     <div class="iv-card-title sell">Вероятност за Sell</div>
                     <div class="iv-card-value neutral" id="ivSellVal">---</div>
                     <div class="iv-gauge"><div class="iv-gauge-fill" id="ivSellGauge" style="width:0%"></div></div>
-                    <div class="iv-assessment-meta">(RSI + OBV) / 2 × V / 100</div>
+                    <div class="iv-assessment-meta">(100 + RSI − OBV) / 2 × V / 100</div>
                 </div>
             </div>
             <div class="iv-ratio-bar">
@@ -1016,6 +1022,10 @@
                 <span id="ratioBuyLabel">Buy 50%</span>
                 <span id="ratioSellLabel">Sell 50%</span>
             </div>
+            <div class="iv-bias-bar" id="ivBiasBarT" style="background:var(--accent-green)">
+                <div class="iv-bias-fill" id="ivBiasFillT" style="width:50%"></div>
+            </div>
+            <div class="iv-bias-label" id="ivBiasLabelT">---</div>
         </div>
 
     </div>
@@ -1466,7 +1476,8 @@
             Object.keys(armLineSeries).forEach(k => { try { chart.removeSeries(armLineSeries[k]); } catch(e) {} });
             armLineSeries = {};
             
-            if (d.waveTrajectories && d.waveTrajectories.length > 0) {
+            const showWaves = document.getElementById('toggleWaves')?.checked;
+            if (showWaves && d.waveTrajectories && d.waveTrajectories.length > 0) {
                 const waveTimes = d.forecastPath.map(p => p.time);
                 d.waveTrajectories.forEach((traj, i) => {
                     armLineSeries[i] = chart.addLineSeries({
@@ -1544,7 +1555,7 @@
                 } else {
                     const oNorm = obvMax > obvMin ? ((obvAll[i] - obvMin) / (obvMax - obvMin)) * 100 : 50;
                     const bBuy = (100 - rsiVals[i - period] + oNorm) / 2;
-                    const bSell = (rsiVals[i - period] + oNorm) / 2;
+                    const bSell = (100 + rsiVals[i - period] - oNorm) / 2;
                     bias.push({ time: t, value: (bBuy / (bBuy + bSell || 1)) * 100 });
                 }
             }
@@ -1781,7 +1792,7 @@
 
             // Assessment: Buy = (100 - RSI + OBV)/2 * V/100, Sell = (RSI + OBV)/2 * V/100
             const buyRaw = ((100 - lastRsi + obvPct) / 2) * (volPct / 100);
-            const sellRaw = ((lastRsi + obvPct) / 2) * (volPct / 100);
+            const sellRaw = ((100 + lastRsi - obvPct) / 2) * (volPct / 100);
             const buyPct = Math.max(0, Math.min(100, isNaN(buyRaw) ? 0 : buyRaw));
             const sellPct = Math.max(0, Math.min(100, isNaN(sellRaw) ? 0 : sellRaw));
 
@@ -1801,7 +1812,7 @@
 
             // Bias bar — спрямо 50:50 (само RSI + OBV, без обем)
             const buyRawRatio = (100 - lastRsi + obvPct) / 2;
-            const sellRawRatio = (lastRsi + obvPct) / 2;
+            const sellRawRatio = (100 + lastRsi - obvPct) / 2;
             const buyRatioPct = Math.max(0, Math.min(100, isNaN(buyRawRatio) ? 0 : buyRawRatio));
             const sellRatioPct = Math.max(0, Math.min(100, isNaN(sellRawRatio) ? 0 : sellRawRatio));
             const totalRatio = buyRatioPct + sellRatioPct || 1;
@@ -1818,6 +1829,7 @@
                 l.style.color = isBuy ? 'var(--accent-green)' : 'var(--accent-red)';
             }
             setBias('ivBiasBar', 'ivBiasFill', 'ivBiasLabel');
+            setBias('ivBiasBarT', 'ivBiasFillT', 'ivBiasLabelT');
 
             // Ratio bar в таблото
             const rb = buyRatioPct + sellRatioPct || 1;
