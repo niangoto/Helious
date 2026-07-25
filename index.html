@@ -1027,11 +1027,11 @@
     <script>
         const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
         const API_BASE = isLocal ? 'http://localhost:3001' : '';
-        const CORS_PROXY = 'https://corsproxy.io/?';
+        const BINANCE_API = 'https://api.binance.com';
 
         function klinesUrl(symbol, interval, limit) {
-            const binanceUrl = `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
-            return API_BASE ? `${API_BASE}/binance?symbol=${symbol}&interval=${interval}&limit=${limit}` : CORS_PROXY + encodeURIComponent(binanceUrl);
+            if (API_BASE) return `${API_BASE}/binance?symbol=${symbol}&interval=${interval}&limit=${limit}`;
+            return `${BINANCE_API}/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`;
         }
         let chart, candleSeries, predictionSeries, centerLineSeries;
         let armLineSeries = {};

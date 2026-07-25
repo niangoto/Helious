@@ -1,0 +1,9 @@
+{
+  "name": "helious",
+  "version": "1.0.0",
+  "description": "Helious Quantum - Analytical Terminal",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  }
+}
