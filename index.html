@@ -1744,6 +1744,10 @@
                 document.getElementById('ivObvVal').textContent = '--';
                 document.getElementById('ivBuyVal').textContent = '--';
                 document.getElementById('ivSellVal').textContent = '--';
+                document.getElementById('ratioBuy').style.width = '50%';
+                document.getElementById('ratioSell').style.width = '50%';
+                document.getElementById('ratioBuyLabel').textContent = 'Buy --';
+                document.getElementById('ratioSellLabel').textContent = 'Sell --';
                 console.error('ivReload error:', e);
             }
             ivEl.style.opacity = '1';
