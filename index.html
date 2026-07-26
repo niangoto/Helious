@@ -615,62 +615,6 @@
             color: var(--text-dim);
         }
 
-        .iv-search-wrapper {
-            position: relative;
-            flex: 1;
-        }
-
-        .iv-search-wrapper input {
-            width: 100%;
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px solid var(--panel-border);
-            color: var(--text-main);
-            padding: 9px 12px 9px 32px;
-            border-radius: 8px;
-            font-size: 13px;
-            font-weight: 500;
-            font-family: 'Outfit', sans-serif;
-            outline: none;
-        }
-
-        .iv-search-wrapper input:focus { border-color: var(--accent-cyan); }
-
-        .iv-search-wrapper .search-icon {
-            position: absolute;
-            left: 10px;
-            top: 50%;
-            transform: translateY(-50%);
-            font-size: 12px;
-            color: var(--text-dim);
-            pointer-events: none;
-        }
-
-        .iv-search-results {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            z-index: 50;
-            background: #0d1220;
-            border: 1px solid var(--panel-border);
-            border-radius: 0 0 8px 8px;
-            max-height: 180px;
-            overflow-y: auto;
-            display: none;
-        }
-
-        .iv-search-results div {
-            padding: 9px 12px;
-            cursor: pointer;
-            font-size: 12px;
-            font-weight: 500;
-            color: var(--text-main);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-        }
-
-        .iv-search-results div:hover { background: rgba(0, 240, 255, 0.08); color: var(--accent-cyan); }
-        .iv-search-results div:last-child { border-bottom: none; }
-
         /* Swipeable pages in indicator view */
         .iv-pages {
             flex: 1;
@@ -797,7 +741,6 @@
             .iv-assessment .iv-card-value { font-size: 30px; }
             .iv-header { padding: 12px 14px 0; }
             .iv-page { padding: 12px 14px 16px; }
-            .iv-search-wrapper input { font-size: 12px; padding: 7px 10px 7px 28px; }
             .iv-ratio-bar { height: 10px; }
             .symbol-dropdown { max-height: 160px; font-size: 11px; }
         }
@@ -985,13 +928,7 @@
 
         <!-- Indicator Tab View (swipeable) -->
         <div id="indicator-view">
-            <div class="iv-header">
-                <div class="iv-search-wrapper">
-                    <span class="search-icon">🔍</span>
-                    <input type="text" id="ivSearch" placeholder="Търси стока..." oninput="ivFilterSymbols(this.value)" onfocus="ivShowResults()">
-                    <div class="iv-search-results" id="ivSearchResults"></div>
-                </div>
-            </div>
+            <div class="iv-header"></div>
 
             <!-- Page dots -->
             <div class="iv-page-indicator">
@@ -1240,9 +1177,11 @@
             loadData();
             startRealtimePolling();
 
-            // Default to chart view
-            document.getElementById('chart-view').style.display = 'flex';
-            document.getElementById('indicator-view').style.display = 'none';
+            // Default to indicator view
+            document.getElementById('chart-view').style.display = 'none';
+            document.getElementById('indicator-view').style.display = 'flex';
+            document.getElementById('viewToggle').classList.add('active');
+            document.getElementById('viewToggle').textContent = '📈 Графика';
             ivReload();
 
             window.addEventListener('resize', () => {
@@ -1634,7 +1573,7 @@
             }
             const prev = document.getElementById('ivArrowPrev');
             const next = document.getElementById('ivArrowNext');
-            if (prev) prev.style.display = idx === 0 ? 'none' : 'flex';
+            if (prev) prev.style.display = 'flex';
             if (next) next.textContent = idx === 0 ? '›' : 'B';
         }
 
@@ -1644,47 +1583,13 @@
             const w = pages.clientWidth;
             const idx = Math.round(pages.scrollLeft / w);
             const target = idx + dir;
-            if (target < 0 || target > 1) {
-                if (dir > 0) showNotification('Модел B — очаквайте скоро', 'success');
+            if (dir < 0 && target < 0) return;
+            if (dir > 0 && target > 1) {
+                showNotification('Модел B — очаквайте скоро', 'success');
                 return;
             }
             pages.scrollBy({ left: dir * w, behavior: 'smooth' });
         }
-
-        function ivFilterSymbols(q) {
-            const results = document.getElementById('ivSearchResults');
-            const query = q.toUpperCase().trim();
-            const all = getFullSymbolList();
-            const filtered = query ? all.filter(s => s.includes(query)) : all.slice(0, 10);
-            results.innerHTML = filtered.map(s =>
-                `<div onclick="ivSelectSymbol('${s}')">${symbolDetails[s] ? symbolDetails[s].name : s.replace('USDT','')} <span style="color:var(--text-dim);font-size:11px">${s}</span></div>`
-            ).join('');
-            results.style.display = filtered.length ? 'block' : 'none';
-        }
-
-        function ivShowResults() {
-            const inp = document.getElementById('ivSearch');
-            ivFilterSymbols(inp.value);
-        }
-
-        function ivSelectSymbol(sym) {
-            ivCurrentSymbol = sym;
-            document.getElementById('ivSearch').value = symbolDetails[sym] ? symbolDetails[sym].name : sym.replace('USDT', '');
-            document.getElementById('ivSearchResults').style.display = 'none';
-            ivReload();
-            if (currentSymbol !== sym) {
-                currentSymbol = sym;
-                latestForecastData = null;
-                document.getElementById('displaySymbol').innerText = sym.replace('USDT', '') + ' / USDT';
-                document.getElementById('symbolSearch').value = '';
-                loadData();
-            }
-        }
-
-        document.addEventListener('click', (e) => {
-            const r = document.getElementById('ivSearchResults');
-            if (r && !e.target.closest('.iv-search-wrapper')) r.style.display = 'none';
-        });
 
         async function ivReload() {
             const ivEl = document.getElementById('indicator-view');
