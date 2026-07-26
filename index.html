@@ -775,34 +775,58 @@
         /* Responsive / App layout */
         @media (max-width: 768px) {
             #top-bar {
-                padding: 8px 10px;
+                padding: 6px 8px;
                 flex-wrap: wrap;
-                gap: 8px;
+                gap: 4px;
             }
-            .title-badge-group { width: 100%; }
+            .title-badge-group {
+                width: 100%;
+                display: flex;
+                flex-direction: row;
+                align-items: center;
+                flex-wrap: wrap;
+                gap: 4px 8px;
+            }
             .title-badge-group .period-selector { flex-wrap: wrap; }
             .period-btn { font-size: 9px; padding: 3px 6px; }
-            #displaySymbol { font-size: 15px; }
-            .stat-val { font-size: 13px; }
-            .stats-box { width: 100%; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
-            .search-wrapper input { width: 100px; }
-            .search-wrapper input:focus { width: 140px; }
-            .indicator-canvas-row { height: 40px; }
-            #pendulumCanvas { width: 80px; height: 80px; bottom: 10px; right: 10px; }
-            #indicator-view { padding: 12px; }
-            .iv-cards { grid-template-columns: 1fr; }
-            .iv-assessment { grid-template-columns: 1fr; }
+            #displaySymbol { font-size: 14px; }
+            #displayInterval { font-size: 9px; }
+            .stat-val { font-size: 12px; }
+            .stats-box {
+                width: 100%;
+                justify-content: flex-start;
+                flex-wrap: wrap;
+                gap: 4px;
+            }
+            .stat-group { padding: 3px 8px; }
+            .stat-label { font-size: 8px; }
+            .search-wrapper input { width: 90px; font-size: 10px; padding: 4px 6px 4px 20px; }
+            .search-wrapper input:focus { width: 130px; }
+            .search-wrapper .search-icon { font-size: 9px; left: 5px; }
+            .indicator-canvas-row { height: 35px; }
+            #pendulumCanvas { width: 60px; height: 60px; bottom: 6px; right: 6px; }
+            #indicator-view { padding: 10px; gap: 12px; }
+            .iv-cards { grid-template-columns: 1fr; gap: 10px; }
+            .iv-card { padding: 14px; }
+            .iv-card-value { font-size: 26px; }
+            .iv-assessment { grid-template-columns: 1fr; gap: 10px; }
+            .iv-assessment .iv-card-value { font-size: 32px; }
+            .iv-header { gap: 8px; margin-bottom: 12px; }
+            .iv-search-wrapper input { font-size: 12px; padding: 8px 10px 8px 30px; }
+            .iv-ratio-bar { height: 10px; }
+            .symbol-dropdown { max-height: 180px; font-size: 11px; }
         }
 
         @media (max-width: 480px) {
-            #top-bar { padding: 6px 8px; gap: 4px; }
-            .period-btn { font-size: 8px; padding: 2px 4px; }
-            .search-wrapper input { width: 80px; font-size: 10px; }
-            .reload-btn-sm { padding: 2px 6px; font-size: 9px; }
-            #viewToggle { font-size: 10px; padding: 4px 8px; }
-            .stat-group { padding: 4px 8px; }
+            #top-bar { padding: 4px 6px; gap: 2px; }
+            .period-btn { font-size: 8px; padding: 2px 5px; }
+            .search-wrapper input { width: 70px; font-size: 9px; }
+            .reload-btn-sm { padding: 2px 5px; font-size: 8px; }
+            #viewToggle { font-size: 9px; padding: 3px 6px; }
             .stat-val { font-size: 11px; }
-            .iv-card-value { font-size: 24px; }
+            .iv-card-value { font-size: 22px; }
+            .iv-card { padding: 10px; }
+            .present-line .label { font-size: 9px; padding: 3px 5px; }
         }
 
         /* Loading & Notification States */
@@ -1028,6 +1052,7 @@
                 <span id="ratioBuyLabel">Buy 50%</span>
                 <span id="ratioSellLabel">Sell 50%</span>
             </div>
+            <div style="margin-top:12px;text-align:center;font-size:9px;color:var(--text-dim);opacity:0.4;font-family:'JetBrains Mono',monospace">Helious Quantum v1.0.1</div>
         </div>
 
     </div>
@@ -1036,7 +1061,7 @@
     <div id="notification-box"></div>
 
     <!-- Version -->
-    <div style="position:fixed;right:12px;bottom:12px;z-index:9998;font-size:9px;color:rgba(255,255,255,0.15);font-family:'JetBrains Mono',monospace;pointer-events:none;user-select:none">v1.0.1</div>
+    <div style="position:fixed;right:10px;bottom:10px;z-index:9998;font-size:8px;color:rgba(255,255,255,0.12);font-family:'JetBrains Mono',monospace;pointer-events:none;user-select:none;letter-spacing:0.5px">v1.0.1</div>
 
     <script src="forecast.js"></script>
     <script>
