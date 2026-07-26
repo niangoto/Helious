@@ -979,15 +979,6 @@
                     <input type="text" id="ivSearch" placeholder="Търси стока..." oninput="ivFilterSymbols(this.value)" onfocus="ivShowResults()">
                     <div class="iv-search-results" id="ivSearchResults"></div>
                 </div>
-                <select id="ivPeriod" onchange="ivPeriodChanged()">
-                    <option value="5m">5 мин</option>
-                    <option value="15m">15 мин</option>
-                    <option value="1h">1 час</option>
-                    <option value="4h">4 часа</option>
-                    <option value="24h" selected>1 ден</option>
-                    <option value="7d">7 дни</option>
-                    <option value="30d">30 дни</option>
-                </select>
             </div>
             <div class="iv-cards">
                 <div class="iv-card">
@@ -1333,9 +1324,8 @@
             });
             document.querySelector(`.period-btn[onclick*="'${period}'"]`)?.classList.add('active');
 
+            ivDataCache = null;
             loadData();
-            const ivPeriod = document.getElementById('ivPeriod');
-            if (ivPeriod.value !== period) { ivPeriod.value = period; ivDataCache = null; ivReload(); }
         }
 
         function updateForecastHorizon(val) {
@@ -1614,24 +1604,6 @@
             }
         }
 
-        function ivPeriodChanged() {
-            const period = document.getElementById('ivPeriod').value;
-            ivDataCache = null;
-            ivReload();
-            if (activePeriod !== period) {
-                activePeriod = period;
-                latestForecastData = null;
-                drawForecast();
-                const config = periodConfigs[period];
-                currentInterval = config.interval;
-                document.getElementById('displayInterval').innerHTML = '<span class="live-dot"></span>Времеви мащаб: ' + currentInterval;
-                document.querySelectorAll('.period-btn').forEach(b => {
-                    b.classList.toggle('active', b.getAttribute('onclick') === "changeAnalysisPeriod('" + period + "')");
-                });
-                loadData();
-            }
-        }
-
         document.addEventListener('click', (e) => {
             const r = document.getElementById('ivSearchResults');
             if (r && !e.target.closest('.iv-search-wrapper')) r.style.display = 'none';
@@ -1641,7 +1613,7 @@
             const ivEl = document.getElementById('indicator-view');
             ivEl.style.opacity = '0.4';
             const sym = ivCurrentSymbol;
-            const period = document.getElementById('ivPeriod').value;
+            const period = activePeriod;
             const config = periodConfigs[period];
             if (!config) { ivEl.style.opacity = '1'; return; }
             try {
