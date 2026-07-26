@@ -1000,8 +1000,8 @@
             </div>
 
             <div class="iv-pages" id="ivPages" onscroll="onIvPageScroll()">
-                <button class="iv-nav-arrow prev" onclick="scrollIvPage(-1)">‹</button>
-                <button class="iv-nav-arrow next" onclick="scrollIvPage(1)">›</button>
+                <button class="iv-nav-arrow prev" id="ivArrowPrev" onclick="scrollIvPage(-1)">‹</button>
+                <button class="iv-nav-arrow next" id="ivArrowNext" onclick="scrollIvPage(1)">›</button>
                 <!-- Page 1: Показатели -->
                 <div class="iv-page">
                     <div class="iv-cards">
@@ -1053,9 +1053,9 @@
                         <span id="ratioBuyLabel">Buy 50%</span>
                         <span id="ratioSellLabel">Sell 50%</span>
                     </div>
-                    <div class="iv-model-label">според модел А</div>
                 </div>
             </div>
+            <div class="iv-model-label">СПОРЕД МОДЕЛ А</div>
         </div>
 
     </div>
@@ -1064,12 +1064,18 @@
     <div id="notification-box"></div>
 
     <!-- Install hint -->
-    <div id="installHint" style="position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:9998;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.2);border-radius:8px;padding:8px 16px;font-size:11px;color:var(--accent-cyan);backdrop-filter:blur(8px);display:none;white-space:nowrap;font-family:'Outfit',sans-serif">📲 Инсталирай като приложение</div>
+    <div id="installHint" onclick="showInstallInfo()" style="position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:9998;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.2);border-radius:8px;padding:8px 16px;font-size:11px;color:var(--accent-cyan);backdrop-filter:blur(8px);display:none;cursor:pointer;white-space:nowrap;font-family:'Outfit',sans-serif">📲 Инсталирай като приложение</div>
     <script>
-    // Show install hint on mobile if not in standalone mode
+    function showInstallInfo() {
+        const isSafari = /iphone|ipad|ipod/i.test(navigator.userAgent) || (/safari/i.test(navigator.userAgent) && !/chrome/i.test(navigator.userAgent));
+        const msg = isSafari
+            ? 'Натисни бутона "Share" (📤) долу → "Add to Home Screen" → "Add"'
+            : 'Натисни трите точки (⋮) горе → "Add to Home Screen" → "Add"';
+        showNotification(msg, 'success');
+    }
     if ('serviceWorker' in navigator && !window.matchMedia('(display-mode: standalone)').matches) {
         const d = document.getElementById('installHint');
-        if (d) { d.style.display = 'block'; setTimeout(() => { d.style.opacity = '0'; d.style.transition = 'opacity 1s'; setTimeout(() => d.remove(), 1000); }, 5000); }
+        if (d) { d.style.display = 'block'; setTimeout(() => { d.style.opacity = '0'; d.style.transition = 'opacity 1s'; setTimeout(() => d.remove(), 1000); }, 7000); }
     }
     </script>
 
@@ -1234,11 +1240,9 @@
             loadData();
             startRealtimePolling();
 
-            // Default to indicator view
-            document.getElementById('chart-view').style.display = 'none';
-            document.getElementById('indicator-view').style.display = 'flex';
-            document.getElementById('viewToggle').classList.add('active');
-            document.getElementById('viewToggle').textContent = '📈 Графика';
+            // Default to chart view
+            document.getElementById('chart-view').style.display = 'flex';
+            document.getElementById('indicator-view').style.display = 'none';
             ivReload();
 
             window.addEventListener('resize', () => {
@@ -1608,11 +1612,15 @@
             if (!showing) {
                 if (!ivDataCache) ivReload();
             } else {
-                setTimeout(() => {
-                    const c = document.getElementById('chart');
-                    chart.resize(c.clientWidth, c.clientHeight);
+                const c = document.getElementById('chart');
+                chart.resize(c.clientWidth, c.clientHeight);
+                // Retry drawing canvases until it works
+                let tries = 0;
+                function tryDraw() {
                     drawIndicatorCanvases();
-                }, 50);
+                    if (++tries < 10) setTimeout(tryDraw, 200);
+                }
+                tryDraw();
             }
         }
 
@@ -1624,12 +1632,22 @@
                 const dot = document.getElementById('ivDot' + i);
                 if (dot) dot.classList.toggle('active', i === idx);
             }
+            const prev = document.getElementById('ivArrowPrev');
+            const next = document.getElementById('ivArrowNext');
+            if (prev) prev.style.display = idx === 0 ? 'none' : 'flex';
+            if (next) next.textContent = idx === 0 ? '›' : 'B';
         }
 
         function scrollIvPage(dir) {
             const pages = document.getElementById('ivPages');
             if (!pages) return;
             const w = pages.clientWidth;
+            const idx = Math.round(pages.scrollLeft / w);
+            const target = idx + dir;
+            if (target < 0 || target > 1) {
+                if (dir > 0) showNotification('Модел B — очаквайте скоро', 'success');
+                return;
+            }
             pages.scrollBy({ left: dir * w, behavior: 'smooth' });
         }
 
