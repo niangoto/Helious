@@ -238,10 +238,11 @@
 
         /* Chart Canvas */
         #chart-container {
-            flex: 1;
+            flex: 1 1 auto;
             position: relative;
             background: #06080f;
-            min-height: 100px;
+            min-height: 80px;
+            overflow: hidden;
         }
 
         #chart {
@@ -300,15 +301,15 @@
             border-top: 1px solid var(--panel-border);
             z-index: 10;
             flex-shrink: 0;
-            flex-basis: auto;
-            min-height: 105px;
+            height: 165px;
         }
 
         .indicator-canvas-row {
-            height: 55px;
+            flex: 1;
             border-bottom: 1px solid var(--panel-border);
             position: relative;
             overflow: hidden;
+            min-height: 0;
         }
 
         .indicator-canvas-row:last-child {
@@ -691,7 +692,7 @@
             }
             .stat-group { padding: 3px 8px; }
             .stat-label { font-size: 8px; }
-            .indicator-canvas-row { height: 35px; }
+            .indicator-canvas-row { flex: 1; }
             #pendulumCanvas { width: 60px; height: 60px; bottom: 6px; right: 6px; }
             .iv-cards { grid-template-columns: 1fr; gap: 8px; }
             .iv-card { padding: 12px; }
@@ -701,6 +702,11 @@
             .iv-header { padding: 12px 14px 0; }
             .iv-page { padding: 12px 14px 16px; }
             .iv-ratio-bar { height: 10px; }
+        }
+
+        @media (max-width: 768px) {
+            #indicator-canvases { height: 105px; }
+        }
         }
 
         @media (max-width: 480px) {
