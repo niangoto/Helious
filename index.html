@@ -5,6 +5,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Helious Quantum | Аналитичен Терминал</title>
+    <link rel="manifest" href="/manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Helious">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="theme-color" content="#06080f">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <!-- Lightweight Charts -->
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
     <!-- Fonts -->
@@ -201,41 +207,6 @@
             color: var(--accent-cyan);
             border-color: var(--accent-cyan);
             box-shadow: 0 0 10px rgba(0, 240, 255, 0.15);
-        }
-
-        .horizon-control {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .horizon-control .horizon-val {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 10px;
-            color: var(--accent-cyan);
-            font-weight: 600;
-            min-width: 50px;
-        }
-
-        .horizon-slider {
-            -webkit-appearance: none;
-            width: 100px;
-            height: 4px;
-            border-radius: 2px;
-            background: rgba(255, 255, 255, 0.08);
-            outline: none;
-            cursor: pointer;
-        }
-
-        .horizon-slider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            appearance: none;
-            width: 12px;
-            height: 12px;
-            border-radius: 50%;
-            background: var(--accent-cyan);
-            box-shadow: 0 0 6px var(--accent-cyan);
-            cursor: pointer;
         }
 
         .reload-btn-sm {
@@ -798,6 +769,39 @@
             border-bottom: none;
         }
 
+        /* Responsive / App layout */
+        @media (max-width: 768px) {
+            #top-bar {
+                padding: 8px 10px;
+                flex-wrap: wrap;
+                gap: 8px;
+            }
+            .title-badge-group { width: 100%; }
+            .title-badge-group .period-selector { flex-wrap: wrap; }
+            .period-btn { font-size: 9px; padding: 3px 6px; }
+            #displaySymbol { font-size: 15px; }
+            .stat-val { font-size: 13px; }
+            .stats-box { width: 100%; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
+            .search-wrapper input { width: 100px; }
+            .search-wrapper input:focus { width: 140px; }
+            .indicator-canvas-row { height: 40px; }
+            #pendulumCanvas { width: 80px; height: 80px; bottom: 10px; right: 10px; }
+            #indicator-view { padding: 12px; }
+            .iv-cards { grid-template-columns: 1fr; }
+            .iv-assessment { grid-template-columns: 1fr; }
+        }
+
+        @media (max-width: 480px) {
+            #top-bar { padding: 6px 8px; gap: 4px; }
+            .period-btn { font-size: 8px; padding: 2px 4px; }
+            .search-wrapper input { width: 80px; font-size: 10px; }
+            .reload-btn-sm { padding: 2px 6px; font-size: 9px; }
+            #viewToggle { font-size: 10px; padding: 4px 8px; }
+            .stat-group { padding: 4px 8px; }
+            .stat-val { font-size: 11px; }
+            .iv-card-value { font-size: 24px; }
+        }
+
         /* Loading & Notification States */
         #loading-overlay {
             position: absolute;
@@ -930,12 +934,6 @@
                 <div class="stat-group">
                     <span class="stat-label">Текуща цена</span>
                     <span id="currentPrice" class="stat-val">---</span>
-                </div>
-                <div class="horizon-control" style="margin-right:8px">
-                    <span class="picker-label">Хоризонт</span>
-                    <input type="range" min="10" max="2000" value="30" class="horizon-slider" id="forecastHorizon"
-                        oninput="updateForecastHorizon(this.value)">
-                    <span id="horizonVal" class="horizon-val">30</span>
                 </div>
                 <button class="reload-btn-sm" onclick="forceReloadForecast()" title="Презареди прогнозата">↻</button>
                 <div class="search-wrapper" style="margin-left:4px">
@@ -1344,7 +1342,6 @@
             forecastSteps = parseInt(val);
             latestForecastData = null;
             drawForecast();
-            document.getElementById('horizonVal').innerText = val;
             reRunForecast();
         }
 
@@ -1922,6 +1919,11 @@
                 chart.timeScale().subscribeVisibleTimeRangeChange(updatePresentLinePosition);
             } catch (e) {}
             window.updatePresentLinePosition = updatePresentLinePosition;
+        }
+
+        // Service Worker за PWA
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/sw.js').catch(() => {});
         }
     </script>
 </body>
