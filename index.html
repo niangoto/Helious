@@ -235,99 +235,6 @@
             box-shadow: 0 0 10px var(--accent-cyan);
         }
 
-        /* Search in controls bar */
-        .search-wrapper {
-            position: relative;
-        }
-
-        .search-wrapper input {
-            width: 130px;
-            padding: 5px 8px 5px 24px;
-            background: rgba(0, 0, 0, 0.4);
-            border: 1px solid var(--panel-border);
-            border-radius: 6px;
-            color: white;
-            font-size: 11px;
-            font-family: 'Outfit', sans-serif;
-            outline: none;
-            transition: all 0.3s;
-        }
-
-        .search-wrapper input:focus {
-            border-color: var(--accent-cyan);
-            box-shadow: 0 0 6px rgba(0, 240, 255, 0.25);
-            width: 200px;
-        }
-
-        .search-wrapper .search-icon {
-            position: absolute;
-            left: 7px;
-            top: 50%;
-            transform: translateY(-50%);
-            font-size: 11px;
-            color: var(--text-dim);
-            pointer-events: none;
-        }
-
-        .symbol-dropdown {
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            z-index: 100;
-            background: #0d1220;
-            border: 1px solid var(--panel-border);
-            border-radius: 0 0 8px 8px;
-            max-height: 260px;
-            overflow-y: auto;
-            display: none;
-            margin-top: 2px;
-        }
-
-        .symbol-dropdown .symbol-item {
-            padding: 8px 12px;
-            border-radius: 0;
-            cursor: pointer;
-            transition: all 0.2s;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-        }
-
-        .symbol-dropdown .symbol-item:hover {
-            background: rgba(0, 240, 255, 0.08);
-        }
-
-        .symbol-dropdown .symbol-item.active {
-            background: rgba(0, 240, 255, 0.12);
-            border-left: 3px solid var(--accent-cyan);
-        }
-
-        .symbol-dropdown .symbol-name {
-            font-weight: 600;
-            font-size: 12px;
-        }
-
-        .symbol-dropdown .symbol-price {
-            font-family: 'JetBrains Mono', monospace;
-            font-size: 10px;
-            color: var(--text-dim);
-            background: rgba(255, 255, 255, 0.04);
-            padding: 2px 6px;
-            border-radius: 4px;
-        }
-
-        .search-add-btn {
-            border: 1px dashed rgba(0, 240, 255, 0.3) !important;
-            background: rgba(0, 240, 255, 0.02) !important;
-        }
-
-        .search-add-btn:hover {
-            background: rgba(0, 240, 255, 0.08) !important;
-            border-color: var(--accent-cyan) !important;
-        }
-
         /* Chart Canvas */
         #chart-container {
             flex: 1;
@@ -615,7 +522,66 @@
             color: var(--text-dim);
         }
 
+        /* Search in indicator view */
+        .iv-search-wrapper {
+            position: relative;
+            flex: 1;
+        }
+        .iv-search-wrapper input {
+            width: 100%;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--panel-border);
+            color: var(--text-main);
+            padding: 9px 12px 9px 32px;
+            border-radius: 8px;
+            font-size: 13px;
+            font-weight: 500;
+            font-family: 'Outfit', sans-serif;
+            outline: none;
+        }
+        .iv-search-wrapper input:focus { border-color: var(--accent-cyan); }
+        .iv-search-wrapper .search-icon {
+            position: absolute;
+            left: 10px;
+            top: 50%;
+            transform: translateY(-50%);
+            font-size: 12px;
+            color: var(--text-dim);
+            pointer-events: none;
+        }
+        .iv-search-results {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            z-index: 50;
+            background: #0d1220;
+            border: 1px solid var(--panel-border);
+            border-radius: 0 0 8px 8px;
+            max-height: 180px;
+            overflow-y: auto;
+            display: none;
+        }
+        .iv-search-results div {
+            padding: 9px 12px;
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-main);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        }
+        .iv-search-results div:hover { background: rgba(0, 240, 255, 0.08); color: var(--accent-cyan); }
+        .iv-search-results div:last-child { border-bottom: none; }
+
         /* Swipeable pages in indicator view */
+        .iv-pages-wrap {
+            flex: 1;
+            display: flex;
+            align-items: stretch;
+            overflow: hidden;
+            position: relative;
+        }
+
         .iv-pages {
             flex: 1;
             display: flex;
@@ -659,21 +625,18 @@
         /* Desktop arrows for page navigation */
         .iv-nav-arrow {
             display: none;
-            position: absolute;
-            top: 50%;
-            transform: translateY(-50%);
-            z-index: 5;
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            background: rgba(13, 18, 30, 0.8);
+            width: 30px;
+            flex-shrink: 0;
+            background: rgba(13, 18, 30, 0.85);
             border: 1px solid var(--panel-border);
             color: var(--accent-cyan);
-            font-size: 14px;
+            font-size: 16px;
             cursor: pointer;
             align-items: center;
             justify-content: center;
+            z-index: 5;
             transition: all 0.25s;
+            border-radius: 0;
         }
 
         .iv-nav-arrow:hover {
@@ -682,11 +645,7 @@
             border-color: var(--accent-cyan);
         }
 
-        .iv-nav-arrow.prev { left: 8px; }
-        .iv-nav-arrow.next { right: 8px; }
-
         @media (min-width: 769px) {
-            .iv-pages { position: relative; }
             .iv-nav-arrow { display: flex; }
         }
 
@@ -729,9 +688,6 @@
             }
             .stat-group { padding: 3px 8px; }
             .stat-label { font-size: 8px; }
-            .search-wrapper input { width: 90px; font-size: 10px; padding: 4px 6px 4px 20px; }
-            .search-wrapper input:focus { width: 130px; }
-            .search-wrapper .search-icon { font-size: 9px; left: 5px; }
             .indicator-canvas-row { height: 35px; }
             #pendulumCanvas { width: 60px; height: 60px; bottom: 6px; right: 6px; }
             .iv-cards { grid-template-columns: 1fr; gap: 8px; }
@@ -742,13 +698,11 @@
             .iv-header { padding: 12px 14px 0; }
             .iv-page { padding: 12px 14px 16px; }
             .iv-ratio-bar { height: 10px; }
-            .symbol-dropdown { max-height: 160px; font-size: 11px; }
         }
 
         @media (max-width: 480px) {
             #top-bar { padding: 4px 6px; gap: 2px; }
             .period-btn { font-size: 8px; padding: 2px 5px; }
-            .search-wrapper input { width: 70px; font-size: 9px; }
             .reload-btn-sm { padding: 2px 5px; font-size: 8px; }
             #viewToggle { font-size: 9px; padding: 3px 6px; }
             .stat-val { font-size: 11px; }
@@ -891,11 +845,6 @@
                     <span id="currentPrice" class="stat-val">---</span>
                 </div>
                 <button class="reload-btn-sm" onclick="forceReloadForecast()" title="Презареди прогнозата">↻</button>
-                <div class="search-wrapper" style="margin-left:4px">
-                    <span class="search-icon">🔍</span>
-                    <input type="text" id="symbolSearch" placeholder="Търси..." oninput="filterSymbols()" onfocus="showSymbolDropdown()">
-                    <div class="symbol-dropdown" id="symbolDropdown"></div>
-                </div>
                 <button id="viewToggle" onclick="toggleView()">📊 Табло</button>
             </div>
         </div>
@@ -928,7 +877,13 @@
 
         <!-- Indicator Tab View (swipeable) -->
         <div id="indicator-view">
-            <div class="iv-header"></div>
+            <div class="iv-header">
+                <div class="iv-search-wrapper">
+                    <span class="search-icon">🔍</span>
+                    <input type="text" id="ivSearch" placeholder="Търси стока..." oninput="ivFilterSymbols(this.value)" onfocus="ivShowResults()">
+                    <div class="iv-search-results" id="ivSearchResults"></div>
+                </div>
+            </div>
 
             <!-- Page dots -->
             <div class="iv-page-indicator">
@@ -936,63 +891,65 @@
                 <div class="iv-page-dot" id="ivDot1"></div>
             </div>
 
-            <div class="iv-pages" id="ivPages" onscroll="onIvPageScroll()">
+            <div class="iv-pages-wrap">
                 <button class="iv-nav-arrow prev" id="ivArrowPrev" onclick="scrollIvPage(-1)">‹</button>
-                <button class="iv-nav-arrow next" id="ivArrowNext" onclick="scrollIvPage(1)">›</button>
-                <!-- Page 1: Показатели -->
-                <div class="iv-page">
-                    <div class="iv-cards">
-                        <div class="iv-card">
-                            <div class="iv-card-title">RSI — Индекс на относителна сила</div>
-                            <div class="iv-card-value neutral" id="ivRsiVal">---</div>
-                            <div class="iv-gauge"><div class="iv-gauge-fill" id="ivRsiGauge" style="width:0%"></div></div>
-                            <div class="iv-meta"><span>Препродаденост 30</span><span>Прекупеност 70</span></div>
-                        </div>
-                        <div class="iv-card">
-                            <div class="iv-card-title">Обем (нормализиран)</div>
-                            <div class="iv-card-value neutral" id="ivVolVal">---</div>
-                            <div class="iv-gauge"><div class="iv-gauge-fill" id="ivVolGauge" style="width:0%"></div></div>
-                            <div class="iv-meta"><span>Мин = 0%</span><span>Макс = 100%</span></div>
-                            <div class="iv-section-label">Гистограма на обема</div>
-                            <div class="iv-hist-bar" id="ivVolHist"></div>
-                        </div>
-                        <div class="iv-card">
-                            <div class="iv-card-title">OBV (нормализиран)</div>
-                            <div class="iv-card-value neutral" id="ivObvVal">---</div>
-                            <div class="iv-gauge"><div class="iv-gauge-fill" id="ivObvGauge" style="width:0%"></div></div>
-                            <div class="iv-meta"><span>Среден = 0%</span><span>Макс = 100%</span></div>
-                            <div style="font-size:10px;color:var(--text-dim);margin-top:2px">OBV мин-макс: <span id="ivObvPctVal">---</span></div>
+                <div class="iv-pages" id="ivPages" onscroll="onIvPageScroll()">
+                    <!-- Page 1: Показатели -->
+                    <div class="iv-page">
+                        <div class="iv-cards">
+                            <div class="iv-card">
+                                <div class="iv-card-title">RSI — Индекс на относителна сила</div>
+                                <div class="iv-card-value neutral" id="ivRsiVal">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="ivRsiGauge" style="width:0%"></div></div>
+                                <div class="iv-meta"><span>Препродаденост 30</span><span>Прекупеност 70</span></div>
+                            </div>
+                            <div class="iv-card">
+                                <div class="iv-card-title">Обем (нормализиран)</div>
+                                <div class="iv-card-value neutral" id="ivVolVal">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="ivVolGauge" style="width:0%"></div></div>
+                                <div class="iv-meta"><span>Мин = 0%</span><span>Макс = 100%</span></div>
+                                <div class="iv-section-label">Гистограма на обема</div>
+                                <div class="iv-hist-bar" id="ivVolHist"></div>
+                            </div>
+                            <div class="iv-card">
+                                <div class="iv-card-title">OBV (нормализиран)</div>
+                                <div class="iv-card-value neutral" id="ivObvVal">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="ivObvGauge" style="width:0%"></div></div>
+                                <div class="iv-meta"><span>Среден = 0%</span><span>Макс = 100%</span></div>
+                                <div style="font-size:10px;color:var(--text-dim);margin-top:2px">OBV мин-макс: <span id="ivObvPctVal">---</span></div>
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <!-- Page 2: Вероятности -->
-                <div class="iv-page">
-                    <div class="iv-assessment">
-                        <div class="iv-card">
-                            <div class="iv-card-title buy">Вероятност за Buy</div>
-                            <div class="iv-card-value neutral" id="ivBuyVal">---</div>
-                            <div class="iv-gauge"><div class="iv-gauge-fill" id="ivBuyGauge" style="width:0%"></div></div>
-                            <div class="iv-assessment-meta">(100 − RSI + OBV) / 2 × V / 100</div>
+                    <!-- Page 2: Вероятности -->
+                    <div class="iv-page">
+                        <div class="iv-model-label" style="margin-bottom:8px">СПОРЕД МОДЕЛ А</div>
+                        <div class="iv-assessment">
+                            <div class="iv-card">
+                                <div class="iv-card-title buy">Вероятност за Buy</div>
+                                <div class="iv-card-value neutral" id="ivBuyVal">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="ivBuyGauge" style="width:0%"></div></div>
+                                <div class="iv-assessment-meta">(100 − RSI + OBV) / 2 × V / 100</div>
+                            </div>
+                            <div class="iv-card">
+                                <div class="iv-card-title sell">Вероятност за Sell</div>
+                                <div class="iv-card-value neutral" id="ivSellVal">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="ivSellGauge" style="width:0%"></div></div>
+                                <div class="iv-assessment-meta">(100 + RSI − OBV) / 2 × V / 100</div>
+                            </div>
                         </div>
-                        <div class="iv-card">
-                            <div class="iv-card-title sell">Вероятност за Sell</div>
-                            <div class="iv-card-value neutral" id="ivSellVal">---</div>
-                            <div class="iv-gauge"><div class="iv-gauge-fill" id="ivSellGauge" style="width:0%"></div></div>
-                            <div class="iv-assessment-meta">(100 + RSI − OBV) / 2 × V / 100</div>
+                        <div class="iv-ratio-bar">
+                            <div class="ratio-buy" id="ratioBuy" style="width:50%"></div>
+                            <div class="ratio-sell" id="ratioSell" style="width:50%"></div>
                         </div>
-                    </div>
-                    <div class="iv-ratio-bar">
-                        <div class="ratio-buy" id="ratioBuy" style="width:50%"></div>
-                        <div class="ratio-sell" id="ratioSell" style="width:50%"></div>
-                    </div>
-                    <div class="iv-ratio-labels">
-                        <span id="ratioBuyLabel">Buy 50%</span>
-                        <span id="ratioSellLabel">Sell 50%</span>
+                        <div class="iv-ratio-labels">
+                            <span id="ratioBuyLabel">Buy 50%</span>
+                            <span id="ratioSellLabel">Sell 50%</span>
+                        </div>
                     </div>
                 </div>
+                <button class="iv-nav-arrow next" id="ivArrowNext" onclick="scrollIvPage(1)">›</button>
             </div>
-            <div class="iv-model-label">СПОРЕД МОДЕЛ А</div>
         </div>
 
     </div>
@@ -1173,7 +1130,6 @@
             });
 
             setupPresentLine();
-            renderSymbolList();
             loadData();
             startRealtimePolling();
 
@@ -1191,100 +1147,11 @@
             chart.timeScale().subscribeVisibleTimeRangeChange(() => drawIndicatorCanvases());
         }
 
-        // Symbol dropdown (replaces sidebar list)
-        function renderSymbolList(filter = '') {
-            const dropdown = document.getElementById('symbolDropdown');
-            dropdown.innerHTML = '';
-
-            const query = filter.toUpperCase().trim();
-            const allSymbols = getFullSymbolList();
-
-            const filtered = allSymbols.filter(s => s.includes(query) || s.replace('USDT', '').includes(query));
-
-            filtered.forEach(sym => {
-                const div = document.createElement('div');
-                div.className = `symbol-item ${sym === currentSymbol ? 'active' : ''}`;
-                div.onclick = () => { selectSymbol(sym); hideSymbolDropdown(); };
-
-                const details = symbolDetails[sym];
-                const displayName = details ? details.name : sym.replace('USDT', '');
-
-                div.innerHTML = `
-                    <span class="symbol-name">${displayName}</span>
-                    <span class="symbol-price">${sym.replace('USDT', '')}</span>
-                `;
-                dropdown.appendChild(div);
-            });
-
-            if (query.length >= 2 && !allSymbols.includes(query) && !allSymbols.includes(query + 'USDT')) {
-                const searchSymbol = query.endsWith('USDT') ? query : query + 'USDT';
-                const addBtn = document.createElement('div');
-                addBtn.className = 'symbol-item search-add-btn';
-                addBtn.onclick = () => { tryAddCustomSymbol(searchSymbol); hideSymbolDropdown(); };
-                addBtn.innerHTML = `
-                    <span style="color: var(--accent-cyan); font-weight: 600; font-size: 12px;">🔍 Намери "${searchSymbol}" в Binance</span>
-                `;
-                dropdown.appendChild(addBtn);
-            }
-
-            dropdown.style.display = filtered.length || (query.length >= 2) ? 'block' : 'none';
-        }
-
-        function filterSymbols() {
-            const val = document.getElementById('symbolSearch').value;
-            renderSymbolList(val);
-        }
-
-        function showSymbolDropdown() {
-            const val = document.getElementById('symbolSearch').value;
-            renderSymbolList(val);
-        }
-
-        function hideSymbolDropdown() {
-            document.getElementById('symbolDropdown').style.display = 'none';
-        }
-
-        document.addEventListener('click', (e) => {
-            const dd = document.getElementById('symbolDropdown');
-            const sw = document.querySelector('.search-wrapper');
-            if (dd && sw && !sw.contains(e.target)) {
-                dd.style.display = 'none';
-            }
-        });
-
-        async function tryAddCustomSymbol(sym) {
-            try {
-                showLoading(true);
-                const res = await fetchKlines(sym, '1h', 10);
-                if (!res.ok) throw new Error("Invalid symbol");
-                const data = await res.json();
-
-                if (data.code === -1121 || (data.msg && data.msg.includes("Invalid symbol"))) {
-                    throw new Error("Невалиден символ");
-                }
-
-                if (!customSymbols.includes(sym)) {
-                    customSymbols.push(sym);
-                    localStorage.setItem('helious_custom_symbols', JSON.stringify(customSymbols));
-                }
-
-                showNotification(`Символът ${sym} е намерен и добавен успешно!`, 'success');
-                document.getElementById('symbolSearch').value = '';
-                selectSymbol(sym);
-            } catch (e) {
-                showNotification(`Индексът "${sym}" не беше намерен в Binance!`, 'error');
-            } finally {
-                showLoading(false);
-            }
-        }
-
         function selectSymbol(sym) {
             currentSymbol = sym;
             latestForecastData = null;
             drawForecast();
             document.getElementById('displaySymbol').innerText = sym.replace('USDT', '') + ' / USDT';
-            document.getElementById('symbolSearch').value = '';
-            hideSymbolDropdown();
             loadData();
             if (ivCurrentSymbol !== sym) {
                 ivCurrentSymbol = sym;
@@ -1590,6 +1457,40 @@
             }
             pages.scrollBy({ left: dir * w, behavior: 'smooth' });
         }
+
+        function ivFilterSymbols(q) {
+            const results = document.getElementById('ivSearchResults');
+            if (!results) return;
+            const query = q.toUpperCase().trim();
+            const all = getFullSymbolList();
+            const filtered = query ? all.filter(s => s.includes(query)) : all.slice(0, 10);
+            results.innerHTML = filtered.map(s =>
+                `<div onclick="ivSelectSymbol('${s}')">${symbolDetails[s] ? symbolDetails[s].name : s.replace('USDT','')} <span style="color:var(--text-dim);font-size:11px">${s}</span></div>`
+            ).join('');
+            results.style.display = filtered.length ? 'block' : 'none';
+        }
+        function ivShowResults() {
+            const inp = document.getElementById('ivSearch');
+            if (inp) ivFilterSymbols(inp.value);
+        }
+        function ivSelectSymbol(sym) {
+            ivCurrentSymbol = sym;
+            const inp = document.getElementById('ivSearch');
+            if (inp) inp.value = symbolDetails[sym] ? symbolDetails[sym].name : sym.replace('USDT', '');
+            const r = document.getElementById('ivSearchResults');
+            if (r) r.style.display = 'none';
+            ivReload();
+            if (currentSymbol !== sym) {
+                currentSymbol = sym;
+                latestForecastData = null;
+                document.getElementById('displaySymbol').innerText = sym.replace('USDT', '') + ' / USDT';
+                loadData();
+            }
+        }
+        document.addEventListener('click', (e) => {
+            const r = document.getElementById('ivSearchResults');
+            if (r && !e.target.closest('.iv-search-wrapper')) r.style.display = 'none';
+        });
 
         async function ivReload() {
             const ivEl = document.getElementById('indicator-view');
