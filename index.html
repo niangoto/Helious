@@ -654,10 +654,10 @@
         }
 
         .iv-model-label {
-            font-size: 9px;
-            font-weight: 600;
+            font-size: 11px;
+            font-weight: 700;
             color: var(--text-dim);
-            opacity: 0.5;
+            opacity: 0.8;
             text-transform: uppercase;
             letter-spacing: 0.5px;
             text-align: center;
@@ -895,15 +895,12 @@
             </div>
 
             <!-- Page dots -->
-            <div class="iv-page-indicator">
-                <div class="iv-page-dot active" id="ivDot0"></div>
-                <div class="iv-page-dot" id="ivDot1"></div>
-            </div>
+            <div class="iv-page-indicator" id="ivPageDots"></div>
 
             <div class="iv-pages-wrap">
                 <button class="iv-nav-arrow prev" id="ivArrowPrev" onclick="scrollIvPage(-1)">‹</button>
                 <div class="iv-pages" id="ivPages" onscroll="onIvPageScroll()">
-                    <!-- Page 1: Показатели -->
+                    <!-- Page 0: Показатели -->
                     <div class="iv-page">
                         <div class="iv-cards">
                             <div class="iv-card">
@@ -930,30 +927,112 @@
                         </div>
                     </div>
 
-                    <!-- Page 2: Вероятности -->
+                    <!-- Page 1: Historical Probability -->
                     <div class="iv-page">
-                        <div class="iv-model-label" style="margin-bottom:8px">СПОРЕД МОДЕЛ А</div>
+                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ B: ИСТОРИЧЕСКА ВЕРОЯТНОСТ</div>
                         <div class="iv-assessment">
                             <div class="iv-card">
                                 <div class="iv-card-title buy">Вероятност за Buy</div>
-                                <div class="iv-card-value neutral" id="ivBuyVal">---</div>
-                                <div class="iv-gauge"><div class="iv-gauge-fill" id="ivBuyGauge" style="width:0%"></div></div>
-                                <div class="iv-assessment-meta">(100 − RSI + OBV) / 2 × V / 100</div>
+                                <div class="iv-card-value neutral" id="modHistBuy">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="modHistBuyGauge" style="width:0%"></div></div>
+                                <div class="iv-assessment-meta">Close > Open → Buy</div>
                             </div>
                             <div class="iv-card">
                                 <div class="iv-card-title sell">Вероятност за Sell</div>
-                                <div class="iv-card-value neutral" id="ivSellVal">---</div>
-                                <div class="iv-gauge"><div class="iv-gauge-fill" id="ivSellGauge" style="width:0%"></div></div>
-                                <div class="iv-assessment-meta">(100 + RSI − OBV) / 2 × V / 100</div>
+                                <div class="iv-card-value neutral" id="modHistSell">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="modHistSellGauge" style="width:0%"></div></div>
+                                <div class="iv-assessment-meta">Close ≤ Open → Sell</div>
                             </div>
                         </div>
-                        <div class="iv-ratio-bar">
-                            <div class="ratio-buy" id="ratioBuy" style="width:50%"></div>
-                            <div class="ratio-sell" id="ratioSell" style="width:50%"></div>
+                        <div class="iv-ratio-bar"><div class="ratio-buy" id="modHistBuyBar" style="width:50%"></div><div class="ratio-sell" id="modHistSellBar" style="width:50%"></div></div>
+                        <div class="iv-ratio-labels"><span id="modHistBuyLbl">Buy 50%</span><span id="modHistSellLbl">Sell 50%</span></div>
+                    </div>
+
+                    <!-- Page 2: Bayesian Probability -->
+                    <div class="iv-page">
+                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ A: БАЙЕСОВА ВЕРОЯТНОСТ</div>
+                        <div class="iv-assessment">
+                            <div class="iv-card">
+                                <div class="iv-card-title buy">Вероятност за Buy</div>
+                                <div class="iv-card-value neutral" id="modBayesBuy">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="modBayesBuyGauge" style="width:0%"></div></div>
+                                <div class="iv-assessment-meta">P(B|Signal) = P(Signal|B) × P(B) / P(Signal)</div>
+                            </div>
+                            <div class="iv-card">
+                                <div class="iv-card-title sell">Вероятност за Sell</div>
+                                <div class="iv-card-value neutral" id="modBayesSell">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="modBayesSellGauge" style="width:0%"></div></div>
+                                <div class="iv-assessment-meta">Апостериорна вероятност</div>
+                            </div>
                         </div>
-                        <div class="iv-ratio-labels">
-                            <span id="ratioBuyLabel">Buy 50%</span>
-                            <span id="ratioSellLabel">Sell 50%</span>
+                        <div class="iv-ratio-bar"><div class="ratio-buy" id="modBayesBuyBar" style="width:50%"></div><div class="ratio-sell" id="modBayesSellBar" style="width:50%"></div></div>
+                        <div class="iv-ratio-labels"><span id="modBayesBuyLbl">Buy 50%</span><span id="modBayesSellLbl">Sell 50%</span></div>
+                    </div>
+
+                    <!-- Page 3: Logistic Regression -->
+                    <div class="iv-page">
+                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ C: ЛОГИСТИЧНА РЕГРЕСИЯ</div>
+                        <div class="iv-assessment">
+                            <div class="iv-card">
+                                <div class="iv-card-title buy">Вероятност за Buy</div>
+                                <div class="iv-card-value neutral" id="modLogBuy">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="modLogBuyGauge" style="width:0%"></div></div>
+                                <div class="iv-assessment-meta">P = 1 / (1 + e^-Z)</div>
+                            </div>
+                            <div class="iv-card">
+                                <div class="iv-card-title sell">Вероятност за Sell</div>
+                                <div class="iv-card-value neutral" id="modLogSell">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="modLogSellGauge" style="width:0%"></div></div>
+                                <div class="iv-assessment-meta">Z = b0 + b1·RSI + b2·MACD + b3·EMA + ...</div>
+                            </div>
+                        </div>
+                        <div class="iv-ratio-bar"><div class="ratio-buy" id="modLogBuyBar" style="width:50%"></div><div class="ratio-sell" id="modLogSellBar" style="width:50%"></div></div>
+                        <div class="iv-ratio-labels"><span id="modLogBuyLbl">Buy 50%</span><span id="modLogSellLbl">Sell 50%</span></div>
+                    </div>
+
+                    <!-- Page 4: Markov Chain -->
+                    <div class="iv-page">
+                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ D: МАРКОВСКА ВЕРИГА</div>
+                        <div class="iv-assessment">
+                            <div class="iv-card">
+                                <div class="iv-card-title buy">Вероятност за Buy</div>
+                                <div class="iv-card-value neutral" id="modMarkovBuy">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="modMarkovBuyGauge" style="width:0%"></div></div>
+                                <div class="iv-assessment-meta">P(B|последна посока)</div>
+                            </div>
+                            <div class="iv-card">
+                                <div class="iv-card-title sell">Вероятност за Sell</div>
+                                <div class="iv-card-value neutral" id="modMarkovSell">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="modMarkovSellGauge" style="width:0%"></div></div>
+                                <div class="iv-assessment-meta">Преходна матрица B↔S</div>
+                            </div>
+                        </div>
+                        <div class="iv-ratio-bar"><div class="ratio-buy" id="modMarkovBuyBar" style="width:50%"></div><div class="ratio-sell" id="modMarkovSellBar" style="width:50%"></div></div>
+                        <div class="iv-ratio-labels"><span id="modMarkovBuyLbl">Buy 50%</span><span id="modMarkovSellLbl">Sell 50%</span></div>
+                    </div>
+
+                    <!-- Page 5: Expected Value -->
+                    <div class="iv-page">
+                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ E: ОЧАКВАНА СТОЙНОСТ</div>
+                        <div class="iv-assessment">
+                            <div class="iv-card">
+                                <div class="iv-card-title buy">Вероятност за Buy</div>
+                                <div class="iv-card-value neutral" id="modEvBuy">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="modEvBuyGauge" style="width:0%"></div></div>
+                                <div class="iv-assessment-meta">EV = WR × Profit − (1−WR) × Loss</div>
+                            </div>
+                            <div class="iv-card">
+                                <div class="iv-card-title sell">Вероятност за Sell</div>
+                                <div class="iv-card-value neutral" id="modEvSell">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="modEvSellGauge" style="width:0%"></div></div>
+                                <div class="iv-assessment-meta">Mat. очакване на сделката</div>
+                            </div>
+                        </div>
+                        <div class="iv-ratio-bar"><div class="ratio-buy" id="modEvBuyBar" style="width:50%"></div><div class="ratio-sell" id="modEvSellBar" style="width:50%"></div></div>
+                        <div class="iv-ratio-labels"><span id="modEvBuyLbl">Buy 50%</span><span id="modEvSellLbl">Sell 50%</span></div>
+                        <div style="margin-top:8px;display:flex;justify-content:space-around;font-size:10px;color:var(--text-dim)">
+                            <span>EV: <span id="modEvVal">---</span></span>
+                            <span>WinRate: <span id="modEvWinRate">---</span></span>
                         </div>
                     </div>
                 </div>
@@ -983,6 +1062,7 @@
     </script>
 
     <script src="forecast.js"></script>
+    <script src="models.js"></script>
     <script>
         const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
         const API_BASE = isLocal ? 'http://localhost:3001' : '';
@@ -1139,6 +1219,16 @@
             });
 
             setupPresentLine();
+            // Build page dots
+            const dotContainer = document.getElementById('ivPageDots');
+            if (dotContainer) {
+                for (let i = 0; i < 6; i++) {
+                    const dot = document.createElement('div');
+                    dot.className = 'iv-page-dot' + (i === 0 ? ' active' : '');
+                    dot.id = 'ivDot' + i;
+                    dotContainer.appendChild(dot);
+                }
+            }
             loadData();
             startRealtimePolling();
 
@@ -1446,15 +1536,19 @@
         function onIvPageScroll() {
             const pages = document.getElementById('ivPages');
             if (!pages) return;
+            const count = 6;
             const idx = Math.round(pages.scrollLeft / pages.clientWidth);
-            for (let i = 0; i < 2; i++) {
+            for (let i = 0; i < count; i++) {
                 const dot = document.getElementById('ivDot' + i);
                 if (dot) dot.classList.toggle('active', i === idx);
             }
             const prev = document.getElementById('ivArrowPrev');
             const next = document.getElementById('ivArrowNext');
             if (prev) prev.style.display = 'flex';
-            if (next) next.textContent = idx === 0 ? '›' : 'B';
+            if (next) {
+                const labels = ['›', '›', '›', '›', '›', 'A'];
+                next.textContent = labels[idx] || '›';
+            }
         }
 
         function scrollIvPage(dir) {
@@ -1464,8 +1558,9 @@
             const idx = Math.round(pages.scrollLeft / w);
             const target = idx + dir;
             if (dir < 0 && target < 0) return;
-            if (dir > 0 && target > 1) {
-                showNotification('Модел B — очаквайте скоро', 'success');
+            const maxPage = 5;
+            if (dir > 0 && target > maxPage) {
+                showNotification('Модел A — активен модел', 'success');
                 return;
             }
             pages.scrollBy({ left: dir * w, behavior: 'smooth' });
@@ -1535,12 +1630,12 @@
                 document.getElementById('ivRsiVal').textContent = '--';
                 document.getElementById('ivVolVal').textContent = '--';
                 document.getElementById('ivObvVal').textContent = '--';
-                document.getElementById('ivBuyVal').textContent = '--';
-                document.getElementById('ivSellVal').textContent = '--';
-                document.getElementById('ratioBuy').style.width = '50%';
-                document.getElementById('ratioSell').style.width = '50%';
-                document.getElementById('ratioBuyLabel').textContent = 'Buy --';
-                document.getElementById('ratioSellLabel').textContent = 'Sell --';
+                ['modHist','modBayes','modLog','modMarkov','modEv'].forEach(p => {
+                    const b = document.getElementById(p + 'Buy');
+                    const s = document.getElementById(p + 'Sell');
+                    if (b) b.textContent = '--';
+                    if (s) s.textContent = '--';
+                });
                 console.error('ivReload error:', e);
             }
             ivEl.style.opacity = '1';
@@ -1602,40 +1697,44 @@
             const obvMinMaxPct = obvMax > obvMin ? ((lastObv - obvMin) / (obvMax - obvMin)) * 100 : 50;
             document.getElementById('ivObvPctVal').textContent = obvMinMaxPct.toFixed(1) + '%';
 
-            // Assessment: Buy = (100 - RSI + OBV)/2 * V/100, Sell = (100 + RSI - OBV)/2 * V/100
-            const buyRaw = ((100 - lastRsi + obvPct) / 2) * (volPct / 100);
-            const sellRaw = ((100 + lastRsi - obvPct) / 2) * (volPct / 100);
-            const buyPct = Math.max(0, Math.min(100, isNaN(buyRaw) ? 0 : buyRaw));
-            const sellPct = Math.max(0, Math.min(100, isNaN(sellRaw) ? 0 : sellRaw));
+            // Compute all probability models
+            const models = computeAllModels(candles);
+            if (models) {
+                const sets = [
+                    { p: 'modHist', m: models.models.historical },
+                    { p: 'modBayes', m: models.models.bayesian },
+                    { p: 'modLog', m: models.models.logistic },
+                    { p: 'modMarkov', m: models.models.markov },
+                    { p: 'modEv', m: models.models.expectedValue }
+                ];
+                sets.forEach(({ p, m }) => {
+                    setModelDisplay(p, m.buyPct, m.sellPct);
+                });
+                const ev = models.models.expectedValue;
+                const evEl = document.getElementById('modEvVal');
+                const wrEl = document.getElementById('modEvWinRate');
+                if (evEl) evEl.textContent = ev.ev ? (ev.ev > 0 ? '+' : '') + ev.ev.toFixed(2) : '---';
+                if (wrEl) wrEl.textContent = ev.winRate ? ev.winRate.toFixed(1) + '%' : '---';
+            }
+        }
 
-            const buyEl = document.getElementById('ivBuyVal');
-            const buyGauge = document.getElementById('ivBuyGauge');
-            buyEl.textContent = buyPct.toFixed(1) + '%';
-            buyEl.className = 'iv-card-value ' + (buyPct > 55 ? 'up' : buyPct < 45 ? 'down' : 'neutral');
-            buyGauge.style.width = buyPct + '%';
-            buyGauge.className = 'iv-gauge-fill ' + (buyPct > 55 ? 'positive' : buyPct < 45 ? 'negative' : 'rsi-mid');
-
-            const sellEl = document.getElementById('ivSellVal');
-            const sellGauge = document.getElementById('ivSellGauge');
-            sellEl.textContent = sellPct.toFixed(1) + '%';
-            sellEl.className = 'iv-card-value ' + (sellPct > 55 ? 'up' : sellPct < 45 ? 'down' : 'neutral');
-            sellGauge.style.width = sellPct + '%';
-            sellGauge.className = 'iv-gauge-fill ' + (sellPct > 55 ? 'positive' : sellPct < 45 ? 'negative' : 'rsi-mid');
-
-            // Ratio bar without volume (pure RSI + OBV)
-            const buyRawRatio = (100 - lastRsi + obvPct) / 2;
-            const sellRawRatio = (100 + lastRsi - obvPct) / 2;
-            const buyRatioPct = Math.max(0, Math.min(100, isNaN(buyRawRatio) ? 0 : buyRawRatio));
-            const sellRatioPct = Math.max(0, Math.min(100, isNaN(sellRawRatio) ? 0 : sellRawRatio));
-            const totalRatio = buyRatioPct + sellRatioPct || 1;
-            const rBuy = (buyRatioPct / totalRatio) * 100;
-            const rSell = (sellRatioPct / totalRatio) * 100;
-
-            document.getElementById('ratioBuy').style.width = rBuy + '%';
-            document.getElementById('ratioSell').style.width = rSell + '%';
-            document.getElementById('ratioBuyLabel').textContent = 'Buy ' + rBuy.toFixed(0) + '%';
-            document.getElementById('ratioSellLabel').textContent = 'Sell ' + rSell.toFixed(0) + '%';
-
+        function setModelDisplay(prefix, buyPct, sellPct) {
+            const bEl = document.getElementById(prefix + 'Buy');
+            const sEl = document.getElementById(prefix + 'Sell');
+            const bGauge = document.getElementById(prefix + 'BuyGauge');
+            const sGauge = document.getElementById(prefix + 'SellGauge');
+            const bBar = document.getElementById(prefix + 'BuyBar');
+            const sBar = document.getElementById(prefix + 'SellBar');
+            const bLbl = document.getElementById(prefix + 'BuyLbl');
+            const sLbl = document.getElementById(prefix + 'SellLbl');
+            if (bEl) { bEl.textContent = buyPct.toFixed(1) + '%'; bEl.className = 'iv-card-value ' + (buyPct > 55 ? 'up' : buyPct < 45 ? 'down' : 'neutral'); }
+            if (sEl) { sEl.textContent = sellPct.toFixed(1) + '%'; sEl.className = 'iv-card-value ' + (sellPct > 55 ? 'up' : sellPct < 45 ? 'down' : 'neutral'); }
+            if (bGauge) bGauge.style.width = buyPct + '%';
+            if (sGauge) sGauge.style.width = sellPct + '%';
+            if (bBar) bBar.style.width = buyPct + '%';
+            if (sBar) sBar.style.width = sellPct + '%';
+            if (bLbl) bLbl.textContent = 'Buy ' + buyPct.toFixed(0) + '%';
+            if (sLbl) sLbl.textContent = 'Sell ' + sellPct.toFixed(0) + '%';
         }
 
         function reRunForecast() {
