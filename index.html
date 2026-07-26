@@ -333,7 +333,7 @@
             flex: 1;
             position: relative;
             background: #06080f;
-            min-height: 0;
+            min-height: 100px;
         }
 
         #chart {
@@ -463,108 +463,64 @@
             display: none;
             flex: 1;
             flex-direction: column;
-            padding: 24px;
             background: var(--panel-bg);
-            overflow-y: auto;
-            gap: 20px;
+            overflow: hidden;
         }
 
         .iv-header {
             display: flex;
-            gap: 16px;
+            gap: 12px;
             align-items: center;
-            margin-bottom: 20px;
+            padding: 16px 20px 0;
             flex-wrap: wrap;
-        }
-
-        .iv-header select {
-            background: rgba(255, 255, 255, 0.04);
-            border: 1px solid var(--panel-border);
-            color: var(--text-main);
-            padding: 10px 14px;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 600;
-            font-family: 'Outfit', sans-serif;
-            cursor: pointer;
-            outline: none;
-            min-width: 160px;
-        }
-
-        .iv-header select:hover {
-            border-color: rgba(0, 240, 255, 0.3);
-        }
-
-        .iv-header select:focus {
-            border-color: var(--accent-cyan);
+            flex-shrink: 0;
         }
 
         .iv-cards {
             display: grid;
             grid-template-columns: repeat(3, 1fr);
-            gap: 16px;
+            gap: 12px;
         }
 
         .iv-card {
             background: rgba(255, 255, 255, 0.02);
             border: 1px solid var(--panel-border);
             border-radius: 12px;
-            padding: 20px;
+            padding: 16px;
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 8px;
             backdrop-filter: blur(8px);
-            transition: all 0.3s;
-        }
-
-        .iv-card:hover {
-            border-color: rgba(0, 240, 255, 0.2);
         }
 
         .iv-card-title {
-            font-size: 11px;
+            font-size: 10px;
             font-weight: 700;
             color: var(--text-dim);
             text-transform: uppercase;
-            letter-spacing: 0.8px;
+            letter-spacing: 0.5px;
         }
 
-        .iv-card-title.buy {
-            color: var(--accent-green);
-        }
-
-        .iv-card-title.sell {
-            color: var(--accent-red);
-        }
+        .iv-card-title.buy { color: var(--accent-green); }
+        .iv-card-title.sell { color: var(--accent-red); }
 
         .iv-card-value {
-            font-size: 32px;
+            font-size: 28px;
             font-weight: 800;
             font-family: 'JetBrains Mono', monospace;
             line-height: 1.1;
         }
 
-        .iv-card-value.up {
-            color: var(--accent-green);
-            text-shadow: 0 0 20px rgba(0, 255, 102, 0.2);
-        }
-
-        .iv-card-value.down {
-            color: var(--accent-red);
-            text-shadow: 0 0 20px rgba(255, 0, 85, 0.2);
-        }
-
-        .iv-card-value.neutral {
-            color: var(--text-main);
-        }
+        .iv-card-value.up { color: var(--accent-green); text-shadow: 0 0 20px rgba(0, 255, 102, 0.2); }
+        .iv-card-value.down { color: var(--accent-red); text-shadow: 0 0 20px rgba(255, 0, 85, 0.2); }
+        .iv-card-value.neutral { color: var(--text-main); }
 
         .iv-gauge {
             width: 100%;
-            height: 6px;
+            height: 5px;
             background: rgba(255, 255, 255, 0.06);
             border-radius: 3px;
             overflow: hidden;
-            margin-top: 4px;
         }
 
         .iv-gauge-fill {
@@ -573,49 +529,33 @@
             transition: width 0.5s ease, background 0.5s ease;
         }
 
-        .iv-gauge-fill.rsi-high {
-            background: var(--accent-red);
-        }
-
-        .iv-gauge-fill.rsi-mid {
-            background: var(--accent-cyan);
-        }
-
-        .iv-gauge-fill.rsi-low {
-            background: var(--accent-green);
-        }
-
-        .iv-gauge-fill.positive {
-            background: var(--accent-green);
-        }
-
-        .iv-gauge-fill.negative {
-            background: var(--accent-red);
-        }
+        .iv-gauge-fill.rsi-high { background: var(--accent-red); }
+        .iv-gauge-fill.rsi-mid { background: var(--accent-cyan); }
+        .iv-gauge-fill.rsi-low { background: var(--accent-green); }
+        .iv-gauge-fill.positive { background: var(--accent-green); }
+        .iv-gauge-fill.negative { background: var(--accent-red); }
 
         .iv-meta {
-            font-size: 11px;
+            font-size: 10px;
             color: var(--text-dim);
-            margin-top: 4px;
             display: flex;
             justify-content: space-between;
         }
 
         .iv-section-label {
-            font-size: 10px;
+            font-size: 9px;
             font-weight: 600;
             color: var(--text-dim);
             letter-spacing: 0.5px;
             text-transform: uppercase;
-            margin: 8px 0 4px;
+            margin: 6px 0 2px;
         }
 
         .iv-hist-bar {
             display: flex;
             align-items: flex-end;
             gap: 2px;
-            height: 40px;
-            margin-top: 6px;
+            height: 32px;
         }
 
         .iv-hist-bar div {
@@ -628,29 +568,22 @@
         .iv-assessment {
             display: grid;
             grid-template-columns: repeat(2, 1fr);
-            gap: 20px;
-            margin-top: 20px;
+            gap: 14px;
         }
 
-        .iv-assessment .iv-card {
-            text-align: center;
-        }
-
-        .iv-assessment .iv-card-value {
-            font-size: 40px;
-        }
+        .iv-assessment .iv-card { text-align: center; }
+        .iv-assessment .iv-card-value { font-size: 36px; }
 
         .iv-assessment-meta {
-            font-size: 11px;
+            font-size: 10px;
             color: var(--text-dim);
-            margin-top: 8px;
-            line-height: 1.5;
+            margin-top: 4px;
+            line-height: 1.4;
         }
 
         .iv-ratio-bar {
-            margin-top: 20px;
-            height: 14px;
-            border-radius: 7px;
+            height: 12px;
+            border-radius: 6px;
             overflow: hidden;
             background: rgba(255, 255, 255, 0.06);
             position: relative;
@@ -677,35 +610,9 @@
         .iv-ratio-labels {
             display: flex;
             justify-content: space-between;
-            font-size: 10px;
+            font-size: 9px;
             font-weight: 600;
             color: var(--text-dim);
-            margin-top: 4px;
-        }
-
-        .iv-bias-bar {
-            margin-top: 16px;
-            height: 16px;
-            border-radius: 8px;
-            overflow: hidden;
-            position: relative;
-            transition: background 0.5s ease;
-        }
-
-        .iv-bias-fill {
-            height: 100%;
-            border-radius: 8px;
-            background: rgba(0, 0, 0, 0.3);
-            transition: width 0.5s ease, margin-left 0.5s ease;
-        }
-
-        .iv-bias-label {
-            text-align: center;
-            font-size: 14px;
-            font-weight: 700;
-            font-family: 'JetBrains Mono', monospace;
-            margin-top: 6px;
-            transition: color 0.5s ease;
         }
 
         .iv-search-wrapper {
@@ -718,24 +625,22 @@
             background: rgba(255, 255, 255, 0.04);
             border: 1px solid var(--panel-border);
             color: var(--text-main);
-            padding: 10px 14px 10px 36px;
+            padding: 9px 12px 9px 32px;
             border-radius: 8px;
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 500;
             font-family: 'Outfit', sans-serif;
             outline: none;
         }
 
-        .iv-search-wrapper input:focus {
-            border-color: var(--accent-cyan);
-        }
+        .iv-search-wrapper input:focus { border-color: var(--accent-cyan); }
 
         .iv-search-wrapper .search-icon {
             position: absolute;
-            left: 12px;
+            left: 10px;
             top: 50%;
             transform: translateY(-50%);
-            font-size: 13px;
+            font-size: 12px;
             color: var(--text-dim);
             pointer-events: none;
         }
@@ -749,27 +654,73 @@
             background: #0d1220;
             border: 1px solid var(--panel-border);
             border-radius: 0 0 8px 8px;
-            max-height: 200px;
+            max-height: 180px;
             overflow-y: auto;
             display: none;
         }
 
         .iv-search-results div {
-            padding: 10px 14px;
+            padding: 9px 12px;
             cursor: pointer;
-            font-size: 13px;
+            font-size: 12px;
             font-weight: 500;
             color: var(--text-main);
             border-bottom: 1px solid rgba(255, 255, 255, 0.04);
         }
 
-        .iv-search-results div:hover {
-            background: rgba(0, 240, 255, 0.08);
-            color: var(--accent-cyan);
+        .iv-search-results div:hover { background: rgba(0, 240, 255, 0.08); color: var(--accent-cyan); }
+        .iv-search-results div:last-child { border-bottom: none; }
+
+        /* Swipeable pages in indicator view */
+        .iv-pages {
+            flex: 1;
+            display: flex;
+            overflow-x: auto;
+            overflow-y: hidden;
+            scroll-snap-type: x mandatory;
+            -webkit-overflow-scrolling: touch;
+            scrollbar-width: none;
         }
 
-        .iv-search-results div:last-child {
-            border-bottom: none;
+        .iv-pages::-webkit-scrollbar { display: none; }
+
+        .iv-page {
+            flex: 0 0 100%;
+            scroll-snap-align: start;
+            overflow-y: auto;
+            padding: 16px 20px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+        }
+
+        .iv-page-indicator {
+            display: flex;
+            justify-content: center;
+            gap: 6px;
+            flex-shrink: 0;
+            padding: 8px 0 4px;
+        }
+
+        .iv-page-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.12);
+            transition: background 0.3s;
+        }
+
+        .iv-page-dot.active { background: var(--accent-cyan); }
+
+        .iv-model-label {
+            font-size: 9px;
+            font-weight: 600;
+            color: var(--text-dim);
+            opacity: 0.5;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            text-align: center;
+            margin-top: 6px;
         }
 
         /* Responsive / App layout */
@@ -805,16 +756,16 @@
             .search-wrapper .search-icon { font-size: 9px; left: 5px; }
             .indicator-canvas-row { height: 35px; }
             #pendulumCanvas { width: 60px; height: 60px; bottom: 6px; right: 6px; }
-            #indicator-view { padding: 10px; gap: 12px; }
-            .iv-cards { grid-template-columns: 1fr; gap: 10px; }
-            .iv-card { padding: 14px; }
-            .iv-card-value { font-size: 26px; }
+            .iv-cards { grid-template-columns: 1fr; gap: 8px; }
+            .iv-card { padding: 12px; }
+            .iv-card-value { font-size: 24px; }
             .iv-assessment { grid-template-columns: 1fr; gap: 10px; }
-            .iv-assessment .iv-card-value { font-size: 32px; }
-            .iv-header { gap: 8px; margin-bottom: 12px; }
-            .iv-search-wrapper input { font-size: 12px; padding: 8px 10px 8px 30px; }
+            .iv-assessment .iv-card-value { font-size: 30px; }
+            .iv-header { padding: 12px 14px 0; }
+            .iv-page { padding: 12px 14px 16px; }
+            .iv-search-wrapper input { font-size: 12px; padding: 7px 10px 7px 28px; }
             .iv-ratio-bar { height: 10px; }
-            .symbol-dropdown { max-height: 180px; font-size: 11px; }
+            .symbol-dropdown { max-height: 160px; font-size: 11px; }
         }
 
         @media (max-width: 480px) {
@@ -824,7 +775,7 @@
             .reload-btn-sm { padding: 2px 5px; font-size: 8px; }
             #viewToggle { font-size: 9px; padding: 3px 6px; }
             .stat-val { font-size: 11px; }
-            .iv-card-value { font-size: 22px; }
+            .iv-card-value { font-size: 20px; }
             .iv-card { padding: 10px; }
             .present-line .label { font-size: 9px; padding: 3px 5px; }
         }
@@ -998,7 +949,7 @@
             </div>
         </div>
 
-        <!-- Indicator Tab View -->
+        <!-- Indicator Tab View (swipeable) -->
         <div id="indicator-view">
             <div class="iv-header">
                 <div class="iv-search-wrapper">
@@ -1007,52 +958,69 @@
                     <div class="iv-search-results" id="ivSearchResults"></div>
                 </div>
             </div>
-            <div class="iv-cards">
-                <div class="iv-card">
-                    <div class="iv-card-title">RSI — Индекс на относителна сила</div>
-                    <div class="iv-card-value neutral" id="ivRsiVal">---</div>
-                    <div class="iv-gauge"><div class="iv-gauge-fill" id="ivRsiGauge" style="width:0%"></div></div>
-                    <div class="iv-meta"><span>Препродаденост 30</span><span>Прекупеност 70</span></div>
+
+            <!-- Page dots -->
+            <div class="iv-page-indicator">
+                <div class="iv-page-dot active" id="ivDot0"></div>
+                <div class="iv-page-dot" id="ivDot1"></div>
+            </div>
+
+            <div class="iv-pages" id="ivPages" onscroll="onIvPageScroll()">
+                <!-- Page 1: Показатели -->
+                <div class="iv-page">
+                    <div class="iv-cards">
+                        <div class="iv-card">
+                            <div class="iv-card-title">RSI — Индекс на относителна сила</div>
+                            <div class="iv-card-value neutral" id="ivRsiVal">---</div>
+                            <div class="iv-gauge"><div class="iv-gauge-fill" id="ivRsiGauge" style="width:0%"></div></div>
+                            <div class="iv-meta"><span>Препродаденост 30</span><span>Прекупеност 70</span></div>
+                        </div>
+                        <div class="iv-card">
+                            <div class="iv-card-title">Обем (нормализиран)</div>
+                            <div class="iv-card-value neutral" id="ivVolVal">---</div>
+                            <div class="iv-gauge"><div class="iv-gauge-fill" id="ivVolGauge" style="width:0%"></div></div>
+                            <div class="iv-meta"><span>Мин = 0%</span><span>Макс = 100%</span></div>
+                            <div class="iv-section-label">Гистограма на обема</div>
+                            <div class="iv-hist-bar" id="ivVolHist"></div>
+                        </div>
+                        <div class="iv-card">
+                            <div class="iv-card-title">OBV (нормализиран)</div>
+                            <div class="iv-card-value neutral" id="ivObvVal">---</div>
+                            <div class="iv-gauge"><div class="iv-gauge-fill" id="ivObvGauge" style="width:0%"></div></div>
+                            <div class="iv-meta"><span>Среден = 0%</span><span>Макс = 100%</span></div>
+                            <div style="font-size:10px;color:var(--text-dim);margin-top:2px">OBV мин-макс: <span id="ivObvPctVal">---</span></div>
+                        </div>
+                    </div>
                 </div>
-                <div class="iv-card">
-                    <div class="iv-card-title">Обем (нормализиран)</div>
-                    <div class="iv-card-value neutral" id="ivVolVal">---</div>
-                    <div class="iv-gauge"><div class="iv-gauge-fill" id="ivVolGauge" style="width:0%"></div></div>
-                    <div class="iv-meta"><span>Мин = 0%</span><span>Макс = 100%</span></div>
-                    <div class="iv-section-label">Гистограма на обема</div>
-                    <div class="iv-hist-bar" id="ivVolHist"></div>
-                </div>
-                <div class="iv-card">
-                    <div class="iv-card-title">OBV (нормализиран)</div>
-                    <div class="iv-card-value neutral" id="ivObvVal">---</div>
-                    <div class="iv-gauge"><div class="iv-gauge-fill" id="ivObvGauge" style="width:0%"></div></div>
-                    <div class="iv-meta"><span>Среден = 0%</span><span>Макс = 100%</span></div>
-                    <div style="font-size:11px;color:var(--text-dim);margin-top:2px">OBV мин-макс: <span id="ivObvPctVal">---</span></div>
+
+                <!-- Page 2: Вероятности -->
+                <div class="iv-page">
+                    <div class="iv-assessment">
+                        <div class="iv-card">
+                            <div class="iv-card-title buy">Вероятност за Buy</div>
+                            <div class="iv-card-value neutral" id="ivBuyVal">---</div>
+                            <div class="iv-gauge"><div class="iv-gauge-fill" id="ivBuyGauge" style="width:0%"></div></div>
+                            <div class="iv-assessment-meta">(100 − RSI + OBV) / 2 × V / 100</div>
+                        </div>
+                        <div class="iv-card">
+                            <div class="iv-card-title sell">Вероятност за Sell</div>
+                            <div class="iv-card-value neutral" id="ivSellVal">---</div>
+                            <div class="iv-gauge"><div class="iv-gauge-fill" id="ivSellGauge" style="width:0%"></div></div>
+                            <div class="iv-assessment-meta">(100 + RSI − OBV) / 2 × V / 100</div>
+                        </div>
+                    </div>
+                    <div class="iv-ratio-bar">
+                        <div class="ratio-buy" id="ratioBuy" style="width:50%"></div>
+                        <div class="ratio-sell" id="ratioSell" style="width:50%"></div>
+                    </div>
+                    <div class="iv-ratio-labels">
+                        <span id="ratioBuyLabel">Buy 50%</span>
+                        <span id="ratioSellLabel">Sell 50%</span>
+                    </div>
+                    <div class="iv-model-label">според модел А</div>
+                    <div style="margin-top:auto;text-align:center;font-size:9px;color:var(--text-dim);opacity:0.4;font-family:'JetBrains Mono',monospace">Helious Quantum v1.0.1</div>
                 </div>
             </div>
-            <div class="iv-assessment">
-                <div class="iv-card">
-                    <div class="iv-card-title buy">Вероятност за Buy</div>
-                    <div class="iv-card-value neutral" id="ivBuyVal">---</div>
-                    <div class="iv-gauge"><div class="iv-gauge-fill" id="ivBuyGauge" style="width:0%"></div></div>
-                    <div class="iv-assessment-meta">(100 − RSI + OBV) / 2 × V / 100</div>
-                </div>
-                <div class="iv-card">
-                    <div class="iv-card-title sell">Вероятност за Sell</div>
-                    <div class="iv-card-value neutral" id="ivSellVal">---</div>
-                    <div class="iv-gauge"><div class="iv-gauge-fill" id="ivSellGauge" style="width:0%"></div></div>
-                    <div class="iv-assessment-meta">(100 + RSI − OBV) / 2 × V / 100</div>
-                </div>
-            </div>
-            <div class="iv-ratio-bar">
-                <div class="ratio-buy" id="ratioBuy" style="width:50%"></div>
-                <div class="ratio-sell" id="ratioSell" style="width:50%"></div>
-            </div>
-            <div class="iv-ratio-labels">
-                <span id="ratioBuyLabel">Buy 50%</span>
-                <span id="ratioSellLabel">Sell 50%</span>
-            </div>
-            <div style="margin-top:12px;text-align:center;font-size:9px;color:var(--text-dim);opacity:0.4;font-family:'JetBrains Mono',monospace">Helious Quantum v1.0.1</div>
         </div>
 
     </div>
@@ -1060,8 +1028,16 @@
     <!-- Floating notifications box -->
     <div id="notification-box"></div>
 
-    <!-- Version -->
+    <!-- Version + Install hint -->
     <div style="position:fixed;right:10px;bottom:10px;z-index:9998;font-size:8px;color:rgba(255,255,255,0.12);font-family:'JetBrains Mono',monospace;pointer-events:none;user-select:none;letter-spacing:0.5px">v1.0.1</div>
+    <div id="installHint" style="position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:9998;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.2);border-radius:8px;padding:8px 16px;font-size:11px;color:var(--accent-cyan);backdrop-filter:blur(8px);display:none;white-space:nowrap;font-family:'Outfit',sans-serif">📲 Инсталирай като приложение</div>
+    <script>
+    // Show install hint on mobile if not in standalone mode
+    if ('serviceWorker' in navigator && !window.matchMedia('(display-mode: standalone)').matches) {
+        const d = document.getElementById('installHint');
+        if (d) { d.style.display = 'block'; setTimeout(() => { d.style.opacity = '0'; d.style.transition = 'opacity 1s'; setTimeout(() => d.remove(), 1000); }, 5000); }
+    }
+    </script>
 
     <script src="forecast.js"></script>
     <script>
@@ -1601,7 +1577,18 @@
                 setTimeout(() => {
                     const c = document.getElementById('chart');
                     chart.resize(c.clientWidth, c.clientHeight);
+                    drawIndicatorCanvases();
                 }, 50);
+            }
+        }
+
+        function onIvPageScroll() {
+            const pages = document.getElementById('ivPages');
+            if (!pages) return;
+            const idx = Math.round(pages.scrollLeft / pages.clientWidth);
+            for (let i = 0; i < 2; i++) {
+                const dot = document.getElementById('ivDot' + i);
+                if (dot) dot.classList.toggle('active', i === idx);
             }
         }
 
