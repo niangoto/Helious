@@ -712,6 +712,40 @@
 
         .iv-page-dot.active { background: var(--accent-cyan); }
 
+        /* Desktop arrows for page navigation */
+        .iv-nav-arrow {
+            display: none;
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            z-index: 5;
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: rgba(13, 18, 30, 0.8);
+            border: 1px solid var(--panel-border);
+            color: var(--accent-cyan);
+            font-size: 14px;
+            cursor: pointer;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.25s;
+        }
+
+        .iv-nav-arrow:hover {
+            background: var(--accent-cyan);
+            color: #06080f;
+            border-color: var(--accent-cyan);
+        }
+
+        .iv-nav-arrow.prev { left: 8px; }
+        .iv-nav-arrow.next { right: 8px; }
+
+        @media (min-width: 769px) {
+            .iv-pages { position: relative; }
+            .iv-nav-arrow { display: flex; }
+        }
+
         .iv-model-label {
             font-size: 9px;
             font-weight: 600;
@@ -893,7 +927,7 @@
         <!-- Top statistics and info bar -->
         <div id="top-bar">
             <div class="title-badge-group">
-                <span id="displaySymbol">BTC / USDT</span>
+                <span id="displaySymbol">BTC / USDT <span style="font-size:9px;font-weight:400;color:var(--text-dim);font-family:'JetBrains Mono',monospace;opacity:0.4">v1.0.1</span></span>
                 <span id="displayInterval"><span class="live-dot"></span>Времеви мащаб: 5m</span>
                 <div class="period-selector" style="margin-top:6px">
                     <button class="period-btn" onclick="changeAnalysisPeriod('5m')">5м</button>
@@ -966,6 +1000,8 @@
             </div>
 
             <div class="iv-pages" id="ivPages" onscroll="onIvPageScroll()">
+                <button class="iv-nav-arrow prev" onclick="scrollIvPage(-1)">‹</button>
+                <button class="iv-nav-arrow next" onclick="scrollIvPage(1)">›</button>
                 <!-- Page 1: Показатели -->
                 <div class="iv-page">
                     <div class="iv-cards">
@@ -1018,7 +1054,6 @@
                         <span id="ratioSellLabel">Sell 50%</span>
                     </div>
                     <div class="iv-model-label">според модел А</div>
-                    <div style="margin-top:auto;text-align:center;font-size:9px;color:var(--text-dim);opacity:0.4;font-family:'JetBrains Mono',monospace">Helious Quantum v1.0.1</div>
                 </div>
             </div>
         </div>
@@ -1028,8 +1063,7 @@
     <!-- Floating notifications box -->
     <div id="notification-box"></div>
 
-    <!-- Version + Install hint -->
-    <div style="position:fixed;right:10px;bottom:10px;z-index:9998;font-size:8px;color:rgba(255,255,255,0.12);font-family:'JetBrains Mono',monospace;pointer-events:none;user-select:none;letter-spacing:0.5px">v1.0.1</div>
+    <!-- Install hint -->
     <div id="installHint" style="position:fixed;left:50%;bottom:20px;transform:translateX(-50%);z-index:9998;background:rgba(0,240,255,0.1);border:1px solid rgba(0,240,255,0.2);border-radius:8px;padding:8px 16px;font-size:11px;color:var(--accent-cyan);backdrop-filter:blur(8px);display:none;white-space:nowrap;font-family:'Outfit',sans-serif">📲 Инсталирай като приложение</div>
     <script>
     // Show install hint on mobile if not in standalone mode
@@ -1590,6 +1624,13 @@
                 const dot = document.getElementById('ivDot' + i);
                 if (dot) dot.classList.toggle('active', i === idx);
             }
+        }
+
+        function scrollIvPage(dir) {
+            const pages = document.getElementById('ivPages');
+            if (!pages) return;
+            const w = pages.clientWidth;
+            pages.scrollBy({ left: dir * w, behavior: 'smooth' });
         }
 
         function ivFilterSymbols(q) {
