@@ -1556,6 +1556,17 @@
             ctx.lineWidth = 2;
             ctx.stroke();
 
+            // Scale labels
+            ctx.fillStyle = 'rgba(255,255,255,0.25)';
+            ctx.font = '9px JetBrains Mono';
+            ctx.textAlign = 'right';
+            ctx.textBaseline = 'middle';
+            const labels = [0, 50, 100];
+            labels.forEach(v => {
+                const y = toY(v);
+                ctx.fillText(v + '%', leftX - 4, y);
+            });
+
             ctx.restore();
         }
 
@@ -1793,12 +1804,15 @@
             const sBar = document.getElementById(prefix + 'SellBar');
             const bLbl = document.getElementById(prefix + 'BuyLbl');
             const sLbl = document.getElementById(prefix + 'SellLbl');
+            const total = buyPct + sellPct || 1;
+            const bNorm = (buyPct / total) * 100;
+            const sNorm = (sellPct / total) * 100;
             if (bEl) { bEl.textContent = buyPct.toFixed(1) + '%'; bEl.className = 'iv-card-value ' + (buyPct > 55 ? 'up' : buyPct < 45 ? 'down' : 'neutral'); }
             if (sEl) { sEl.textContent = sellPct.toFixed(1) + '%'; sEl.className = 'iv-card-value ' + (sellPct > 55 ? 'up' : sellPct < 45 ? 'down' : 'neutral'); }
             if (bGauge) bGauge.style.width = buyPct + '%';
             if (sGauge) sGauge.style.width = sellPct + '%';
-            if (bBar) bBar.style.width = buyPct + '%';
-            if (sBar) sBar.style.width = sellPct + '%';
+            if (bBar) bBar.style.width = bNorm + '%';
+            if (sBar) sBar.style.width = sNorm + '%';
             if (bLbl) bLbl.textContent = 'Buy ' + buyPct.toFixed(0) + '%';
             if (sLbl) sLbl.textContent = 'Sell ' + sellPct.toFixed(0) + '%';
         }
