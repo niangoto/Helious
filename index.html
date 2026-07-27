@@ -1125,24 +1125,21 @@
         };
 
         const symbolDetails = {
-            'PAXGUSDT': { name: 'GOLD (Злато)', desc: 'Физическо Злато Spot' },
-            'BZUSDT': { name: 'BRENT OIL (Петрол)', desc: 'Брент Суров Петрол' },
-            'CLUSDT': { name: 'WTI OIL (Петрол)', desc: 'WTI Суров Петрол' },
             'BTCUSDT': { name: 'BTC (Биткойн)', desc: 'Крипто Лидер' },
             'ETHUSDT': { name: 'ETH (Етериум)', desc: 'Смарт Контракти' },
             'BNBUSDT': { name: 'BNB (Binance)', desc: 'Екосистема на Binance' },
             'SOLUSDT': { name: 'SOL (Солана)', desc: 'Високоскоростна Мрежа' },
-            'ADAUSDT': { name: 'ADA (Cardano)', desc: 'Академичен Блокчейн' },
             'XRPUSDT': { name: 'XRP (Ripple)', desc: 'Междубанкови Плащания' },
+            'ADAUSDT': { name: 'ADA (Cardano)', desc: 'Академичен Блокчейн' },
             'DOTUSDT': { name: 'DOT (Polkadot)', desc: 'Свързани Блокчейни' },
             'AVAXUSDT': { name: 'AVAX (Avalanche)', desc: 'Мащабируем Блокчейн' },
-            'MATICUSDT': { name: 'POL (Polygon)', desc: 'L2 Мащабиране' },
             'LINKUSDT': { name: 'LINK (Chainlink)', desc: 'Децентрализирани Оракули' },
+            'MATICUSDT': { name: 'POL (Polygon)', desc: 'L2 Мащабиране' },
             'LTCUSDT': { name: 'LTC (Litecoin)', desc: 'Дигитално Сребро' },
             'DOGEUSDT': { name: 'DOGE (Dogecoin)', desc: 'Меме Лидер' },
-            'SHIBUSDT': { name: 'SHIB (Shiba Inu)', desc: 'Шиба Екосистема' },
-            'NEARUSDT': { name: 'NEAR (Protocol)', desc: 'Потребителски Web3' },
-            'ATOMUSDT': { name: 'ATOM (Cosmos)', desc: 'Мрежа от Блокчейни' }
+            'PAXGUSDT': { name: 'GOLD (Злато)', desc: 'Физическо Злато' },
+            'BZUSDT': { name: 'BRENT OIL (Петрол)', desc: 'Брент Суров Петрол' },
+            'CLUSDT': { name: 'WTI OIL (Петрол)', desc: 'WTI Суров Петрол' }
         };
 
         const popularSymbols = [
@@ -1647,16 +1644,24 @@
 
         function tryAddCustomSymbol(sym) {
             showLoading(true);
-            fetchKlines(sym, '1h', 10).then(res => {
-                if (res.code === -1121 || res.msg?.includes('Invalid symbol')) throw new Error();
+            // Try exact symbol first, then USDT, then just add anyway
+            const trySym = (s) => fetchKlines(s, '1h', 10).then(() => s).catch(() => null);
+            trySym(sym).then(ok => ok || trySym(sym + 'USDT')).then(found => {
+                const finalSym = found || sym;
+                if (!customSymbols.includes(finalSym)) {
+                    customSymbols.push(finalSym);
+                    localStorage.setItem('helious_custom_symbols', JSON.stringify(customSymbols));
+                }
+                showNotification(`Символът ${finalSym} е добавен!`, 'success');
+                ivSelectSymbol(finalSym);
+            }).catch(() => {
+                // Add anyway if user insists
                 if (!customSymbols.includes(sym)) {
                     customSymbols.push(sym);
                     localStorage.setItem('helious_custom_symbols', JSON.stringify(customSymbols));
                 }
-                showNotification(`Символът ${sym} е добавен!`, 'success');
+                showNotification(`Символът ${sym} е добавен (без Binance проверка)`, 'success');
                 ivSelectSymbol(sym);
-            }).catch(() => {
-                showNotification(`Индексът "${sym}" не е намерен в Binance!`, 'error');
             }).finally(() => showLoading(false));
         }
 
@@ -1669,10 +1674,9 @@
             results.innerHTML = filtered.map(s =>
                 `<div onclick="ivSelectSymbol('${s}')">${symbolDetails[s] ? symbolDetails[s].name : s.replace('USDT','')} <span style="color:var(--text-dim);font-size:11px">${s}</span></div>`
             ).join('');
-            // Allow adding custom symbols from Binance
-            if (query.length >= 2 && !all.includes(query) && !all.includes(query + 'USDT')) {
-                const searchSym = query.endsWith('USDT') ? query : query + 'USDT';
-                results.innerHTML += `<div style="border-top:1px solid rgba(0,240,255,0.2);color:var(--accent-cyan)" onclick="tryAddCustomSymbol('${searchSym}')">🔍 Намери "${searchSym}" в Binance</div>`;
+            // Allow adding custom symbols - search exact user input first
+            if (query.length >= 2 && !all.includes(query) && !all.some(s => s.replace('USDT','') === query.replace('USDT',''))) {
+                results.innerHTML += `<div style="border-top:1px solid rgba(0,240,255,0.2);color:var(--accent-cyan)" onclick="tryAddCustomSymbol('${query}')">🔍 Намери "${query}" в Binance</div>`;
             }
             results.style.display = (filtered.length || query.length >= 2) ? 'block' : 'none';
         }
