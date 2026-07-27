@@ -1666,9 +1666,14 @@
             pages.scrollBy({ left: dir * w, behavior: 'smooth' });
         }
 
-        function tryAddCustomSymbol(sym) {
+        function tryAddCustomSymbol(input) {
+            // Map display name to ticker if possible
+            const upper = input.toUpperCase().trim();
+            let sym = upper;
+            for (const [k, v] of Object.entries(symbolDetails)) {
+                if (v.name.toUpperCase().includes(upper) || k.includes(upper)) { sym = k; break; }
+            }
             showLoading(true);
-            // Try exact symbol first, then USDT, then just add anyway
             const trySym = (s) => fetchKlines(s, '1h', 10).then(() => s).catch(() => null);
             trySym(sym).then(ok => ok || trySym(sym + 'USDT')).then(found => {
                 const finalSym = found || sym;
@@ -1694,7 +1699,11 @@
             if (!results) return;
             const query = q.toUpperCase().trim();
             const all = getFullSymbolList();
-            const filtered = query ? all.filter(s => s.includes(query) || s.replace('USDT', '').includes(query)) : all.slice(0, 15);
+            // Search by ticker and by display name
+            const filtered = all.filter(s => {
+                const displayName = (symbolDetails[s]?.name || s.replace('USDT', '')).toUpperCase();
+                return s.includes(query) || s.replace('USDT', '').includes(query) || displayName.includes(query);
+            }).slice(0, 20);
             results.innerHTML = filtered.map(s =>
                 `<div onclick="ivSelectSymbol('${s}')">${symbolDetails[s] ? symbolDetails[s].name : s.replace('USDT','')} <span style="color:var(--text-dim);font-size:11px">${s}</span></div>`
             ).join('');
