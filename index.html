@@ -1086,7 +1086,7 @@
             if (!r.ok) throw new Error('Symbol not available on Binance Spot API');
             return r.json();
         }
-        let chart, candleSeries, predictionSeries, centerLineSeries, avgProbSeries;
+        let chart, candleSeries, predictionSeries, centerLineSeries;
         let latestForecastData = null;
         let latestCandles = [];
         let indicatorData = { rsi: [], volume: [] };
@@ -1224,16 +1224,6 @@
                 title: 'Център',
                 priceLineVisible: false,
                 lastValueVisible: false
-            });
-
-            avgProbSeries = chart.addLineSeries({
-                color: 'rgba(0, 240, 255, 0.6)',
-                lineWidth: 1,
-                lineStyle: 2,
-                title: 'Средна вероятност',
-                priceLineVisible: false,
-                lastValueVisible: false,
-                priceScaleId: 'left'
             });
 
             setupPresentLine();
@@ -1454,19 +1444,6 @@
                     computeModelProbSequence(candles, 3),
                     computeModelProbSequence(candles, 4)
                 ];
-                if (avgProbSeries && indicatorData.modelProbs[0].length > 0) {
-                    const minLen = Math.min(...indicatorData.modelProbs.map(p => p.length));
-                    const avgData = [];
-                    for (let i = 0; i < minLen; i++) {
-                        let sum = 0, count = 0;
-                        for (let m = 0; m < 5; m++) {
-                            const v = indicatorData.modelProbs[m][i].value;
-                            if (v !== null) { sum += v; count++; }
-                        }
-                        avgData.push({ time: indicatorData.modelProbs[0][i].time, value: count > 0 ? sum / count : 50 });
-                    }
-                    avgProbSeries.setData(avgData);
-                }
             }
             drawIndicatorCanvases();
         }
