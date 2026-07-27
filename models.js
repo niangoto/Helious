@@ -226,3 +226,73 @@ function computeAllModels(candles) {
     }
   };
 }
+
+function computeModelProbSequence(candles, modelIndex) {
+  if (!candles || candles.length < 30) return [];
+  const prices = candles.map(c => c.close);
+  const result = [];
+  const warmup = 20;
+
+  const fullRsi = typeof computeRSI === 'function' ? computeRSI(candles, 14) : prices.map(() => 50);
+  const fullEma20 = computeEMA(prices, 20);
+  const fullEma50 = computeEMA(prices, 50);
+  const fullMacd = computeMACD(prices);
+  const fullAtr = computeATR(candles, 14);
+  const fullAdx = computeADX(candles, 14);
+
+  let bb = 0, bs = 0, sb = 0, ss = 0;
+  let prevBull = candles[0].close >= candles[0].open;
+
+  for (let i = warmup; i < candles.length; i++) {
+    const t = candles[i].time;
+
+    if (modelIndex === 0) {
+      let b = 0, s = 0;
+      for (let j = 0; j <= i; j++) {
+        if (candles[j].close > candles[j].open) b++; else s++;
+      }
+      result.push({ time: t, value: (b / (b + s || 1)) * 100 });
+    } else if (modelIndex === 1) {
+      const rsi = fullRsi[i] || 50;
+      const price = prices[i];
+      const emaSignal = (price - fullEma20[i]) / price;
+      const macdHist = fullMacd.histogram[i] || 0;
+      const atr = fullAtr[i] || 0;
+      const adx = fullAdx.adx[i] || 0;
+      const volNorm = 50;
+      const bayes = computeBayesianProbability(50, rsi, macdHist, emaSignal, atr / price, adx, volNorm);
+      result.push({ time: t, value: bayes.buyPct });
+    } else if (modelIndex === 2) {
+      const rsi = fullRsi[i] || 50;
+      const price = prices[i];
+      const emaSignal = (price - fullEma20[i]) / price;
+      const macdHist = fullMacd.histogram[i] || 0;
+      const atr = fullAtr[i] || 0;
+      const adx = fullAdx.adx[i] || 0;
+      const logReg = computeLogisticRegression(rsi, macdHist, emaSignal, atr / price, adx, 50);
+      result.push({ time: t, value: logReg.buyPct });
+    } else if (modelIndex === 3) {
+      const bull = candles[i].close >= candles[i].open;
+      if (prevBull && bull) bb++;
+      else if (prevBull && !bull) bs++;
+      else if (!prevBull && bull) sb++;
+      else ss++;
+      prevBull = bull;
+      const pBuy = (bb + bs > 0 ? bb / (bb + bs) : 0.5) * (bull ? 1 : 0) + (sb + ss > 0 ? sb / (sb + ss) : 0.5) * (bull ? 0 : 1);
+      result.push({ time: t, value: Math.max(5, Math.min(95, pBuy * 100)) });
+    } else if (modelIndex === 4) {
+      let wins = 0, losses = 0, tp = 0, tl = 0;
+      for (let j = 0; j <= i; j++) {
+        const ch = candles[j].close - candles[j].open;
+        if (ch > 0) { wins++; tp += ch; } else { losses++; tl += Math.abs(ch); }
+      }
+      const wr = wins / (wins + losses || 1);
+      const avgP = wins > 0 ? tp / wins : 0;
+      const avgL = losses > 0 ? tl / losses : 0;
+      const ev = wr * avgP - (1 - wr) * avgL;
+      const maxEV = avgP + avgL || 1;
+      result.push({ time: t, value: Math.max(5, Math.min(95, 50 + Math.max(-1, Math.min(1, ev / maxEV)) * 40)) });
+    }
+  }
+  return result;
+}

@@ -1414,6 +1414,16 @@
                 }
             }
             indicatorData = { rsi, vol, bias };
+            // Pre-compute model probability sequences for chart
+            if (typeof computeModelProbSequence === 'function') {
+                indicatorData.modelProbs = [
+                    computeModelProbSequence(candles, 0),
+                    computeModelProbSequence(candles, 1),
+                    computeModelProbSequence(candles, 2),
+                    computeModelProbSequence(candles, 3),
+                    computeModelProbSequence(candles, 4)
+                ];
+            }
             drawIndicatorCanvases();
         }
 
@@ -1436,6 +1446,47 @@
 
             const d = indicatorData;
             if (!d.rsi.length) return;
+
+            // Model pages (1-5): show historical probability for that model
+            if (currentPage >= 1 && currentPage <= 5 && d.modelProbs && d.modelProbs[currentPage - 1]) {
+                const probData = d.modelProbs[currentPage - 1];
+                const modelNames = ['Историческа', 'Байесова', 'Логистична', 'Марковска', 'Очаквана стойност'];
+                label.textContent = modelNames[currentPage - 1] + ' вероятност';
+
+                let range = chart.timeScale().getVisibleRange();
+                if (!range && probData.length > 1) range = { from: probData[0].time, to: probData[probData.length - 1].time };
+                if (!range) return;
+
+                const vis = probData.filter(p => p.time >= range.from && p.time <= range.to && p.value !== null);
+                if (vis.length < 2) return;
+                const pts = vis.map(p => ({ x: chart.timeScale().timeToCoordinate(p.time), y: p.value })).filter(p => p.x !== null);
+                if (pts.length < 2) return;
+
+                // Fixed 0-100 range for probability
+                const toY = (v) => h - (v / 100) * (h - 8) - 4;
+
+                // Background zones: green top half, red bottom half
+                const midY = toY(50);
+                ctx.fillStyle = 'rgba(0,255,102,0.06)';
+                ctx.fillRect(0, 0, w, midY);
+                ctx.fillStyle = 'rgba(255,0,85,0.06)';
+                ctx.fillRect(0, midY, w, h - midY);
+
+                // 50% line
+                ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(w, midY);
+                ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]);
+
+                // Probability line
+                ctx.beginPath();
+                pts.forEach((p, i) => { if (i === 0) ctx.moveTo(p.x, toY(p.y)); else ctx.lineTo(p.x, toY(p.y)); });
+                ctx.strokeStyle = '#ff3344';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                return;
+            }
+
+            // Page 0: cycle through RSI / Volume / Bias
             const datasets = [
                 { data: d.rsi, color: '#b450ff', overlay: [{ val: 70, c: 'rgba(255,0,85,0.5)' }, { val: 30, c: 'rgba(0,255,102,0.5)' }], label: 'RSI' },
                 { data: d.vol, color: '#26a69a', overlay: null, label: 'Обем' },
