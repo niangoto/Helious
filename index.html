@@ -301,15 +301,15 @@
             border-top: 1px solid var(--panel-border);
             z-index: 10;
             flex-shrink: 0;
-            height: 220px;
+            height: auto;
+            min-height: 0;
         }
 
         .indicator-canvas-row {
-            flex: 1;
-            border-bottom: 1px solid var(--panel-border);
+            height: 55px;
             position: relative;
             overflow: hidden;
-            min-height: 0;
+            border-bottom: none;
         }
 
         .indicator-canvas-row:last-child {
@@ -692,7 +692,7 @@
             }
             .stat-group { padding: 3px 8px; }
             .stat-label { font-size: 8px; }
-            .indicator-canvas-row { flex: 1; }
+            .indicator-canvas-row { height: 40px; }
             #pendulumCanvas { width: 60px; height: 60px; bottom: 6px; right: 6px; }
             .iv-cards { grid-template-columns: 1fr; gap: 8px; }
             .iv-card { padding: 12px; }
@@ -705,7 +705,7 @@
         }
 
         @media (max-width: 768px) {
-            #indicator-canvases { height: 140px; }
+            #indicator-canvases { height: auto; }
         }
         }
 
@@ -867,24 +867,13 @@
                     <div class="label" id="presentLineLabel">СЕГА</div>
                 </div>
             </div>
-            <!-- Canvas Indicator Panels -->
+            <!-- Dynamic Indicator Panel -->
             <div id="indicator-canvases">
-                <div class="indicator-canvas-row">
-                    <span class="indicator-canvas-label">RSI</span>
-                    <canvas id="canvas-rsi"></canvas>
+                <div class="indicator-canvas-row" id="chartIndicatorRow" onclick="cycleIndicator()" style="cursor:pointer">
+                    <span class="indicator-canvas-label" id="chartIndicatorLabel">RSI</span>
+                    <canvas id="chartIndicatorCanvas"></canvas>
                 </div>
-                <div class="indicator-canvas-row">
-                    <span class="indicator-canvas-label">Обем</span>
-                    <canvas id="canvas-volume"></canvas>
-                </div>
-                <div class="indicator-canvas-row">
-                    <span class="indicator-canvas-label">Bias</span>
-                    <canvas id="canvas-bias"></canvas>
-                </div>
-                <div class="indicator-canvas-row">
-                    <span class="indicator-canvas-label">Buy Signal</span>
-                    <canvas id="canvas-prob"></canvas>
-                </div>
+            </div>
             </div>
         </div>
 
@@ -1430,94 +1419,155 @@
                     const bBuy = (100 - rsiVals[i - period] + oNorm) / 2;
                     const bSell = (100 + rsiVals[i - period] - oNorm) / 2;
                     bias.push({ time: t, value: (bBuy / (bBuy + bSell || 1)) * 100 });
-                    // Buy signal: 0 = Sell 100%, 100 = Buy 100%
-                    const raw = (100 - rsiVals[i - period] + oNorm) / 2;
-                    prob.push({ time: t, value: Math.max(0, Math.min(100, raw)) });
                 }
             }
-            indicatorData = { rsi, vol, bias, prob };
+            indicatorData = { rsi, vol, bias };
             drawIndicatorCanvases();
         }
 
         function drawIndicatorCanvases() {
-            const d = indicatorData;
-            if (!d.rsi.length) return;
+            const cvs = document.getElementById('chartIndicatorCanvas');
+            const label = document.getElementById('chartIndicatorLabel');
+            if (!cvs || !label) return;
+            const parent = cvs.parentElement;
+            const w = parent.clientWidth;
+            const h = parent.clientHeight;
+            if (w <= 0 || h <= 0) return;
             const dpr = window.devicePixelRatio || 1;
-            let range = chart.timeScale().getVisibleRange();
-            if (!range && d.rsi.length > 1) {
-                range = { from: d.rsi[0].time, to: d.rsi[d.rsi.length - 1].time };
-            }
-            if (!range) return;
-            const rows = [
-                { id: 'canvas-rsi', data: d.rsi, color: '#b450ff', overlay: [{ val: 70, c: 'rgba(255,0,85,0.5)' }, { val: 30, c: 'rgba(0,255,102,0.5)' }] },
-                { id: 'canvas-volume', data: d.vol, color: '#26a69a' },
-                { id: 'canvas-bias', data: d.bias, color: '#ffd700', overlay: [{ val: 50, c: 'rgba(255,255,255,0.2)' }] },
-                { id: 'canvas-prob', data: d.prob, color: '#ff3344', overlay: [{ val: 50, c: 'rgba(255,255,255,0.15)' }, { val: 100, c: 'rgba(0,255,102,0.12)' }, { val: 0, c: 'rgba(255,0,85,0.12)' }] }
-            ];
-            rows.forEach(({ id, data, color, overlay }) => {
-                const cvs = document.getElementById(id);
-                if (!cvs) return;
-                const parent = cvs.parentElement;
-                const w = parent.clientWidth;
-                const h = parent.clientHeight;
-                if (w <= 0 || h <= 0) return;
-                cvs.width = w * dpr;
-                cvs.height = h * dpr;
-                cvs.style.width = w + 'px';
-                cvs.style.height = h + 'px';
-                const ctx = cvs.getContext('2d');
-                ctx.scale(dpr, dpr);
-                ctx.clearRect(0, 0, w, h);
-                const vis = data.filter(p => p.time >= range.from && p.time <= range.to && p.value !== null);
+            cvs.width = w * dpr;
+            cvs.height = h * dpr;
+            cvs.style.width = w + 'px';
+            cvs.style.height = h + 'px';
+            const ctx = cvs.getContext('2d');
+            ctx.scale(dpr, dpr);
+            ctx.clearRect(0, 0, w, h);
+
+            if (currentPage === 0) {
+                // Page 0: cycle through RSI / Volume / Bias
+                const d = indicatorData;
+                if (!d.rsi.length) return;
+                const datasets = [
+                    { data: d.rsi, color: '#b450ff', overlay: [{ val: 70, c: 'rgba(255,0,85,0.5)' }, { val: 30, c: 'rgba(0,255,102,0.5)' }], label: 'RSI' },
+                    { data: d.vol, color: '#26a69a', overlay: null, label: 'Обем' },
+                    { data: d.bias, color: '#ffd700', overlay: [{ val: 50, c: 'rgba(255,255,255,0.2)' }], label: 'Bias' }
+                ];
+                const sel = datasets[indicatorCycle];
+                label.textContent = sel.label + ' (клик за смяна)';
+
+                let range = chart.timeScale().getVisibleRange();
+                if (!range && sel.data.length > 1) range = { from: sel.data[0].time, to: sel.data[sel.data.length - 1].time };
+                if (!range) return;
+
+                const vis = sel.data.filter(p => p.time >= range.from && p.time <= range.to && p.value !== null);
                 if (vis.length < 2) return;
                 const pts = vis.map(p => ({ x: chart.timeScale().timeToCoordinate(p.time), y: p.value })).filter(p => p.x !== null);
                 if (pts.length < 2) return;
+
                 let minY = Infinity, maxY = -Infinity;
                 vis.forEach(p => { if (p.value < minY) minY = p.value; if (p.value > maxY) maxY = p.value; });
                 if (maxY === minY) { minY -= 1; maxY += 1; }
                 const pad = (maxY - minY) * 0.1;
-                minY -= pad;
-                maxY += pad;
+                minY -= pad; maxY += pad;
                 const toY = (v) => h - ((v - minY) / (maxY - minY)) * (h - 8) - 4;
-                if (overlay) {
-                    overlay.forEach(({ val, c }) => {
+
+                if (sel.overlay) {
+                    sel.overlay.forEach(({ val, c }) => {
                         const y = toY(val);
-                        if (y >= 0 && y <= h) {
-                            ctx.beginPath();
-                            ctx.moveTo(0, y);
-                            ctx.lineTo(w, y);
-                            ctx.strokeStyle = c;
-                            ctx.lineWidth = 1;
-                            ctx.setLineDash([4, 4]);
-                            ctx.stroke();
-                            ctx.setLineDash([]);
-                        }
+                        if (y >= 0 && y <= h) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.strokeStyle = c; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]); }
                     });
                 }
-                if (id === 'canvas-volume') {
+
+                if (indicatorCycle === 1) {
                     const bw = Math.max(1, (pts[1].x - pts[0].x) * 0.7);
                     const zero = toY(0);
                     pts.forEach(p => {
                         const y0 = Math.min(toY(p.y), zero);
                         const bh = Math.max(1, Math.abs(toY(p.y) - zero));
-                        ctx.fillStyle = color;
+                        ctx.fillStyle = sel.color;
                         ctx.fillRect(p.x - bw / 2, y0, bw, bh);
                     });
                 } else {
                     ctx.beginPath();
-                    pts.forEach((p, i) => {
-                        if (i === 0) ctx.moveTo(p.x, toY(p.y));
-                        else ctx.lineTo(p.x, toY(p.y));
-                    });
-                    ctx.strokeStyle = color;
+                    pts.forEach((p, i) => { if (i === 0) ctx.moveTo(p.x, toY(p.y)); else ctx.lineTo(p.x, toY(p.y)); });
+                    ctx.strokeStyle = sel.color;
                     ctx.lineWidth = 1.5;
                     ctx.stroke();
                 }
-            });
+            } else if (currentPage >= 1 && currentPage <= 5) {
+                // Model pages: show probability gauge for that model
+                const mi = currentPage - 1;
+                const prefix = MODEL_PREFIXES[mi];
+                const bEl = document.getElementById(prefix + 'Buy');
+                const sEl = document.getElementById(prefix + 'Sell');
+                const buyTxt = bEl ? bEl.textContent : '--%';
+                const sellTxt = sEl ? sEl.textContent : '--%';
+                label.textContent = MODEL_NAMES[mi] + ' вероятност';
+
+                // Draw a centered gauge
+                const gw = Math.max(60, w - 40);
+                const gx = (w - gw) / 2;
+                const gy = 8;
+                const gh = h - 16;
+
+                // Background
+                ctx.fillStyle = 'rgba(255,255,255,0.04)';
+                ctx.beginPath();
+                ctx.roundRect(gx, gy, gw, gh, gh / 2);
+                ctx.fill();
+
+                // Parse buy %
+                const buyVal = parseFloat(buyTxt) || 50;
+                const sellVal = parseFloat(sellTxt) || 50;
+                const total = buyVal + sellVal || 1;
+                const buyFrac = buyVal / total;
+
+                // Buy fill (left to center)
+                const buyW = buyFrac * gw;
+                if (buyW > 0) {
+                    ctx.fillStyle = 'var(--accent-green)';
+                    ctx.beginPath();
+                    ctx.roundRect(gx, gy, buyW, gh, [gh / 2, 0, 0, gh / 2]);
+                    ctx.fill();
+                }
+
+                // Sell fill (right to center)
+                const sellW = (1 - buyFrac) * gw;
+                if (sellW > 0) {
+                    ctx.fillStyle = 'var(--accent-red)';
+                    ctx.beginPath();
+                    ctx.roundRect(gx + buyW, gy, sellW, gh, [0, gh / 2, gh / 2, 0]);
+                    ctx.fill();
+                }
+
+                // Center divider
+                ctx.fillStyle = 'rgba(255,255,255,0.3)';
+                ctx.fillRect(gx + buyW - 0.5, gy, 1, gh);
+
+                // Labels
+                ctx.fillStyle = '#00ff66';
+                ctx.font = Math.max(9, Math.min(13, h * 0.3)) + 'px JetBrains Mono';
+                ctx.textAlign = 'left';
+                ctx.fillText(buyTxt, gx + 4, gy + gh / 2 + 4);
+                ctx.fillStyle = '#ff0055';
+                ctx.textAlign = 'right';
+                ctx.fillText(sellTxt, gx + gw - 4, gy + gh / 2 + 4);
+            }
+        }
+
+        function cycleIndicator() {
+            if (currentPage === 0) {
+                indicatorCycle = (indicatorCycle + 1) % 3;
+                drawIndicatorCanvases();
+            }
         }
 
         let ivDataCache = null;
         let ivCurrentSymbol = 'BTCUSDT';
+        let currentPage = 0;
+        let indicatorCycle = 0;
+        const INDICATOR_NAMES = ['RSI', 'Обем', 'Bias'];
+        const MODEL_PREFIXES = ['modHist', 'modBayes', 'modLog', 'modMarkov', 'modEv'];
+        const MODEL_NAMES = ['ИСТОРИЧЕСКА', 'БАЙЕСОВА', 'ЛОГИСТИЧНА', 'МАРКОВСКА', 'ОЧАКВАНА СТОЙНОСТ'];
 
         function toggleView() {
             const chartView = document.getElementById('chart-view');
@@ -1548,6 +1598,7 @@
             if (!pages) return;
             const count = 6;
             const idx = Math.round(pages.scrollLeft / pages.clientWidth);
+            currentPage = idx;
             for (let i = 0; i < count; i++) {
                 const dot = document.getElementById('ivDot' + i);
                 if (dot) dot.classList.toggle('active', i === idx);
