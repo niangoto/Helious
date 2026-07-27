@@ -302,11 +302,11 @@
             border-top: 1px solid var(--panel-border);
             z-index: 10;
             flex-shrink: 0;
-            height: auto;
+            height: 120px;
         }
 
         .indicator-canvas-row {
-            height: 55px;
+            height: 120px;
             position: relative;
             overflow: hidden;
         }
@@ -687,7 +687,7 @@
             }
             .stat-group { padding: 3px 8px; }
             .stat-label { font-size: 8px; }
-            .indicator-canvas-row { height: 40px; }
+            .indicator-canvas-row { height: 80px; }
             #pendulumCanvas { width: 60px; height: 60px; bottom: 6px; right: 6px; }
             .iv-cards { grid-template-columns: 1fr; gap: 8px; }
             .iv-card { padding: 12px; }
@@ -864,7 +864,7 @@
             </div>
             <!-- Canvas Indicator Panels -->
             <div id="indicator-canvases">
-                <div class="indicator-canvas-row" id="chartIndicatorRow" onclick="cycleIndicator()" style="cursor:pointer">
+                <div class="indicator-canvas-row" id="chartIndicatorRow">
                     <span class="indicator-canvas-label" id="chartIndicatorLabel">RSI</span>
                     <canvas id="chartIndicatorCanvas"></canvas>
                 </div>
@@ -1486,54 +1486,65 @@
                 return;
             }
 
-            // Page 0: cycle through RSI / Volume / Bias
-            const datasets = [
-                { data: d.rsi, color: '#b450ff', overlay: [{ val: 70, c: 'rgba(255,0,85,0.5)' }, { val: 30, c: 'rgba(0,255,102,0.5)' }], label: 'RSI' },
-                { data: d.vol, color: '#26a69a', overlay: null, label: 'Обем' },
-                { data: d.bias, color: '#ffd700', overlay: [{ val: 50, c: 'rgba(255,255,255,0.2)' }], label: 'Bias' }
-            ];
-            const sel = datasets[indicatorCycle];
-            label.textContent = sel.label + ' (клик за смяна)';
+            // Page 0: average probability from all models
+            if (currentPage === 0 && d.modelProbs && d.modelProbs.length > 0) {
+                label.textContent = 'Средна вероятност (5 модела)';
 
+                // Average all model probabilities
+                const avgData = [];
+                const minLen = Math.min(...d.modelProbs.map(p => p.length));
+                for (let i = 0; i < minLen; i++) {
+                    let sum = 0, count = 0;
+                    for (let m = 0; m < 5; m++) {
+                        const v = d.modelProbs[m][i].value;
+                        if (v !== null) { sum += v; count++; }
+                    }
+                    avgData.push({ time: d.modelProbs[0][i].time, value: count > 0 ? sum / count : 50 });
+                }
+
+                drawProbLine(ctx, w, h, avgData);
+                return;
+            }
+
+            // Model pages (1-5): show historical probability for that model
+            if (currentPage >= 1 && currentPage <= 5 && d.modelProbs && d.modelProbs[currentPage - 1]) {
+                const probData = d.modelProbs[currentPage - 1];
+                const modelNames = ['Историческа', 'Байесова', 'Логистична', 'Марковска', 'Очаквана стойност'];
+                label.textContent = modelNames[currentPage - 1] + ' вероятност';
+                drawProbLine(ctx, w, h, probData);
+                return;
+            }
+        }
+
+        function drawProbLine(ctx, w, h, probData) {
             let range = chart.timeScale().getVisibleRange();
-            if (!range && sel.data.length > 1) range = { from: sel.data[0].time, to: sel.data[sel.data.length - 1].time };
+            if (!range && probData.length > 1) range = { from: probData[0].time, to: probData[probData.length - 1].time };
             if (!range) return;
 
-            const vis = sel.data.filter(p => p.time >= range.from && p.time <= range.to && p.value !== null);
+            const vis = probData.filter(p => p.time >= range.from && p.time <= range.to && p.value !== null);
             if (vis.length < 2) return;
             const pts = vis.map(p => ({ x: chart.timeScale().timeToCoordinate(p.time), y: p.value })).filter(p => p.x !== null);
             if (pts.length < 2) return;
 
-            let minY = Infinity, maxY = -Infinity;
-            vis.forEach(p => { if (p.value < minY) minY = p.value; if (p.value > maxY) maxY = p.value; });
-            if (maxY === minY) { minY -= 1; maxY += 1; }
-            const pad = (maxY - minY) * 0.1;
-            minY -= pad; maxY += pad;
-            const toY = (v) => h - ((v - minY) / (maxY - minY)) * (h - 8) - 4;
+            const toY = (v) => h - (v / 100) * (h - 8) - 4;
+            const midY = toY(50);
 
-            if (sel.overlay) {
-                sel.overlay.forEach(({ val, c }) => {
-                    const y = toY(val);
-                    if (y >= 0 && y <= h) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.strokeStyle = c; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]); }
-                });
-            }
+            // Background zones
+            ctx.fillStyle = 'rgba(0,255,102,0.06)';
+            ctx.fillRect(0, 0, w, midY);
+            ctx.fillStyle = 'rgba(255,0,85,0.06)';
+            ctx.fillRect(0, midY, w, h - midY);
 
-            if (indicatorCycle === 1) {
-                const bw = Math.max(1, (pts[1].x - pts[0].x) * 0.7);
-                const zero = toY(0);
-                pts.forEach(p => {
-                    const y0 = Math.min(toY(p.y), zero);
-                    const bh = Math.max(1, Math.abs(toY(p.y) - zero));
-                    ctx.fillStyle = sel.color;
-                    ctx.fillRect(p.x - bw / 2, y0, bw, bh);
-                });
-            } else {
-                ctx.beginPath();
-                pts.forEach((p, i) => { if (i === 0) ctx.moveTo(p.x, toY(p.y)); else ctx.lineTo(p.x, toY(p.y)); });
-                ctx.strokeStyle = sel.color;
-                ctx.lineWidth = 1.5;
-                ctx.stroke();
-            }
+            // 50% line
+            ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(w, midY);
+            ctx.strokeStyle = 'rgba(255,255,255,0.15)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]);
+
+            // Probability line
+            ctx.beginPath();
+            pts.forEach((p, i) => { if (i === 0) ctx.moveTo(p.x, toY(p.y)); else ctx.lineTo(p.x, toY(p.y)); });
+            ctx.strokeStyle = '#ff3344';
+            ctx.lineWidth = 2;
+            ctx.stroke();
         }
 
         function cycleIndicator() {
