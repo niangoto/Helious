@@ -1077,6 +1077,16 @@
         const BINANCE_SPOT = 'https://api.binance.com';
         const BINANCE_FUTURES = 'https://fapi.binance.com';
 
+        const YAHOO_SYMBOLS = {
+            'CAC': '^FCHI', 'CAC40': '^FCHI', 'DAX': '^GDAXI', 'DAX40': '^GDAXI',
+            'NDX': '^NDX', 'NAS100': '^NDX', 'SPX': '^GSPC', 'SP500': '^GSPC',
+            'DJI': '^DJI', 'DOW': '^DJI',
+            'USDCHF': 'USDCHF=X', 'EURUSD': 'EURUSD=X', 'GBPUSD': 'GBPUSD=X',
+            'USDJPY': 'USDJPY=X', 'EURJPY': 'EURJPY=X', 'GBPJPY': 'GBPJPY=X',
+            'XAUUSD': 'GC=F', 'XAGUSD': 'SI=F', 'GOLD': 'GC=F', 'SILVER': 'SI=F',
+            'WTI': 'CL=F', 'OIL': 'CL=F', 'BRENT': 'BZ=F', 'BZ': 'BZ=F'
+        };
+
         async function fetchKlines(symbol, interval, limit) {
             if (API_BASE) {
                 // Try Binance first, then Yahoo Finance
@@ -1084,7 +1094,8 @@
                 if (binance && Array.isArray(binance) && binance.length > 0) return binance;
                 if (binance && binance.error) throw new Error(binance.error);
                 // Fallback to Yahoo Finance
-                const yahoo = await fetch(`${API_BASE}/yahoo?symbol=${symbol}&interval=${interval}`).then(r => r.json()).catch(() => null);
+                const yhSym = YAHOO_SYMBOLS[symbol.toUpperCase()] || symbol;
+                const yahoo = await fetch(`${API_BASE}/yahoo?symbol=${encodeURIComponent(yhSym)}&interval=${interval}`).then(r => r.json()).catch(() => null);
                 if (yahoo && Array.isArray(yahoo) && yahoo.length > 0) return yahoo;
                 throw new Error('Няма данни за ' + symbol);
             }
@@ -1095,7 +1106,8 @@
             if (r.ok) return r.json();
             // Try Yahoo (may fail due to CORS)
             try {
-                const yh = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=1y&includePrePost=false`);
+                const yhSym = YAHOO_SYMBOLS[symbol.toUpperCase()] || symbol;
+                const yh = await fetch(`https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(yhSym)}?interval=${interval}&range=1y&includePrePost=false`);
                 if (yh.ok) {
                     const parsed = await yh.json();
                     const result = parsed.chart?.result?.[0];
@@ -1687,6 +1699,8 @@
             for (const [k, v] of Object.entries(symbolDetails)) {
                 if (v.name.toUpperCase().includes(upper) || k.includes(upper)) { sym = k; break; }
             }
+            // Also check Yahoo symbol mapping
+            if (YAHOO_SYMBOLS[upper]) sym = upper;
             showLoading(true);
             const trySym = (s) => fetchKlines(s, '1h', 10).then(() => s).catch(() => null);
             trySym(sym).then(ok => ok || trySym(sym + 'USDT')).then(found => {

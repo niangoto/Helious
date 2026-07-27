@@ -93,7 +93,19 @@ const server = http.createServer((req, res) => {
 
   // Yahoo Finance Proxy Endpoint (for indices, forex, stocks)
   if (url.pathname === '/yahoo' && req.method === 'GET') {
-    const symbol = url.searchParams.get('symbol') || '^GSPC';
+    let symbol = url.searchParams.get('symbol') || '^GSPC';
+    // Symbol mapping for common indices/forex
+    const yahooMap = {
+      'CAC': '^FCHI', 'CAC40': '^FCHI', 'DAX': '^GDAXI', 'DAX40': '^GDAXI',
+      'NDX': '^NDX', 'NAS100': '^NDX', 'SPX': '^GSPC', 'SP500': '^GSPC',
+      'DJI': '^DJI', 'DOW': '^DJI',
+      'USDCHF': 'USDCHF=X', 'EURUSD': 'EURUSD=X', 'GBPUSD': 'GBPUSD=X',
+      'USDJPY': 'USDJPY=X', 'EURJPY': 'EURJPY=X', 'GBPJPY': 'GBPJPY=X',
+      'XAUUSD': 'GC=F', 'XAGUSD': 'SI=F', 'GOLD': 'GC=F', 'SILVER': 'SI=F',
+      'WTI': 'CL=F', 'OIL': 'CL=F', 'BRENT': 'BZ=F'
+    };
+    const mapped = yahooMap[symbol.toUpperCase()];
+    if (mapped) symbol = mapped;
     const interval = url.searchParams.get('interval') || '1d';
     const range = interval === '1d' ? '1y' : interval === '5m' ? '1mo' : interval === '1h' ? '6mo' : interval === '1wk' ? '5y' : '2y';
     const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&includePrePost=false`;
