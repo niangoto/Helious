@@ -914,28 +914,7 @@
                         </div>
                     </div>
 
-                    <!-- Page 1: Average Probability -->
-                    <div class="iv-page">
-                        <div class="iv-model-label" style="margin-bottom:8px">СРЕДНА ВЕРОЯТНОСТ (5 МОДЕЛА)</div>
-                        <div class="iv-assessment" id="avgProbAssessment">
-                            <div class="iv-card">
-                                <div class="iv-card-title buy">Вероятност за Buy</div>
-                                <div class="iv-card-value neutral" id="avgBuy">---</div>
-                                <div class="iv-gauge"><div class="iv-gauge-fill" id="avgBuyGauge" style="width:0%"></div></div>
-                                <div class="iv-assessment-meta">Средно от 5-те модела</div>
-                            </div>
-                            <div class="iv-card">
-                                <div class="iv-card-title sell">Вероятност за Sell</div>
-                                <div class="iv-card-value neutral" id="avgSell">---</div>
-                                <div class="iv-gauge"><div class="iv-gauge-fill" id="avgSellGauge" style="width:0%"></div></div>
-                                <div class="iv-assessment-meta">100% − Средна Buy вероятност</div>
-                            </div>
-                        </div>
-                        <div class="iv-ratio-bar"><div class="ratio-buy" id="avgBuyBar" style="width:50%"></div><div class="ratio-sell" id="avgSellBar" style="width:50%"></div></div>
-                        <div class="iv-ratio-labels"><span id="avgBuyLbl">Buy 50%</span><span id="avgSellLbl">Sell 50%</span></div>
-                    </div>
-
-                    <!-- Page 2: Historical Probability -->
+                    <!-- Page 1: Historical Probability -->
                     <div class="iv-page">
                         <div class="iv-model-label" style="margin-bottom:8px">ИСТОРИЧЕСКА ВЕРОЯТНОСТ</div>
                         <div class="iv-assessment">
@@ -1230,7 +1209,7 @@
             // Build page dots
             const dotContainer = document.getElementById('ivPageDots');
             if (dotContainer) {
-                for (let i = 0; i < 7; i++) {
+                for (let i = 0; i < 6; i++) {
                     const dot = document.createElement('div');
                     dot.className = 'iv-page-dot' + (i === 0 ? ' active' : '');
                     dot.id = 'ivDot' + i;
@@ -1533,28 +1512,18 @@
                 return;
             }
 
-            // Page 1: average probability from all models
-            if (currentPage === 1 && d.modelProbs && d.modelProbs.length > 0) {
-                label.textContent = 'Средна вероятност';
-                const avgData = [];
-                const minLen = Math.min(...d.modelProbs.map(p => p.length));
-                for (let i = 0; i < minLen; i++) {
-                    let sum = 0, count = 0;
-                    for (let m = 0; m < 5; m++) {
-                        const v = d.modelProbs[m][i].value;
-                        if (v !== null) { sum += v; count++; }
-                    }
-                    avgData.push({ time: d.modelProbs[0][i].time, value: count > 0 ? sum / count : 50 });
-                }
-                drawProbLine(ctx, w, h, avgData);
+            // Page 1: historical probability
+            if (currentPage === 1 && d.modelProbs && d.modelProbs[0]) {
+                label.textContent = 'Историческа вероятност';
+                drawProbLine(ctx, w, h, d.modelProbs[0]);
                 return;
             }
 
-            // Pages 2-6: individual model probability
-            if (currentPage >= 2 && currentPage <= 6 && d.modelProbs && d.modelProbs[currentPage - 2]) {
-                const probData = d.modelProbs[currentPage - 2];
-                const modelNames = ['Историческа', 'Байесова', 'Логистична', 'Марковска', 'Очаквана стойност'];
-                label.textContent = modelNames[currentPage - 2] + ' вероятност';
+            // Pages 2-5: individual model probability
+            if (currentPage >= 2 && currentPage <= 5 && d.modelProbs && d.modelProbs[currentPage - 1]) {
+                const probData = d.modelProbs[currentPage - 1];
+                const modelNames = [null, 'Байесова', 'Логистична', 'Марковска', 'Очаквана стойност'];
+                label.textContent = modelNames[currentPage - 1] + ' вероятност';
                 drawProbLine(ctx, w, h, probData);
                 return;
             }
@@ -1628,7 +1597,7 @@
         function onIvPageScroll() {
             const pages = document.getElementById('ivPages');
             if (!pages) return;
-            const count = 7;
+            const count = 6;
             const idx = Math.round(pages.scrollLeft / pages.clientWidth);
             currentPage = idx;
             for (let i = 0; i < count; i++) {
@@ -1639,7 +1608,7 @@
             const next = document.getElementById('ivArrowNext');
             if (prev) prev.style.display = 'flex';
             if (next) {
-                const labels = ['›', '›', '›', '›', '›', '›', 'A'];
+                const labels = ['›', '›', '›', '›', '›', 'A'];
                 next.textContent = labels[idx] || '›';
             }
         }
@@ -1651,7 +1620,7 @@
             const idx = Math.round(pages.scrollLeft / w);
             const target = idx + dir;
             if (dir < 0 && target < 0) return;
-            const maxPage = 6;
+            const maxPage = 5;
             if (dir > 0 && target > maxPage) {
                 showNotification('Модел A — активен модел', 'success');
                 return;
@@ -1723,7 +1692,7 @@
                 document.getElementById('ivRsiVal').textContent = '--';
                 document.getElementById('ivVolVal').textContent = '--';
                 document.getElementById('ivObvVal').textContent = '--';
-                ['modHist','modBayes','modLog','modMarkov','modEv','avg'].forEach(p => {
+                ['modHist','modBayes','modLog','modMarkov','modEv'].forEach(p => {
                     const b = document.getElementById(p + 'Buy');
                     const s = document.getElementById(p + 'Sell');
                     if (b) b.textContent = '--';
@@ -1801,14 +1770,6 @@
                     { p: 'modEv', m: models.models.expectedValue }
                 ];
                 sets.forEach(({ p, m }) => {
-                    setModelDisplay(p, m.buyPct, m.sellPct);
-                });
-                // Average probability
-                let avgBuy = 0;
-                sets.forEach(({ m }) => { avgBuy += m.buyPct; });
-                avgBuy /= sets.length;
-                const avgSell = 100 - avgBuy;
-                setModelDisplay('avg', avgBuy, avgSell);
                 const ev = models.models.expectedValue;
                 const evEl = document.getElementById('modEvVal');
                 const wrEl = document.getElementById('modEvWinRate');
