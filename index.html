@@ -1584,15 +1584,25 @@
             ctx.lineWidth = 2;
             ctx.stroke();
 
-            // Scale labels
-            ctx.fillStyle = 'rgba(255,255,255,0.25)';
-            ctx.font = '9px JetBrains Mono';
-            ctx.textAlign = 'right';
-            ctx.textBaseline = 'middle';
-            const labels = [0, 50, 100];
-            labels.forEach(v => {
+            // Scale labels and gridlines
+            ctx.save();
+            ctx.beginPath(); ctx.rect(leftX, 0, plotW, h); ctx.clip();
+            const gridVals = [0, 25, 50, 75, 100];
+            ctx.strokeStyle = 'rgba(255,255,255,0.04)'; ctx.lineWidth = 1; ctx.setLineDash([2, 3]);
+            gridVals.forEach(v => {
                 const y = toY(v);
-                ctx.fillText(v + '%', leftX - 4, y);
+                ctx.beginPath(); ctx.moveTo(leftX, y); ctx.lineTo(rightX, y); ctx.stroke();
+            });
+            ctx.setLineDash([]);
+            ctx.restore();
+
+            // Axis labels on the left margin
+            ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+            [100, 75, 50, 25, 0].forEach(v => {
+                const y = toY(v);
+                ctx.fillStyle = 'rgba(255,255,255,0.35)';
+                ctx.font = 'bold 10px JetBrains Mono';
+                ctx.fillText(v + '%', leftX - 6, y);
             });
 
             ctx.restore();
