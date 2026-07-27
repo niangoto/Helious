@@ -1082,9 +1082,12 @@
                 const r = await fetch(`${API_BASE}/binance?symbol=${symbol}&interval=${interval}&limit=${limit}`);
                 return r.json();
             }
-            const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
-            if (!r.ok) throw new Error('Symbol not available on Binance Spot API');
-            return r.json();
+            // Try Spot, fallback to Futures
+            let r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
+            if (r.ok) return r.json();
+            r = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
+            if (r.ok) return r.json();
+            throw new Error('Symbol not available on Binance');
         }
         let chart, candleSeries, predictionSeries, centerLineSeries;
         let latestForecastData = null;
@@ -1365,7 +1368,7 @@
                 chart.timeScale().setVisibleRange(range);
             } catch (e) {
                 console.error("Data loading error:", e);
-                showNotification("Пазарната връзка беше прекъсната. Моля, проверете Binance проксито.", "error");
+                showNotification(`Няма данни за ${currentSymbol} — символът не е намерен в Binance`, "error");
             } finally {
                 showLoading(false);
             }
