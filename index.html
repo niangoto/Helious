@@ -7,7 +7,6 @@
     <title>Helious Quantum | Аналитичен Терминал</title>
     <link rel="manifest" href="/manifest.json">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-title" content="Helious">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="theme-color" content="#06080f">
@@ -700,7 +699,7 @@
         }
 
         @media (max-width: 768px) {
-            #indicator-canvases { height: 140px; }
+            #indicator-canvases { height: 105px; }
         }
         }
 
@@ -916,7 +915,7 @@
 
                     <!-- Page 1: Historical Probability -->
                     <div class="iv-page">
-                        <div class="iv-model-label" style="margin-bottom:8px">ИСТОРИЧЕСКА ВЕРОЯТНОСТ</div>
+                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ B: ИСТОРИЧЕСКА ВЕРОЯТНОСТ</div>
                         <div class="iv-assessment">
                             <div class="iv-card">
                                 <div class="iv-card-title buy">Вероятност за Buy</div>
@@ -937,7 +936,7 @@
 
                     <!-- Page 2: Bayesian Probability -->
                     <div class="iv-page">
-                        <div class="iv-model-label" style="margin-bottom:8px">БАЙЕСОВА ВЕРОЯТНОСТ</div>
+                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ A: БАЙЕСОВА ВЕРОЯТНОСТ</div>
                         <div class="iv-assessment">
                             <div class="iv-card">
                                 <div class="iv-card-title buy">Вероятност за Buy</div>
@@ -958,7 +957,7 @@
 
                     <!-- Page 3: Logistic Regression -->
                     <div class="iv-page">
-                        <div class="iv-model-label" style="margin-bottom:8px">ЛОГИСТИЧНА РЕГРЕСИЯ</div>
+                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ C: ЛОГИСТИЧНА РЕГРЕСИЯ</div>
                         <div class="iv-assessment">
                             <div class="iv-card">
                                 <div class="iv-card-title buy">Вероятност за Buy</div>
@@ -979,7 +978,7 @@
 
                     <!-- Page 4: Markov Chain -->
                     <div class="iv-page">
-                        <div class="iv-model-label" style="margin-bottom:8px">МАРКОВСКА ВЕРИГА</div>
+                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ D: МАРКОВСКА ВЕРИГА</div>
                         <div class="iv-assessment">
                             <div class="iv-card">
                                 <div class="iv-card-title buy">Вероятност за Buy</div>
@@ -1000,7 +999,7 @@
 
                     <!-- Page 5: Expected Value -->
                     <div class="iv-page">
-                        <div class="iv-model-label" style="margin-bottom:8px">ОЧАКВАНА СТОЙНОСТ (EV)</div>
+                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ E: ОЧАКВАНА СТОЙНОСТ</div>
                         <div class="iv-assessment">
                             <div class="iv-card">
                                 <div class="iv-card-title buy">Вероятност за Buy</div>
@@ -1491,9 +1490,6 @@
         }
 
         let ivDataCache = null;
-        let ivCurrentSymbol = 'BTCUSDT';
-        let currentPage = 0;
-        let indicatorCycle = 0;
 
         function toggleView() {
             const chartView = document.getElementById('chart-view');
