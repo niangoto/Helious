@@ -5,6 +5,9 @@ const path = require('path');
 
 const PORT = process.env.PORT || 3001;
 
+// Simple in-memory cache for Yahoo responses
+const yahooCache = {};
+
 function sendJson(res, status, payload) {
   res.writeHead(status, {
     'Content-Type': 'application/json',
@@ -107,6 +110,16 @@ const server = http.createServer((req, res) => {
     const mapped = yahooMap[symbol.toUpperCase()];
     if (mapped) symbol = mapped;
     const interval = url.searchParams.get('interval') || '1d';
+    const cacheKey = symbol + '_' + interval;
+    const cached = yahooCache[cacheKey];
+    const now = Date.now();
+    // Cache for: 1min for 1m/5m, 5min for 15m/30m/1h, 1h for 1d+
+    const ttl = interval === '1d' ? 3600000 : interval === '1h' ? 300000 : 60000;
+    if (cached && now - cached.time < ttl) {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify(cached.data));
+      return;
+    }
     const range = interval === '1d' ? '1y' : interval === '5m' ? '1mo' : interval === '1h' ? '6mo' : interval === '1wk' ? '5y' : '2y';
     const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&includePrePost=false`;
 
@@ -130,6 +143,7 @@ const server = http.createServer((req, res) => {
             (quote.volume?.[i] || 0).toString(),
             t * 1000 + 60000, '0', 0, '0', '0', '0'
           ]).filter(k => parseFloat(k[4]) > 0);
+          yahooCache[cacheKey] = { time: Date.now(), data: klines };
           res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
           res.end(JSON.stringify(klines));
         } catch (e) { sendJson(res, 500, { error: 'Yahoo parse: ' + e.message }); }
