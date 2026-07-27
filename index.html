@@ -1146,10 +1146,17 @@
         };
 
         const popularSymbols = [
-            'PAXGUSDT', 'BZUSDT', 'CLUSDT', 'BTCUSDT', 'ETHUSDT', 'BNBUSDT', 'SOLUSDT', 'ADAUSDT', 'XRPUSDT',
-            'DOTUSDT', 'AVAXUSDT', 'MATICUSDT', 'LINKUSDT', 'LTCUSDT', 'DOGEUSDT',
-            'SHIBUSDT', 'NEARUSDT', 'UNIUSDT', 'FILUSDT', 'ATOMUSDT', 'OPUSDT',
-            'ARBUSDT', 'SUIUSDT', 'PEPEUSDT', 'FTMUSDT', 'TIAUSDT', 'RENDERUSDT'
+            'BTCUSDT','ETHUSDT','BNBUSDT','SOLUSDT','XRPUSDT','ADAUSDT','AVAXUSDT','DOTUSDT',
+            'LINKUSDT','MATICUSDT','LTCUSDT','DOGEUSDT','SHIBUSDT','NEARUSDT','UNIUSDT',
+            'FILUSDT','ATOMUSDT','OPUSDT','ARBUSDT','SUIUSDT','PEPEUSDT','FTMUSDT',
+            'TIAUSDT','RENDERUSDT','INJUSDT','APTUSDT','SEIUSDT','ORDIUSDT','RUNUSDT',
+            'FETUSDT','AGIXUSDT','OCEANUSDT','ICPUSDT','EOSUSDT','TRXUSDT','VETUSDT',
+            'THETAUSDT','ALGOUSDT','MANAUSDT','SANDUSDT','AXSUSDT','AAVEUSDT','MKRUSDT',
+            'COMPUSDT','SNXUSDT','CRVUSDT','BALUSDT','YFIUSDT','ZECUSDT','XMRUSDT',
+            'DASHUSDT','ETCUSDT','CHZUSDT','ENJUSDT','BATUSDT','OMGUSDT','ZILUSDT',
+            'IOSTUSDT','IOTAUSDT','ONTUSDT','QTUMUSDT','WAVESUSDT','KSMUSDT','XEMUSDT',
+            'NEOUSDT','GALAUSDT','IMXUSDT','BLURUSDT','LOOKSUSDT','DYDXUSDT','GMXUSDT',
+            'PAXGUSDT','BZUSDT','CLUSDT'
         ];
 
         let customSymbols = JSON.parse(localStorage.getItem('helious_custom_symbols') || '[]');
@@ -1638,16 +1645,36 @@
             pages.scrollBy({ left: dir * w, behavior: 'smooth' });
         }
 
+        function tryAddCustomSymbol(sym) {
+            showLoading(true);
+            fetchKlines(sym, '1h', 10).then(res => {
+                if (res.code === -1121 || res.msg?.includes('Invalid symbol')) throw new Error();
+                if (!customSymbols.includes(sym)) {
+                    customSymbols.push(sym);
+                    localStorage.setItem('helious_custom_symbols', JSON.stringify(customSymbols));
+                }
+                showNotification(`Символът ${sym} е добавен!`, 'success');
+                ivSelectSymbol(sym);
+            }).catch(() => {
+                showNotification(`Индексът "${sym}" не е намерен в Binance!`, 'error');
+            }).finally(() => showLoading(false));
+        }
+
         function ivFilterSymbols(q) {
             const results = document.getElementById('ivSearchResults');
             if (!results) return;
             const query = q.toUpperCase().trim();
             const all = getFullSymbolList();
-            const filtered = query ? all.filter(s => s.includes(query)) : all.slice(0, 10);
+            const filtered = query ? all.filter(s => s.includes(query) || s.replace('USDT', '').includes(query)) : all.slice(0, 15);
             results.innerHTML = filtered.map(s =>
                 `<div onclick="ivSelectSymbol('${s}')">${symbolDetails[s] ? symbolDetails[s].name : s.replace('USDT','')} <span style="color:var(--text-dim);font-size:11px">${s}</span></div>`
             ).join('');
-            results.style.display = filtered.length ? 'block' : 'none';
+            // Allow adding custom symbols from Binance
+            if (query.length >= 2 && !all.includes(query) && !all.includes(query + 'USDT')) {
+                const searchSym = query.endsWith('USDT') ? query : query + 'USDT';
+                results.innerHTML += `<div style="border-top:1px solid rgba(0,240,255,0.2);color:var(--accent-cyan)" onclick="tryAddCustomSymbol('${searchSym}')">🔍 Намери "${searchSym}" в Binance</div>`;
+            }
+            results.style.display = (filtered.length || query.length >= 2) ? 'block' : 'none';
         }
         function ivShowResults() {
             const inp = document.getElementById('ivSearch');
