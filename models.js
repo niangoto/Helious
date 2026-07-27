@@ -54,187 +54,199 @@ function computeADX(candles, period) {
   return { adx: computeEMA(dx, period), plusDI, minusDI };
 }
 
-// --- Cached Logistic Regression ---
-let logRegCache = { trainedOn: 0, w: null, means: null, stds: null };
-let modelSeqCache = { candlesHash: 0, data: null };
+// Build signal bitmask for a candle (13 conditions → 13-bit mask)
+function signalMask(i, rsi, ema20, ema50, ema200, macdLine, macdSig, macdHist, atr, adx, vol, meanAtr, meanVol) {
+  let mask = 0;
+  if (rsi < 30) mask |= 1 << 0;
+  if (rsi > 70) mask |= 1 << 1;
+  if (ema20 > ema50) mask |= 1 << 2;
+  if (ema20 < ema50) mask |= 1 << 3;
+  if (macdLine > macdSig) mask |= 1 << 4;
+  if (macdLine < macdSig) mask |= 1 << 5;
+  if (adx > 25) mask |= 1 << 6;
+  if (adx < 20) mask |= 1 << 7;
+  if (atr > meanAtr) mask |= 1 << 8;
+  if (atr < meanAtr) mask |= 1 << 9;
+  if (vol > meanVol) mask |= 1 << 10;
+  if (vol < meanVol) mask |= 1 << 11;
+  if (macdHist > 0) mask |= 1 << 12;
+  return mask;
+}
+
+// Simulate trade: entry at close[i], TP = close + 1.5*ATR, SL = close - 1.0*ATR
+// Returns: 1 if TP hit first, 0 if SL hit first, -1 if neither within maxBars
+function simulateTrade(candles, i, atrVal, maxBars) {
+  const entry = candles[i].close;
+  const tp = entry + 1.5 * atrVal;
+  const sl = entry - 1.0 * atrVal;
+  const limit = Math.min(i + maxBars, candles.length);
+  for (let j = i + 1; j < limit; j++) {
+    if (candles[j].high >= tp) return 1;
+    if (candles[j].low <= sl) return 0;
+  }
+  return -1;
+}
+
+// --- Cached statistics ---
+let statsCache = { hash: 0, combos: null, histBuyPct: 50, markovMatrix: null, evData: null };
 
 function candlesHash(candles) {
   let h = 0;
-  const n = Math.min(candles.length, 20);
+  const n = Math.min(candles.length, 50);
   for (let i = candles.length - n; i < candles.length; i++)
     h = ((h << 5) - h + Math.round(candles[i].close * 100)) | 0;
   return h;
 }
 
-function trainLogReg(data) {
-  const f = 6;
-  let w = new Array(f + 1).fill(0);
-  const means = new Array(f).fill(0);
-  const stds = new Array(f).fill(1);
-  for (let j = 0; j < f; j++) {
-    let s = 0;
-    for (const d of data) s += [d.rsi, d.emaRatio, d.macdV, d.atrNorm, d.adxV, d.volNorm][j];
-    means[j] = s / data.length;
-    let sq = 0;
-    for (const d of data) sq += Math.pow([d.rsi, d.emaRatio, d.macdV, d.atrNorm, d.adxV, d.volNorm][j] - means[j], 2);
-    stds[j] = Math.sqrt(sq / data.length) || 1;
-  }
-  function sig(z) { return 1 / (1 + Math.exp(-Math.max(-15, Math.min(15, z)))); }
-  for (let ep = 0; ep < 80; ep++) {
-    const g = new Array(f + 1).fill(0);
-    for (const d of data) {
-      const x = [1, (d.rsi - means[0]) / stds[0], (d.emaRatio - means[1]) / stds[1], (d.macdV - means[2]) / stds[2], (d.atrNorm - means[3]) / stds[3], (d.adxV - means[4]) / stds[4], (d.volNorm - means[5]) / stds[5]];
-      let z = 0; for (let j = 0; j <= f; j++) z += w[j] * x[j];
-      const p = sig(z);
-      const e = p - d.label;
-      for (let j = 0; j <= f; j++) g[j] += e * x[j];
+// Build all statistics from historical data
+function buildStats(candles) {
+  const n = candles.length;
+  if (n < 30) return null;
+  const prices = candles.map(c => c.close);
+  const rsiV = typeof computeRSI === 'function' ? computeRSI(candles, 14) : prices.map(() => 50);
+  const ema20 = computeEMA(prices, 20);
+  const ema50 = computeEMA(prices, 50);
+  const ema200 = computeEMA(prices, 200);
+  const macd = computeMACD(prices);
+  const atrV = computeATR(candles, 14);
+  const adxR = computeADX(candles, 14);
+  const volV = candles.map(c => c.volume || 0);
+
+  const meanAtr = atrV.reduce((s, v) => s + v, 0) / atrV.length;
+  const meanVol = volV.reduce((s, v) => s + v, 0) / volV.length;
+  const maxBars = Math.min(50, n);
+
+  // Combo stats: mask → { total, wins }
+  const combos = new Map();
+  let totalWins = 0, totalTrades = 0;
+
+  // Markov: track sequence of trade outcomes
+  let prevWin = -1;
+  let bb = 0, bs = 0, sb = 0, ss = 0;
+
+  // EV data
+  let wins = 0, losses = 0, tpSum = 0, slSum = 0;
+
+  for (let i = 20; i < n - 1; i++) {
+    const atr = atrV[i] || atrV[atrV.length - 1] || 1;
+    const result = simulateTrade(candles, i, atr, maxBars);
+    if (result < 0) continue;
+
+    totalTrades++;
+    if (result === 1) totalWins++;
+
+    const mask = signalMask(i, rsiV[i] || 50, ema20[i], ema50[i], ema200[i], macd.macdLine[i], macd.signal[i], macd.histogram[i], atrV[i], adxR.adx[i], volV[i], meanAtr, meanVol);
+    if (!combos.has(mask)) combos.set(mask, { total: 0, wins: 0 });
+    const c = combos.get(mask);
+    c.total++;
+    if (result === 1) c.wins++;
+
+    // Markov
+    if (prevWin >= 0) {
+      if (prevWin === 1 && result === 1) bb++;
+      else if (prevWin === 1 && result === 0) bs++;
+      else if (prevWin === 0 && result === 1) sb++;
+      else if (prevWin === 0 && result === 0) ss++;
     }
-    for (let j = 0; j <= f; j++) w[j] -= (0.003 / data.length) * g[j];
+    prevWin = result;
+
+    // EV
+    if (result === 1) { wins++; tpSum += atr * 1.5; }
+    else { losses++; slSum += atr * 1.0; }
   }
-  return { w, means, stds };
+
+  const hTotal = totalTrades || 1;
+  const markovMatrix = { bb: bb / (bb + bs || 1), bs: bs / (bb + bs || 1), sb: sb / (sb + ss || 1), ss: ss / (sb + ss || 1) };
+
+  return {
+    hash: candlesHash(candles),
+    combos,
+    histBuyPct: (totalWins / hTotal) * 100,
+    markovMatrix,
+    prevWin,
+    ev: { wins, losses, tpSum, slSum, winRate: wins / (wins + losses || 1) * 100, avgProfit: wins > 0 ? tpSum / wins : 0, avgLoss: losses > 0 ? slSum / losses : 0 }
+  };
+}
+
+function getStats(candles) {
+  const h = candlesHash(candles);
+  if (statsCache.hash !== h) {
+    statsCache = { hash: 0, combos: null, histBuyPct: 50, markovMatrix: null, evData: null };
+    const s = buildStats(candles);
+    if (s) statsCache = s;
+  }
+  return statsCache;
 }
 
 // --- Models ---
+
 function computeHistoricalProbability(candles) {
-  let buy = 0, sell = 0;
-  for (let i = 0; i < candles.length - 1; i++) {
-    if (candles[i + 1].close > candles[i].close) buy++;
-    else sell++;
-  }
-  const total = buy + sell || 1;
-  return { buyPct: (buy / total) * 100, sellPct: (sell / total) * 100 };
+  const s = getStats(candles);
+  return { buyPct: s.histBuyPct, sellPct: 100 - s.histBuyPct };
 }
 
-function computeBayesianProbability(candles, rsiVals, ema20, ema50, macdLine, macdSignal, atrVals, adxVals, volVals) {
-  const n = candles.length;
-  const t = { rsiLow: { a: 0, b: 0 }, rsiHigh: { a: 0, b: 0 }, emaBull: { a: 0, b: 0 }, emaBear: { a: 0, b: 0 }, macdBull: { a: 0, b: 0 }, macdBear: { a: 0, b: 0 }, adxS: { a: 0, b: 0 }, adxW: { a: 0, b: 0 }, atrH: { a: 0, b: 0 }, atrL: { a: 0, b: 0 }, volH: { a: 0, b: 0 }, volL: { a: 0, b: 0 } };
-  const mAtr = atrVals.reduce((s, v) => s + v, 0) / atrVals.length;
-  const mVol = volVals.reduce((s, v) => s + v, 0) / volVals.length;
+function computeCombinationProbability(candles) {
+  const s = getStats(candles);
+  if (!s.combos || s.combos.size === 0) return { buyPct: s.histBuyPct, sellPct: 100 - s.histBuyPct };
 
-  for (let i = 20; i < n - 1; i++) {
-    const up = candles[i + 1].close > candles[i].close ? 1 : 0;
-    const r = rsiVals[i] || 50;
-    if (r < 30) { t.rsiLow.a++; if (up) t.rsiLow.b++; }
-    if (r > 70) { t.rsiHigh.a++; if (up) t.rsiHigh.b++; }
-    if (ema20[i] > ema50[i]) { t.emaBull.a++; if (up) t.emaBull.b++; }
-    if (ema20[i] < ema50[i]) { t.emaBear.a++; if (up) t.emaBear.b++; }
-    if (macdLine[i] > macdSignal[i]) { t.macdBull.a++; if (up) t.macdBull.b++; }
-    if (macdLine[i] < macdSignal[i]) { t.macdBear.a++; if (up) t.macdBear.b++; }
-    if (adxVals[i] > 25) { t.adxS.a++; if (up) t.adxS.b++; }
-    if (adxVals[i] < 20) { t.adxW.a++; if (up) t.adxW.b++; }
-    if (atrVals[i] > mAtr) { t.atrH.a++; if (up) t.atrH.b++; }
-    if (atrVals[i] < mAtr) { t.atrL.a++; if (up) t.atrL.b++; }
-    if (volVals[i] > mVol) { t.volH.a++; if (up) t.volH.b++; }
-    if (volVals[i] < mVol) { t.volL.a++; if (up) t.volL.b++; }
-  }
+  const prices = candles.map(c => c.close);
+  const rsiV = typeof computeRSI === 'function' ? computeRSI(candles, 14) : prices.map(() => 50);
+  const ema20 = computeEMA(prices, 20);
+  const ema50 = computeEMA(prices, 50);
+  const ema200 = computeEMA(prices, 200);
+  const macd = computeMACD(prices);
+  const atrV = computeATR(candles, 14);
+  const adxR = computeADX(candles, 14);
+  const volV = candles.map(c => c.volume || 0);
+  const meanAtr = atrV.reduce((s, v) => s + v, 0) / atrV.length;
+  const meanVol = volV.reduce((s, v) => s + v, 0) / volV.length;
 
-  const prior = (() => { let b = 0, s = 0; for (let i = 0; i < n - 1; i++) { if (candles[i + 1].close > candles[i].close) b++; else s++; } return b / (b + s || 1); })();
-  const last = n - 1;
-  const conds = [];
-  const lr = rsiVals[last] || 50;
-  if (lr < 30) conds.push(t.rsiLow);
-  if (lr > 70) conds.push(t.rsiHigh);
-  if (ema20[last] > ema50[last]) conds.push(t.emaBull);
-  if (ema20[last] < ema50[last]) conds.push(t.emaBear);
-  if (macdLine[last] > macdSignal[last]) conds.push(t.macdBull);
-  if (macdLine[last] < macdSignal[last]) conds.push(t.macdBear);
-  if (adxVals[last] > 25) conds.push(t.adxS);
-  if (adxVals[last] < 20) conds.push(t.adxW);
-  if (atrVals[last] > mAtr) conds.push(t.atrH);
-  if (atrVals[last] < mAtr) conds.push(t.atrL);
-  if (volVals[last] > mVol) conds.push(t.volH);
-  if (volVals[last] < mVol) conds.push(t.volL);
-
-  let prob = prior;
-  if (conds.length > 0) {
-    prob = conds.reduce((s, c) => {
-      if (c.a > 0) { const pSgB = c.b / c.a; const pSgS = (c.a - c.b) / c.a; const pS = pSgB * prior + pSgS * (1 - prior); return s + (pS > 0 ? (pSgB * prior) / pS : prior); }
-      return s + prior;
-    }, 0) / conds.length;
-  }
-  return { buyPct: Math.max(1, Math.min(99, prob * 100)), sellPct: Math.max(1, Math.min(99, (1 - prob) * 100)) };
-}
-
-function computeLogisticRegression(candles, rsiVals, ema20, ema50, macdLine, macdSignal, macdHist, atrVals, adxVals, volVals, forceRetrain) {
-  if (!logRegCache.w || forceRetrain || Math.abs(candles.length - logRegCache.trainedOn) > 50) {
-    const data = [];
-    for (let i = 20; i < candles.length - 1; i++) {
-      data.push({
-        rsi: rsiVals[i] || 50,
-        emaRatio: ema20[i] > 0 ? (candles[i].close - ema20[i]) / ema20[i] : 0,
-        macdV: macdHist[i] || 0,
-        atrNorm: (atrVals[i] || 0) / (candles[i].close || 1),
-        adxV: adxVals[i] || 0,
-        volNorm: volVals[i] || 0,
-        label: candles[i + 1].close > candles[i].close ? 1 : 0
-      });
-    }
-    const trained = trainLogReg(data);
-    if (trained) {
-      logRegCache = { trainedOn: candles.length, w: trained.w, means: trained.means, stds: trained.stds };
-    }
-  }
-
-  if (!logRegCache.w) return { buyPct: 50, sellPct: 50 };
   const last = candles.length - 1;
-  const x = [1, ((rsiVals[last] || 50) - logRegCache.means[0]) / logRegCache.stds[0],
-    ((candles[last].close - ema20[last]) / (ema20[last] || 1) - logRegCache.means[1]) / logRegCache.stds[1],
-    ((macdHist[last] || 0) - logRegCache.means[2]) / logRegCache.stds[2],
-    (((atrVals[last] || 0) / (candles[last].close || 1)) - logRegCache.means[3]) / logRegCache.stds[3],
-    ((adxVals[last] || 0) - logRegCache.means[4]) / logRegCache.stds[4],
-    ((volVals[last] || 0) - logRegCache.means[5]) / logRegCache.stds[5]
-  ];
-  let z = 0; for (let j = 0; j <= 6; j++) z += logRegCache.w[j] * x[j];
-  const prob = 1 / (1 + Math.exp(-Math.max(-15, Math.min(15, z))));
-  return { buyPct: Math.max(1, Math.min(99, prob * 100)), sellPct: Math.max(1, Math.min(99, (1 - prob) * 100)) };
+  const mask = signalMask(last, rsiV[last] || 50, ema20[last], ema50[last], ema200[last], macd.macdLine[last], macd.signal[last], macd.histogram[last], atrV[last], adxR.adx[last], volV[last], meanAtr, meanVol);
+
+  // Find exact match
+  if (s.combos.has(mask)) {
+    const c = s.combos.get(mask);
+    if (c.total > 0) {
+      const buyPct = (c.wins / c.total) * 100;
+      return { buyPct: Math.max(1, Math.min(99, buyPct)), sellPct: Math.max(1, Math.min(99, 100 - buyPct)) };
+    }
+  }
+
+  // No exact match: fall back to historical
+  return { buyPct: s.histBuyPct, sellPct: 100 - s.histBuyPct };
 }
 
 function computeMarkovChain(candles) {
-  let bb = 0, bs = 0, sb = 0, ss = 0;
-  for (let i = 1; i < candles.length - 1; i++) {
-    const bull = candles[i + 1].close > candles[i].close;
-    const prevBull = candles[i].close > candles[i - 1].close;
-    if (prevBull && bull) bb++;
-    else if (prevBull && !bull) bs++;
-    else if (!prevBull && bull) sb++;
-    else ss++;
-  }
-  const tB = bb + bs || 1, tS = sb + ss || 1;
-  const prob = (candles[candles.length - 1].close > candles[candles.length - 2].close) ? (bb / tB) : (sb / tS);
+  const s = getStats(candles);
+  if (!s.markovMatrix) return { buyPct: s.histBuyPct, sellPct: 100 - s.histBuyPct };
+  const prob = s.prevWin === 1 ? s.markovMatrix.bb : s.markovMatrix.sb;
   return { buyPct: Math.max(1, Math.min(99, prob * 100)), sellPct: Math.max(1, Math.min(99, (1 - prob) * 100)) };
 }
 
 function computeExpectedValue(candles) {
-  let wins = 0, losses = 0, tp = 0, tl = 0;
-  for (let i = 0; i < candles.length - 1; i++) {
-    const ch = candles[i + 1].close - candles[i].close;
-    if (ch > 0) { wins++; tp += ch; } else { losses++; tl += Math.abs(ch); }
-  }
-  const t = wins + losses || 1;
-  const wr = wins / t;
-  const ap = wins > 0 ? tp / wins : 0, al = losses > 0 ? tl / losses : 0;
-  const ev = wr * ap - (1 - wr) * al;
-  const ratio = Math.max(-1, Math.min(1, ev / (ap + al || 1)));
-  const buyPct = 50 + ratio * 40;
-  return { buyPct: Math.max(1, Math.min(99, buyPct)), sellPct: Math.max(1, Math.min(99, 100 - buyPct)), ev, winRate: wr * 100, avgProfit: ap, avgLoss: al };
+  const s = getStats(candles);
+  if (!s.ev) return { buyPct: 50, sellPct: 50, ev: 0, winRate: 50, avgProfit: 0, avgLoss: 0 };
+  const ev = s.ev;
+  const buyPct = 50 + (ev.winRate - 50) * 0.5; // map win rate toward probability
+  return {
+    buyPct: Math.max(1, Math.min(99, buyPct)),
+    sellPct: Math.max(1, Math.min(99, 100 - buyPct)),
+    ev: (ev.winRate / 100) * ev.avgProfit - (1 - ev.winRate / 100) * ev.avgLoss,
+    winRate: ev.winRate,
+    avgProfit: ev.avgProfit,
+    avgLoss: ev.avgLoss
+  };
 }
 
 function computeAllModels(candles) {
   if (!candles || candles.length < 30) return null;
-  const prices = candles.map(c => c.close);
-  const rsiVals = typeof computeRSI === 'function' ? computeRSI(candles, 14) : prices.map(() => 50);
-  const ema20 = computeEMA(prices, 20);
-  const ema50 = computeEMA(prices, 50);
-  const macd = computeMACD(prices);
-  const atrVals = computeATR(candles, 14);
-  const adxR = computeADX(candles, 14);
-  const volVals = candles.map(c => c.volume || 0);
-
+  const hist = computeHistoricalProbability(candles);
   return {
     models: {
-      historical: computeHistoricalProbability(candles),
-      bayesian: computeBayesianProbability(candles, rsiVals, ema20, ema50, macd.macdLine, macd.signal, atrVals, adxR.adx, volVals),
-      logistic: computeLogisticRegression(candles, rsiVals, ema20, ema50, macd.macdLine, macd.signal, macd.histogram, atrVals, adxR.adx, volVals, false),
+      historical: hist,
+      bayesian: computeCombinationProbability(candles),
+      logistic: computeCombinationProbability(candles),
       markov: computeMarkovChain(candles),
       expectedValue: computeExpectedValue(candles)
     }
@@ -243,37 +255,75 @@ function computeAllModels(candles) {
 
 function computeModelProbSequence(candles, modelIndex) {
   if (!candles || candles.length < 30) return [];
-  const h = candlesHash(candles);
-  if (modelSeqCache.candlesHash === h && modelSeqCache.data && modelSeqCache.data[modelIndex]) return modelSeqCache.data[modelIndex];
-
+  const result = [];
   const n = candles.length;
+  const step = Math.max(1, Math.floor(n / 200)); // sample ~200 points
+
+  // Pre-compute all indicators once
   const prices = candles.map(c => c.close);
-  const allRsi = typeof computeRSI === 'function' ? computeRSI(candles, 14) : prices.map(() => 50);
-  const allEma20 = computeEMA(prices, 20);
-  const allEma50 = computeEMA(prices, 50);
-  const allMacd = computeMACD(prices);
-  const allAtr = computeATR(candles, 14);
-  const allAdx = computeADX(candles, 14);
-  const allVol = candles.map(c => c.volume || 0);
+  const rsiV = typeof computeRSI === 'function' ? computeRSI(candles, 14) : prices.map(() => 50);
+  const ema20 = computeEMA(prices, 20);
+  const ema50 = computeEMA(prices, 50);
+  const ema200 = computeEMA(prices, 200);
+  const macd = computeMACD(prices);
+  const atrV = computeATR(candles, 14);
+  const adxR = computeADX(candles, 14);
+  const volV = candles.map(c => c.volume || 0);
+  const meanAtr = atrV.reduce((s, v) => s + v, 0) / atrV.length;
+  const meanVol = volV.reduce((s, v) => s + v, 0) / volV.length;
+  const maxBars = Math.min(50, n);
 
-  const results = [[], [], [], [], []];
-  for (let i = 30; i < n; i++) {
-    const sub = { candles: candles.slice(0, i + 1), rsi: allRsi.slice(0, i + 1), ema20: allEma20.slice(0, i + 1), ema50: allEma50.slice(0, i + 1), macdLine: allMacd.macdLine.slice(0, i + 1), macdSig: allMacd.signal.slice(0, i + 1), macdHist: allMacd.histogram.slice(0, i + 1), atr: allAtr.slice(0, i + 1), adx: allAdx.adx.slice(0, i + 1), vol: allVol.slice(0, i + 1) };
-    const t = candles[i].time;
-    results[0].push({ time: t, value: computeHistoricalProbability(sub.candles).buyPct });
-    if (i % 3 === 0 || i === n - 1) {
-      results[1].push({ time: t, value: computeBayesianProbability(sub.candles, sub.rsi, sub.ema20, sub.ema50, sub.macdLine, sub.macdSig, sub.atr, sub.adx, sub.vol).buyPct });
-      results[2].push({ time: t, value: computeLogisticRegression(sub.candles, sub.rsi, sub.ema20, sub.ema50, sub.macdLine, sub.macdSig, sub.macdHist, sub.atr, sub.adx, sub.vol, false).buyPct });
+  // Build combo stats progressively
+  const combos = new Map();
+  let totalWins = 0, totalTrades = 0;
+  let bb = 0, bs = 0, sb = 0, ss = 0;
+  let prevWin = -1;
+  let wins = 0, losses = 0, tpSum = 0, slSum = 0;
+
+  for (let i = 30; i < n - 1; i++) {
+    const atr = atrV[i] || 1;
+    const tradeResult = simulateTrade(candles, i, atr, maxBars);
+    if (tradeResult < 0) continue;
+
+    totalTrades++;
+    if (tradeResult === 1) totalWins++;
+
+    const mask = signalMask(i, rsiV[i] || 50, ema20[i], ema50[i], ema200[i], macd.macdLine[i], macd.signal[i], macd.histogram[i], atrV[i], adxR.adx[i], volV[i], meanAtr, meanVol);
+    if (!combos.has(mask)) combos.set(mask, { total: 0, wins: 0 });
+    const c = combos.get(mask);
+    c.total++;
+    if (tradeResult === 1) c.wins++;
+
+    if (prevWin >= 0) {
+      if (prevWin === 1 && tradeResult === 1) bb++;
+      else if (prevWin === 1 && tradeResult === 0) bs++;
+      else if (prevWin === 0 && tradeResult === 1) sb++;
+      else if (prevWin === 0 && tradeResult === 0) ss++;
     }
-    results[3].push({ time: t, value: computeMarkovChain(sub.candles).buyPct });
-    results[4].push({ time: t, value: computeExpectedValue(sub.candles).buyPct });
-  }
-  // Fill gaps for sparse models
-  for (let m = 1; m <= 2; m++) {
-    for (let i = results[m].length; i < results[0].length; i++)
-      results[m].push({ time: results[0][i].time, value: results[m][results[m].length - 1] ? results[m][results[m].length - 1].value : 50 });
-  }
+    prevWin = tradeResult;
+    if (tradeResult === 1) { wins++; tpSum += atr * 1.5; }
+    else { losses++; slSum += atr * 1.0; }
 
-  modelSeqCache = { candlesHash: h, data: results };
-  return results[modelIndex];
+    // Record at sampled points
+    if (i % step === 0 || i === n - 2) {
+      const t = candles[i].time;
+      const hPct = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
+
+      if (modelIndex === 0) { // Historical
+        result.push({ time: t, value: hPct });
+      } else if (modelIndex === 1 || modelIndex === 2) { // Combination (Bayesian/Logistic)
+        const tMask = signalMask(i, rsiV[i] || 50, ema20[i], ema50[i], ema200[i], macd.macdLine[i], macd.signal[i], macd.histogram[i], atrV[i], adxR.adx[i], volV[i], meanAtr, meanVol);
+        let val = hPct;
+        if (combos.has(tMask)) { const cc = combos.get(tMask); if (cc.total > 0) val = (cc.wins / cc.total) * 100; }
+        result.push({ time: t, value: val });
+      } else if (modelIndex === 3) { // Markov
+        const p = prevWin === 1 ? (bb / (bb + bs || 1)) : (sb / (sb + ss || 1));
+        result.push({ time: t, value: p * 100 });
+      } else if (modelIndex === 4) { // EV
+        const wr = wins / (wins + losses || 1);
+        result.push({ time: t, value: 50 + (wr - 0.5) * 40 });
+      }
+    }
+  }
+  return result;
 }
