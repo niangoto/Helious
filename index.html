@@ -914,9 +914,30 @@
                         </div>
                     </div>
 
-                    <!-- Page 1: Historical Probability -->
+                    <!-- Page 1: Average Probability -->
                     <div class="iv-page">
-                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ B: ИСТОРИЧЕСКА ВЕРОЯТНОСТ</div>
+                        <div class="iv-model-label" style="margin-bottom:8px">СРЕДНА ВЕРОЯТНОСТ (5 МОДЕЛА)</div>
+                        <div class="iv-assessment" id="avgProbAssessment">
+                            <div class="iv-card">
+                                <div class="iv-card-title buy">Вероятност за Buy</div>
+                                <div class="iv-card-value neutral" id="avgBuy">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="avgBuyGauge" style="width:0%"></div></div>
+                                <div class="iv-assessment-meta">Средно от 5-те модела</div>
+                            </div>
+                            <div class="iv-card">
+                                <div class="iv-card-title sell">Вероятност за Sell</div>
+                                <div class="iv-card-value neutral" id="avgSell">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="avgSellGauge" style="width:0%"></div></div>
+                                <div class="iv-assessment-meta">100% − Средна Buy вероятност</div>
+                            </div>
+                        </div>
+                        <div class="iv-ratio-bar"><div class="ratio-buy" id="avgBuyBar" style="width:50%"></div><div class="ratio-sell" id="avgSellBar" style="width:50%"></div></div>
+                        <div class="iv-ratio-labels"><span id="avgBuyLbl">Buy 50%</span><span id="avgSellLbl">Sell 50%</span></div>
+                    </div>
+
+                    <!-- Page 2: Historical Probability -->
+                    <div class="iv-page">
+                        <div class="iv-model-label" style="margin-bottom:8px">ИСТОРИЧЕСКА ВЕРОЯТНОСТ</div>
                         <div class="iv-assessment">
                             <div class="iv-card">
                                 <div class="iv-card-title buy">Вероятност за Buy</div>
@@ -937,7 +958,7 @@
 
                     <!-- Page 2: Bayesian Probability -->
                     <div class="iv-page">
-                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ A: БАЙЕСОВА ВЕРОЯТНОСТ</div>
+                        <div class="iv-model-label" style="margin-bottom:8px">БАЙЕСОВА ВЕРОЯТНОСТ</div>
                         <div class="iv-assessment">
                             <div class="iv-card">
                                 <div class="iv-card-title buy">Вероятност за Buy</div>
@@ -958,7 +979,7 @@
 
                     <!-- Page 3: Logistic Regression -->
                     <div class="iv-page">
-                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ C: ЛОГИСТИЧНА РЕГРЕСИЯ</div>
+                        <div class="iv-model-label" style="margin-bottom:8px">ЛОГИСТИЧНА РЕГРЕСИЯ</div>
                         <div class="iv-assessment">
                             <div class="iv-card">
                                 <div class="iv-card-title buy">Вероятност за Buy</div>
@@ -979,7 +1000,7 @@
 
                     <!-- Page 4: Markov Chain -->
                     <div class="iv-page">
-                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ D: МАРКОВСКА ВЕРИГА</div>
+                        <div class="iv-model-label" style="margin-bottom:8px">МАРКОВСКА ВЕРИГА</div>
                         <div class="iv-assessment">
                             <div class="iv-card">
                                 <div class="iv-card-title buy">Вероятност за Buy</div>
@@ -1000,7 +1021,7 @@
 
                     <!-- Page 5: Expected Value -->
                     <div class="iv-page">
-                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ E: ОЧАКВАНА СТОЙНОСТ</div>
+                        <div class="iv-model-label" style="margin-bottom:8px">ОЧАКВАНА СТОЙНОСТ (EV)</div>
                         <div class="iv-assessment">
                             <div class="iv-card">
                                 <div class="iv-card-title buy">Вероятност за Buy</div>
@@ -1486,11 +1507,34 @@
                 return;
             }
 
-            // Page 0: average probability from all models
-            if (currentPage === 0 && d.modelProbs && d.modelProbs.length > 0) {
-                label.textContent = 'Средна вероятност (5 модела)';
+            // Page 0: show RSI line (no cycling needed)
+            if (currentPage === 0) {
+                if (!d.rsi.length) return;
+                let range = chart.timeScale().getVisibleRange();
+                if (!range && d.rsi.length > 1) range = { from: d.rsi[0].time, to: d.rsi[d.rsi.length - 1].time };
+                if (!range) return;
+                const vis = d.rsi.filter(p => p.time >= range.from && p.time <= range.to && p.value !== null);
+                if (vis.length < 2) return;
+                const pts = vis.map(p => ({ x: chart.timeScale().timeToCoordinate(p.time), y: p.value })).filter(p => p.x !== null);
+                if (pts.length < 2) return;
+                let minY = Infinity, maxY = -Infinity;
+                vis.forEach(p => { if (p.value < minY) minY = p.value; if (p.value > maxY) maxY = p.value; });
+                if (maxY === minY) { minY -= 1; maxY += 1; }
+                const pad = (maxY - minY) * 0.1;
+                minY -= pad; maxY += pad;
+                const toY = (v) => h - ((v - minY) / (maxY - minY)) * (h - 8) - 4;
+                // 70/30 lines
+                [70, 30].forEach(val => { const y = toY(val); if (y >= 0 && y <= h) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.strokeStyle = 'rgba(255,255,255,0.1)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]); } });
+                label.textContent = 'RSI';
+                ctx.beginPath();
+                pts.forEach((p, i) => { if (i === 0) ctx.moveTo(p.x, toY(p.y)); else ctx.lineTo(p.x, toY(p.y)); });
+                ctx.strokeStyle = '#b450ff'; ctx.lineWidth = 1.5; ctx.stroke();
+                return;
+            }
 
-                // Average all model probabilities
+            // Page 1: average probability from all models
+            if (currentPage === 1 && d.modelProbs && d.modelProbs.length > 0) {
+                label.textContent = 'Средна вероятност';
                 const avgData = [];
                 const minLen = Math.min(...d.modelProbs.map(p => p.length));
                 for (let i = 0; i < minLen; i++) {
@@ -1501,16 +1545,15 @@
                     }
                     avgData.push({ time: d.modelProbs[0][i].time, value: count > 0 ? sum / count : 50 });
                 }
-
                 drawProbLine(ctx, w, h, avgData);
                 return;
             }
 
-            // Model pages (1-5): show historical probability for that model
-            if (currentPage >= 1 && currentPage <= 5 && d.modelProbs && d.modelProbs[currentPage - 1]) {
-                const probData = d.modelProbs[currentPage - 1];
+            // Pages 2-6: individual model probability
+            if (currentPage >= 2 && currentPage <= 6 && d.modelProbs && d.modelProbs[currentPage - 2]) {
+                const probData = d.modelProbs[currentPage - 2];
                 const modelNames = ['Историческа', 'Байесова', 'Логистична', 'Марковска', 'Очаквана стойност'];
-                label.textContent = modelNames[currentPage - 1] + ' вероятност';
+                label.textContent = modelNames[currentPage - 2] + ' вероятност';
                 drawProbLine(ctx, w, h, probData);
                 return;
             }
@@ -1584,7 +1627,7 @@
         function onIvPageScroll() {
             const pages = document.getElementById('ivPages');
             if (!pages) return;
-            const count = 6;
+            const count = 7;
             const idx = Math.round(pages.scrollLeft / pages.clientWidth);
             currentPage = idx;
             for (let i = 0; i < count; i++) {
@@ -1595,7 +1638,7 @@
             const next = document.getElementById('ivArrowNext');
             if (prev) prev.style.display = 'flex';
             if (next) {
-                const labels = ['›', '›', '›', '›', '›', 'A'];
+                const labels = ['›', '›', '›', '›', '›', '›', 'A'];
                 next.textContent = labels[idx] || '›';
             }
         }
@@ -1607,7 +1650,7 @@
             const idx = Math.round(pages.scrollLeft / w);
             const target = idx + dir;
             if (dir < 0 && target < 0) return;
-            const maxPage = 5;
+            const maxPage = 6;
             if (dir > 0 && target > maxPage) {
                 showNotification('Модел A — активен модел', 'success');
                 return;
@@ -1679,7 +1722,7 @@
                 document.getElementById('ivRsiVal').textContent = '--';
                 document.getElementById('ivVolVal').textContent = '--';
                 document.getElementById('ivObvVal').textContent = '--';
-                ['modHist','modBayes','modLog','modMarkov','modEv'].forEach(p => {
+                ['modHist','modBayes','modLog','modMarkov','modEv','avg'].forEach(p => {
                     const b = document.getElementById(p + 'Buy');
                     const s = document.getElementById(p + 'Sell');
                     if (b) b.textContent = '--';
@@ -1759,6 +1802,12 @@
                 sets.forEach(({ p, m }) => {
                     setModelDisplay(p, m.buyPct, m.sellPct);
                 });
+                // Average probability
+                let avgBuy = 0;
+                sets.forEach(({ m }) => { avgBuy += m.buyPct; });
+                avgBuy /= sets.length;
+                const avgSell = 100 - avgBuy;
+                setModelDisplay('avg', avgBuy, avgSell);
                 const ev = models.models.expectedValue;
                 const evEl = document.getElementById('modEvVal');
                 const wrEl = document.getElementById('modEvWinRate');
