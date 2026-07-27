@@ -1563,13 +1563,19 @@
             const toY = (v) => h - (v / 100) * (h - 8) - 4;
             const midY = toY(50);
 
-            // Axis labels on the left margin (draw BEFORE clip)
+            // Axis labels: 0 at middle, ±100 at extremes
             ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-            [100, 75, 50, 25, 0].forEach(v => {
+            [
+                { v: 100, label: 'Buy 100' },
+                { v: 75, label: 'Buy 50' },
+                { v: 50, label: '0' },
+                { v: 25, label: 'Sell 50' },
+                { v: 0, label: 'Sell 100' }
+            ].forEach(({ v, label }) => {
                 const y = toY(v);
-                ctx.fillStyle = 'rgba(255,255,255,0.4)';
+                ctx.fillStyle = v === 50 ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.35)';
                 ctx.font = 'bold 10px JetBrains Mono';
-                ctx.fillText(v + '%', leftX - 6, y);
+                ctx.fillText(label, leftX - 6, y);
             });
 
             // Draw only within plot area
@@ -1596,42 +1602,12 @@
             ctx.beginPath(); ctx.moveTo(leftX, midY); ctx.lineTo(rightX, midY); ctx.stroke();
             ctx.setLineDash([]);
 
-            // Draw probability as green buy / red sell filled regions
-            const buyColor = 'rgba(0,255,102,0.15)';
-            const sellColor = 'rgba(255,0,85,0.15)';
-            const buyLine = 'rgba(0,255,102,0.8)';
-            const sellLine = 'rgba(255,0,85,0.8)';
-
-            // For each segment between points, fill the area
+            // Probability line (single red line, 0-100% buy scale)
             ctx.beginPath();
             pts.forEach((p, i) => { if (i === 0) ctx.moveTo(p.x, toY(p.y)); else ctx.lineTo(p.x, toY(p.y)); });
-            // Close to midline
-            ctx.lineTo(pts[pts.length - 1].x, midY);
-            ctx.lineTo(pts[0].x, midY);
-            ctx.closePath();
-            // Gradient fill: green above 50%, red below 50%
-            const grad = ctx.createLinearGradient(0, toY(0), 0, toY(100));
-            grad.addColorStop(0, buyColor);
-            grad.addColorStop(0.5, 'rgba(255,255,255,0.02)');
-            grad.addColorStop(1, sellColor);
-            ctx.fillStyle = grad;
-            ctx.fill();
-
-            // Buy line (upper boundary)
-            ctx.beginPath();
-            pts.forEach((p, i) => {
-                const v = p.y > 50 ? toY(p.y) : midY;
-                if (i === 0) ctx.moveTo(p.x, v); else ctx.lineTo(p.x, v);
-            });
-            ctx.strokeStyle = buyLine; ctx.lineWidth = 2; ctx.stroke();
-
-            // Sell line (lower boundary)  
-            ctx.beginPath();
-            pts.forEach((p, i) => {
-                const v = p.y < 50 ? toY(p.y) : midY;
-                if (i === 0) ctx.moveTo(p.x, v); else ctx.lineTo(p.x, v);
-            });
-            ctx.strokeStyle = sellLine; ctx.lineWidth = 2; ctx.stroke();
+            ctx.strokeStyle = '#ff3344';
+            ctx.lineWidth = 2;
+            ctx.stroke();
 
             ctx.restore();
         }
