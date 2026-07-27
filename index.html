@@ -301,7 +301,7 @@
             border-top: 1px solid var(--panel-border);
             z-index: 10;
             flex-shrink: 0;
-            height: 165px;
+            height: 220px;
         }
 
         .indicator-canvas-row {
@@ -705,7 +705,7 @@
         }
 
         @media (max-width: 768px) {
-            #indicator-canvases { height: 105px; }
+            #indicator-canvases { height: 140px; }
         }
         }
 
@@ -881,6 +881,10 @@
                     <span class="indicator-canvas-label">Bias</span>
                     <canvas id="canvas-bias"></canvas>
                 </div>
+                <div class="indicator-canvas-row">
+                    <span class="indicator-canvas-label">Buy Signal</span>
+                    <canvas id="canvas-prob"></canvas>
+                </div>
             </div>
         </div>
 
@@ -929,7 +933,7 @@
 
                     <!-- Page 1: Historical Probability -->
                     <div class="iv-page">
-                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ B: ИСТОРИЧЕСКА ВЕРОЯТНОСТ</div>
+                        <div class="iv-model-label" style="margin-bottom:8px">ИСТОРИЧЕСКА ВЕРОЯТНОСТ</div>
                         <div class="iv-assessment">
                             <div class="iv-card">
                                 <div class="iv-card-title buy">Вероятност за Buy</div>
@@ -950,7 +954,7 @@
 
                     <!-- Page 2: Bayesian Probability -->
                     <div class="iv-page">
-                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ A: БАЙЕСОВА ВЕРОЯТНОСТ</div>
+                        <div class="iv-model-label" style="margin-bottom:8px">БАЙЕСОВА ВЕРОЯТНОСТ</div>
                         <div class="iv-assessment">
                             <div class="iv-card">
                                 <div class="iv-card-title buy">Вероятност за Buy</div>
@@ -971,7 +975,7 @@
 
                     <!-- Page 3: Logistic Regression -->
                     <div class="iv-page">
-                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ C: ЛОГИСТИЧНА РЕГРЕСИЯ</div>
+                        <div class="iv-model-label" style="margin-bottom:8px">ЛОГИСТИЧНА РЕГРЕСИЯ</div>
                         <div class="iv-assessment">
                             <div class="iv-card">
                                 <div class="iv-card-title buy">Вероятност за Buy</div>
@@ -992,7 +996,7 @@
 
                     <!-- Page 4: Markov Chain -->
                     <div class="iv-page">
-                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ D: МАРКОВСКА ВЕРИГА</div>
+                        <div class="iv-model-label" style="margin-bottom:8px">МАРКОВСКА ВЕРИГА</div>
                         <div class="iv-assessment">
                             <div class="iv-card">
                                 <div class="iv-card-title buy">Вероятност за Buy</div>
@@ -1013,7 +1017,7 @@
 
                     <!-- Page 5: Expected Value -->
                     <div class="iv-page">
-                        <div class="iv-model-label" style="margin-bottom:8px">МОДЕЛ E: ОЧАКВАНА СТОЙНОСТ</div>
+                        <div class="iv-model-label" style="margin-bottom:8px">ОЧАКВАНА СТОЙНОСТ (EV)</div>
                         <div class="iv-assessment">
                             <div class="iv-card">
                                 <div class="iv-card-title buy">Вероятност за Buy</div>
@@ -1413,20 +1417,25 @@
                 obvAll.push(obvVal);
             }
             const obvMin = Math.min(...obvAll), obvMax = Math.max(...obvAll);
+            const prob = [];
             for (let i = 0; i < candles.length; i++) {
                 const t = candles[i].time;
                 rsi.push({ time: t, value: i < period ? null : rsiVals[i - period] });
                 vol.push({ time: t, value: candles[i].volume || 0 });
                 if (i < period) {
                     bias.push({ time: t, value: null });
+                    prob.push({ time: t, value: null });
                 } else {
                     const oNorm = obvMax > obvMin ? ((obvAll[i] - obvMin) / (obvMax - obvMin)) * 100 : 50;
                     const bBuy = (100 - rsiVals[i - period] + oNorm) / 2;
                     const bSell = (100 + rsiVals[i - period] - oNorm) / 2;
                     bias.push({ time: t, value: (bBuy / (bBuy + bSell || 1)) * 100 });
+                    // Buy signal: 0 = Sell 100%, 100 = Buy 100%
+                    const raw = (100 - rsiVals[i - period] + oNorm) / 2;
+                    prob.push({ time: t, value: Math.max(0, Math.min(100, raw)) });
                 }
             }
-            indicatorData = { rsi, vol, bias };
+            indicatorData = { rsi, vol, bias, prob };
             drawIndicatorCanvases();
         }
 
@@ -1442,7 +1451,8 @@
             const rows = [
                 { id: 'canvas-rsi', data: d.rsi, color: '#b450ff', overlay: [{ val: 70, c: 'rgba(255,0,85,0.5)' }, { val: 30, c: 'rgba(0,255,102,0.5)' }] },
                 { id: 'canvas-volume', data: d.vol, color: '#26a69a' },
-                { id: 'canvas-bias', data: d.bias, color: '#ffd700', overlay: [{ val: 50, c: 'rgba(255,255,255,0.2)' }] }
+                { id: 'canvas-bias', data: d.bias, color: '#ffd700', overlay: [{ val: 50, c: 'rgba(255,255,255,0.2)' }] },
+                { id: 'canvas-prob', data: d.prob, color: '#ff3344', overlay: [{ val: 50, c: 'rgba(255,255,255,0.15)' }, { val: 100, c: 'rgba(0,255,102,0.12)' }, { val: 0, c: 'rgba(255,0,85,0.12)' }] }
             ];
             rows.forEach(({ id, data, color, overlay }) => {
                 const cvs = document.getElementById(id);
