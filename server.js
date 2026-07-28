@@ -230,6 +230,16 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Check MT5 availability
+  if (url.pathname === '/check-mt5' && req.method === 'GET') {
+    const dp = require('./data-provider');
+    dp.checkMT5().then(ok => {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ mt5: ok }));
+    });
+    return;
+  }
+
   // Static Files
   const filePath = path.join(__dirname, url.pathname === '/' ? 'index.html' : url.pathname);
   fs.readFile(filePath, (err, data) => {
@@ -246,4 +256,7 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
+  // Check MT5 availability in background
+  const dp = require('./data-provider');
+  dp.checkMT5().catch(() => {});
 });

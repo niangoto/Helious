@@ -214,14 +214,19 @@ async function fetchData(symbol, interval) {
 
 // ─── MT5 Bridge ────────────────────────────────────────────────
 let mt5Available = false;
+let mt5Checked = false;
 
 function checkMT5() {
+  if (mt5Checked) return Promise.resolve(mt5Available);
+  mt5Checked = true;
   return new Promise(resolve => {
     const proc = spawn('python3', [path.join(__dirname, 'mt5-bridge.py'), '--check']);
     let out = '';
     proc.stdout.on('data', d => out += d);
     proc.on('close', code => {
       mt5Available = code === 0 && out.trim() === 'ok';
+      if (mt5Available) log('INFO', 'MT5 available');
+      else log('WARN', 'MT5 not available');
       resolve(mt5Available);
     });
     proc.on('error', () => { mt5Available = false; resolve(false); });
@@ -230,6 +235,7 @@ function checkMT5() {
 }
 
 async function fetchMT5(symbol, interval) {
+  if (!mt5Checked) await checkMT5();
   if (!mt5Available) throw new Error('MT5 not available');
   const tf = { '1m': 'M1', '5m': 'M5', '15m': 'M15', '30m': 'M30', '1h': 'H1', '4h': 'H4', '1d': 'D1' }[interval] || 'D1';
   return new Promise((resolve, reject) => {
