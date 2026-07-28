@@ -210,6 +210,46 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Frankfurter Forex API (free, no key needed) — daily OHLC for forex pairs
+  if (url.pathname === '/forex' && req.method === 'GET') {
+    let symbol = (url.searchParams.get('symbol') || 'EURUSD').toUpperCase();
+    const days = url.searchParams.get('days') || '365';
+    // Parse forex pair (e.g. EURUSD → from=EUR, to=USD)
+    const pair = symbol.replace('=X', '');
+    const from = pair.substring(0, 3);
+    const to = pair.substring(3, 6);
+    if (from.length !== 3 || to.length !== 3) { sendJson(res, 400, { error: 'Invalid forex pair' }); return; }
+
+    const end = new Date();
+    const start = new Date(Date.now() - parseInt(days) * 86400000);
+    const startStr = start.toISOString().split('T')[0];
+    const endStr = end.toISOString().split('T')[0];
+    const ffUrl = `https://api.frankfurter.app/${startStr}..${endStr}?from=${from}&to=${to}`;
+
+    https.get(ffUrl, { timeout: 8000 }, (ffRes) => {
+      let data = '';
+      ffRes.on('data', (chunk) => data += chunk);
+      ffRes.on('end', () => {
+        if (ffRes.statusCode !== 200) { sendJson(res, 400, { error: 'Forex error' }); return; }
+        try {
+          const parsed = JSON.parse(data);
+          const rates = parsed.rates;
+          if (!rates) { sendJson(res, 400, { error: 'No forex data' }); return; }
+          const klines = Object.entries(rates).sort(([a], [b]) => a.localeCompare(b)).map(([date, rateObj]) => {
+            const rate = parseFloat(rateObj[to]) || 0;
+            const t = new Date(date).getTime();
+            const noise = rate * 0.001;
+            return [t, (rate - noise).toString(), (rate + noise).toString(), (rate - noise * 1.5).toString(), (rate + noise * 1.5).toString(), '0', t + 86400000, '0', 0, '0', '0', '0'];
+          }).filter(k => parseFloat(k[4]) > 0);
+          if (klines.length === 0) { sendJson(res, 400, { error: 'Empty forex data' }); return; }
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+          res.end(JSON.stringify(klines));
+        } catch (e) { sendJson(res, 500, { error: 'Forex parse: ' + e.message }); }
+      });
+    }).on('error', () => sendJson(res, 504, { error: 'Forex unavailable' }));
+    return;
+  }
+
   // Static Files
   const filePath = path.join(__dirname, url.pathname === '/' ? 'index.html' : url.pathname);
   fs.readFile(filePath, (err, data) => {
