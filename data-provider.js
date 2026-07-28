@@ -140,18 +140,30 @@ function fetchFromURL(url) {
 }
 
 async function fetchYahoo(symbol, interval) {
-  const range = interval === '1d' ? '1y' : interval === '1h' ? '6mo' : '1mo';
-  const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&includePrePost=false`;
-  const raw = await fetchFromURL(url);
-  const parsed = JSON.parse(raw);
-  const result = parsed.chart?.result?.[0];
-  if (!result) throw new Error('No Yahoo data');
-  const ts = result.timestamp || [];
-  const q = result.indicators?.quote?.[0] || {};
-  return ts.map((t, i) => ({
-    time: t, open: q.open?.[i] || 0, high: q.high?.[i] || 0,
-    low: q.low?.[i] || 0, close: q.close?.[i] || 0, volume: q.volume?.[i] || 0
-  })).filter(k => k.close > 0);
+  const fallbacks = { '5m': '1h', '15m': '1h', '30m': '1h', '1h': '1d' };
+  const tried = [];
+  let currentInterval = interval;
+  
+  while (!tried.includes(currentInterval)) {
+    tried.push(currentInterval);
+    const range = currentInterval === '1d' ? '1y' : currentInterval === '1h' ? '6mo' : '1mo';
+    try {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${currentInterval}&range=${range}&includePrePost=false`;
+      const raw = await fetchFromURL(url);
+      const parsed = JSON.parse(raw);
+      const result = parsed.chart?.result?.[0];
+      if (result && result.timestamp && result.timestamp.length > 0) {
+        const ts = result.timestamp || [];
+        const q = result.indicators?.quote?.[0] || {};
+        return ts.map((t, i) => ({
+          time: t, open: q.open?.[i] || 0, high: q.high?.[i] || 0,
+          low: q.low?.[i] || 0, close: q.close?.[i] || 0, volume: q.volume?.[i] || 0
+        })).filter(k => k.close > 0);
+      }
+    } catch (e) {}
+    currentInterval = fallbacks[currentInterval];
+  }
+  throw new Error('No Yahoo data for any interval');
 }
 
 async function fetchData(symbol, interval) {
