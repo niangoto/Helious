@@ -139,7 +139,14 @@ function fetchFromURL(url) {
   });
 }
 
+// Simple in-memory cache for Yahoo responses
+const yahooCache = {};
+
 async function fetchYahoo(symbol, interval) {
+  const cacheKey = symbol + '_' + interval;
+  const cached = yahooCache[cacheKey];
+  if (cached && Date.now() - cached.time < 60000) return cached.data;
+
   const fallbacks = { '5m': '1h', '15m': '1h', '30m': '1h', '1h': '1d' };
   const tried = [];
   let currentInterval = interval;
@@ -155,10 +162,12 @@ async function fetchYahoo(symbol, interval) {
       if (result && result.timestamp && result.timestamp.length > 0) {
         const ts = result.timestamp || [];
         const q = result.indicators?.quote?.[0] || {};
-        return ts.map((t, i) => ({
+        const data = ts.map((t, i) => ({
           time: t, open: q.open?.[i] || 0, high: q.high?.[i] || 0,
           low: q.low?.[i] || 0, close: q.close?.[i] || 0, volume: q.volume?.[i] || 0
         })).filter(k => k.close > 0);
+        yahooCache[cacheKey] = { time: Date.now(), data };
+        return data;
       }
     } catch (e) {}
     currentInterval = fallbacks[currentInterval];
