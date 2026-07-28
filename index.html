@@ -1094,12 +1094,6 @@
                 // Try Binance first, then Yahoo Finance
                 const binance = await fetch(`${API_BASE}/binance?symbol=${symbol}&interval=${interval}&limit=${limit}`).then(r => r.json()).catch(() => null);
                 if (binance && Array.isArray(binance) && binance.length > 0) return binance;
-                // Fallback to Forex API for forex pairs
-                const isForex = /^[A-Z]{6}=X$|^[A-Z]{6}$/.test(symbol.toUpperCase());
-                if (isForex) {
-                    const forex = await fetch(`${API_BASE}/forex?symbol=${symbol}`).then(r => r.json()).catch(() => null);
-                    if (forex && Array.isArray(forex) && forex.length > 0) return forex;
-                }
                 // Fallback to Yahoo Finance (don't throw on Binance error)
                 const yhSym = YAHOO_SYMBOLS[symbol.toUpperCase()] || symbol;
                 const yahoo = await fetch(`${API_BASE}/yahoo?symbol=${encodeURIComponent(yhSym)}&interval=${interval}`).then(r => r.json()).catch(() => null);
