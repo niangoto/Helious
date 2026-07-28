@@ -1043,6 +1043,27 @@
                             <span>WinRate: <span id="modEvWinRate">---</span></span>
                         </div>
                     </div>
+
+                    <!-- Page 6: Wavelet Transform -->
+                    <div class="iv-page">
+                        <div class="iv-model-label" style="margin-bottom:8px">УЕЙВЛЕТ ТРАНСФОРМАЦИЯ</div>
+                        <div class="iv-assessment">
+                            <div class="iv-card">
+                                <div class="iv-card-title buy">Вероятност за Buy</div>
+                                <div class="iv-card-value neutral" id="modWaveletBuy">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="modWaveletBuyGauge" style="width:0%"></div></div>
+                                <div class="iv-assessment-meta">Haar wavelet: честотен анализ на цената</div>
+                            </div>
+                            <div class="iv-card">
+                                <div class="iv-card-title sell">Вероятност за Sell</div>
+                                <div class="iv-card-value neutral" id="modWaveletSell">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="modWaveletSellGauge" style="width:0%"></div></div>
+                                <div class="iv-assessment-meta">Детайлни коефициенти на вълните</div>
+                            </div>
+                        </div>
+                        <div class="iv-ratio-bar"><div class="ratio-buy" id="modWaveletBuyBar" style="width:50%"></div><div class="ratio-sell" id="modWaveletSellBar" style="width:50%"></div></div>
+                        <div class="iv-ratio-labels"><span id="modWaveletBuyLbl">Buy 50%</span><span id="modWaveletSellLbl">Sell 50%</span></div>
+                    </div>
                 </div>
                 <button class="iv-nav-arrow next" id="ivArrowNext" onclick="scrollIvPage(1)">›</button>
             </div>
@@ -1270,7 +1291,7 @@
             // Build page dots
             const dotContainer = document.getElementById('ivPageDots');
             if (dotContainer) {
-                for (let i = 0; i < 7; i++) {
+                for (let i = 0; i < 8; i++) {
                     const dot = document.createElement('div');
                     dot.className = 'iv-page-dot' + (i === 0 ? ' active' : '');
                     dot.id = 'ivDot' + i;
@@ -1482,7 +1503,8 @@
                     computeModelProbSequence(candles, 1),
                     computeModelProbSequence(candles, 2),
                     computeModelProbSequence(candles, 3),
-                    computeModelProbSequence(candles, 4)
+                    computeModelProbSequence(candles, 4),
+                    computeModelProbSequence(candles, 5)
                 ];
             }
             drawIndicatorCanvases();
@@ -1553,6 +1575,13 @@
                 const modelNames = ['Историческа', 'Байесова', 'Логистична', 'Марковска', 'Очаквана стойност'];
                 label.textContent = modelNames[currentPage - 2] + ' вероятност';
                 drawProbLine(ctx, w, h, probData);
+                return;
+            }
+
+            // Page 7: Wavelet
+            if (currentPage === 7 && d.modelProbs && d.modelProbs[5]) {
+                label.textContent = 'Уейвлет трансформация';
+                drawProbLine(ctx, w, h, d.modelProbs[5]);
                 return;
             }
         }
@@ -1661,7 +1690,7 @@
         function onIvPageScroll() {
             const pages = document.getElementById('ivPages');
             if (!pages) return;
-            const count = 7;
+            const count = 8;
             const idx = Math.round(pages.scrollLeft / pages.clientWidth);
             currentPage = idx;
             for (let i = 0; i < count; i++) {
@@ -1672,7 +1701,7 @@
             const next = document.getElementById('ivArrowNext');
             if (prev) prev.style.display = 'flex';
             if (next) {
-                const labels = ['›', '›', '›', '›', '›', '›', 'A'];
+                const labels = ['›', '›', '›', '›', '›', '›', '›', 'A'];
                 next.textContent = labels[idx] || '›';
             }
         }
@@ -1684,7 +1713,7 @@
             const idx = Math.round(pages.scrollLeft / w);
             const target = idx + dir;
             if (dir < 0 && target < 0) return;
-            const maxPage = 6;
+            const maxPage = 7;
             if (dir > 0 && target > maxPage) {
                 showNotification('Модел A — активен модел', 'success');
                 return;
@@ -1788,7 +1817,7 @@
                 document.getElementById('ivRsiVal').textContent = '--';
                 document.getElementById('ivVolVal').textContent = '--';
                 document.getElementById('ivObvVal').textContent = '--';
-                ['modHist','modBayes','modLog','modMarkov','modEv','avg'].forEach(p => {
+                ['modHist','modBayes','modLog','modMarkov','modEv','modWavelet'].forEach(p => {
                     const b = document.getElementById(p + 'Buy');
                     const s = document.getElementById(p + 'Sell');
                     if (b) b.textContent = '--';
@@ -1863,7 +1892,8 @@
                     { p: 'modBayes', m: models.models.bayesian },
                     { p: 'modLog', m: models.models.logistic },
                     { p: 'modMarkov', m: models.models.markov },
-                    { p: 'modEv', m: models.models.expectedValue }
+                    { p: 'modEv', m: models.models.expectedValue },
+                    { p: 'modWavelet', m: models.models.wavelet }
                 ];
                 sets.forEach(({ p, m }) => {
                     setModelDisplay(p, m.buyPct, m.sellPct);

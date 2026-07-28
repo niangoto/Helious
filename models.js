@@ -241,6 +241,7 @@ function computeExpectedValue(candles) {
 
 function computeAllModels(candles) {
   if (!candles || candles.length < 30) return null;
+  const prices = candles.map(c => c.close);
   const hist = computeHistoricalProbability(candles);
   return {
     models: {
@@ -248,7 +249,8 @@ function computeAllModels(candles) {
       bayesian: computeCombinationProbability(candles),
       logistic: computeCombinationProbability(candles),
       markov: computeMarkovChain(candles),
-      expectedValue: computeExpectedValue(candles)
+      expectedValue: computeExpectedValue(candles),
+      wavelet: computeWaveletProbability(prices)
     }
   };
 }
@@ -322,8 +324,59 @@ function computeModelProbSequence(candles, modelIndex) {
       } else if (modelIndex === 4) { // EV
         const wr = wins / (wins + losses || 1);
         result.push({ time: t, value: 50 + (wr - 0.5) * 40 });
+      } else if (modelIndex === 5) { // Wavelet
+        const subPrices = prices.slice(0, i + 1);
+        const w = computeWaveletProbability(subPrices);
+        result.push({ time: t, value: w.buyPct });
       }
     }
   }
   return result;
+}
+
+// --- Wavelet Transform (Haar) ---
+function haarWaveletDecompose(data) {
+  const n = data.length;
+  if (n < 2) return { approx: data, details: [] };
+  const half = Math.floor(n / 2);
+  const approx = new Array(half);
+  const details = new Array(half);
+  for (let i = 0; i < half; i++) {
+    const a = data[i * 2];
+    const b = data[i * 2 + 1];
+    approx[i] = (a + b) / 2;
+    details[i] = (a - b) / 2;
+  }
+  return { approx, details };
+}
+
+function haarWaveletMultiLevel(prices, levels) {
+  levels = levels || 3;
+  let current = prices;
+  const allDetails = [];
+  for (let level = 0; level < levels; level++) {
+    const result = haarWaveletDecompose(current);
+    allDetails.push(result.details);
+    current = result.approx;
+    if (current.length < 2) break;
+  }
+  return { finalApprox: current, allDetails };
+}
+
+function computeWaveletProbability(prices) {
+  if (prices.length < 8) return { buyPct: 50, sellPct: 50 };
+  const result = haarWaveletMultiLevel(prices, 4);
+  const details = result.allDetails;
+  let signal = 0, totalWeight = 0;
+  for (let level = 0; level < details.length; level++) {
+    const weight = Math.pow(2, -level);
+    totalWeight += weight * details[level].length;
+    for (const d of details[level]) {
+      const normalized = Math.max(-1, Math.min(1, d / (prices[prices.length - 1] * 0.01)));
+      signal += normalized * weight;
+    }
+  }
+  const avgSignal = totalWeight > 0 ? signal / totalWeight : 0;
+  const buyPct = 50 + Math.max(-40, Math.min(40, avgSignal * 200));
+  return { buyPct: Math.max(1, Math.min(99, buyPct)), sellPct: Math.max(1, Math.min(99, 100 - buyPct)) };
 }
