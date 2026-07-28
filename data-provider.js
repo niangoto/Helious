@@ -264,7 +264,6 @@ async function fetchData(symbol, interval) {
         const data = await fetchTwelvedata(sym, interval);
         if (data.length > 10) return { symbol: canonical, interval, candles: data, source: 'twelvedata:' + sym };
       }
-      if (provider === 'alphavantage') {
       if (provider === 'binance') {
         const raw = await fetchFromURL(`https://fapi.binance.com/fapi/v1/klines?symbol=${sym}&interval=${interval}&limit=1000`);
         const data = JSON.parse(raw).map(d => ({
@@ -341,10 +340,8 @@ async function fetchMT5(symbol, interval) {
 function log(level, msg, data) {
   const line = `[${new Date().toISOString()}] [${level}] ${msg}${data ? ' ' + JSON.stringify(data) : ''}`;
   console.log(line);
-  try { fs.appendFileSync(path.join(__dirname, 'data-provider.log'), line + '\n'); } catch (e) {}
+  try { require('fs').appendFileSync(path.join(__dirname, 'data-provider.log'), line + '\n'); } catch (e) {}
 }
-
-const fs = require('fs');
 
 // ─── Express-style handler for server.js ────────────────────────
 async function handleDataRequest(urlParams) {
