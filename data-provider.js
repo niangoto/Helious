@@ -242,7 +242,17 @@ async function fetchTwelvedata(symbol, interval) {
   return data;
 }
 
+// Negative cache — remember symbols that failed to avoid hitting APIs repeatedly
+const failCache = {};
+const FAIL_TTL = 120000; // 2 minutes
+
 async function fetchData(symbol, interval) {
+  const canonical = resolveSymbol(symbol);
+  const cacheKey = canonical + '_' + interval;
+  const failed = failCache[cacheKey];
+  if (failed && Date.now() - failed.time < FAIL_TTL) {
+    throw { message: `Няма данни за ${canonical} (кеширана грешка)`, errors: failed.errors };
+  }
   const canonical = resolveSymbol(symbol);
   const sources = getSources(symbol);
   const errors = [];
@@ -294,6 +304,8 @@ async function fetchData(symbol, interval) {
     } catch (e) { errors.push(`binance:${symbol}: ${e.message}`); }
   }
 
+  // Cache failure so we don't spam APIs for dead symbols
+  failCache[cacheKey] = { time: Date.now(), errors };
   throw { message: `Няма данни за ${canonical}`, errors };
 }
 
