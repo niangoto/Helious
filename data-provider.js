@@ -253,7 +253,6 @@ async function fetchData(symbol, interval) {
   if (failed && Date.now() - failed.time < FAIL_TTL) {
     throw { message: `Няма данни за ${canonical} (кеширана грешка)`, errors: failed.errors };
   }
-  const canonical = resolveSymbol(symbol);
   const sources = getSources(symbol);
   const errors = [];
 
