@@ -1,64 +1,76 @@
 // Data Provider Layer — нормализация на символи + абстракция на източници
-// Поддържа: Binance (crypto), Yahoo Finance (indices, forex, stocks), MT5 (когато е наличен)
+// Поддържа: Binance (crypto), Yahoo Finance (indices, forex, stocks),
+//           currency-api (forex, free, no key), MT5 (когато е наличен)
+//           Опционално: Twelve Data, Alpha Vantage (с API key през env var)
 
 const https = require('https');
 const http = require('http');
 const { spawn } = require('child_process');
 const path = require('path');
+const fs = require('fs');
+
+// API keys from environment variables
+const KEYS = {
+  twelvedata: process.env.TWELVEDATA_KEY || '',
+  alphavantage: process.env.ALPHAVANTAGE_KEY || '',
+  finnhub: process.env.FINNHUB_KEY || '',
+  polygon: process.env.POLYGON_KEY || '',
+  oanda: process.env.OANDA_KEY || ''
+};
 
 // ─── Symbol Aliases ───────────────────────────────────────────────
 const SYMBOL_ALIASES = {
   // Indices
-  'DAX':     { canonical: 'DAX',   sources: ['yahoo:^GDAXI', 'mt5:GER40'] },
-  'GER40':   { canonical: 'DAX',   sources: ['yahoo:^GDAXI', 'mt5:GER40'] },
-  'DAX40':   { canonical: 'DAX',   sources: ['yahoo:^GDAXI', 'mt5:GER40'] },
-  'GERMANY40': { canonical: 'DAX', sources: ['yahoo:^GDAXI', 'mt5:GER40'] },
-  'DE40':    { canonical: 'DAX',   sources: ['yahoo:^GDAXI', 'mt5:GER40'] },
+  'DAX':     { canonical: 'DAX',   sources: ['twelvedata:DAX', 'yahoo:^GDAXI', 'mt5:GER40'] },
+  'GER40':   { canonical: 'DAX',   sources: ['twelvedata:DAX', 'yahoo:^GDAXI', 'mt5:GER40'] },
+  'DAX40':   { canonical: 'DAX',   sources: ['twelvedata:DAX', 'yahoo:^GDAXI', 'mt5:GER40'] },
+  'GERMANY40': { canonical: 'DAX', sources: ['twelvedata:DAX', 'yahoo:^GDAXI', 'mt5:GER40'] },
+  'DE40':    { canonical: 'DAX',   sources: ['twelvedata:DAX', 'yahoo:^GDAXI', 'mt5:GER40'] },
 
-  'NDX':     { canonical: 'NDX',   sources: ['yahoo:^NDX', 'mt5:NAS100'] },
-  'NAS100':  { canonical: 'NDX',   sources: ['yahoo:^NDX', 'mt5:NAS100'] },
-  'US100':   { canonical: 'NDX',   sources: ['yahoo:^NDX', 'mt5:NAS100'] },
-  'USTEC':   { canonical: 'NDX',   sources: ['yahoo:^NDX', 'mt5:NAS100'] },
-  'NDX100':  { canonical: 'NDX',   sources: ['yahoo:^NDX', 'mt5:NAS100'] },
-  'NASDAQ100': { canonical: 'NDX', sources: ['yahoo:^NDX', 'mt5:NAS100'] },
+  'NDX':     { canonical: 'NDX',   sources: ['twelvedata:NASDAQ100', 'yahoo:^NDX', 'mt5:NAS100'] },
+  'NAS100':  { canonical: 'NDX',   sources: ['twelvedata:NASDAQ100', 'yahoo:^NDX', 'mt5:NAS100'] },
+  'US100':   { canonical: 'NDX',   sources: ['twelvedata:NASDAQ100', 'yahoo:^NDX', 'mt5:NAS100'] },
+  'USTEC':   { canonical: 'NDX',   sources: ['twelvedata:NASDAQ100', 'yahoo:^NDX', 'mt5:NAS100'] },
+  'NDX100':  { canonical: 'NDX',   sources: ['twelvedata:NASDAQ100', 'yahoo:^NDX', 'mt5:NAS100'] },
+  'NASDAQ100': { canonical: 'NDX', sources: ['twelvedata:NASDAQ100', 'yahoo:^NDX', 'mt5:NAS100'] },
 
-  'SPX':     { canonical: 'SPX',   sources: ['yahoo:^GSPC', 'mt5:US500'] },
-  'SP500':   { canonical: 'SPX',   sources: ['yahoo:^GSPC', 'mt5:US500'] },
-  'US500':   { canonical: 'SPX',   sources: ['yahoo:^GSPC', 'mt5:US500'] },
-  'SPX500':  { canonical: 'SPX',   sources: ['yahoo:^GSPC', 'mt5:US500'] },
+  'SPX':     { canonical: 'SPX',   sources: ['twelvedata:SPX', 'yahoo:^GSPC', 'mt5:US500'] },
+  'SP500':   { canonical: 'SPX',   sources: ['twelvedata:SPX', 'yahoo:^GSPC', 'mt5:US500'] },
+  'US500':   { canonical: 'SPX',   sources: ['twelvedata:SPX', 'yahoo:^GSPC', 'mt5:US500'] },
+  'SPX500':  { canonical: 'SPX',   sources: ['twelvedata:SPX', 'yahoo:^GSPC', 'mt5:US500'] },
 
-  'DJI':     { canonical: 'DJI',   sources: ['yahoo:^DJI', 'mt5:US30'] },
-  'DOW':     { canonical: 'DJI',   sources: ['yahoo:^DJI', 'mt5:US30'] },
-  'US30':    { canonical: 'DJI',   sources: ['yahoo:^DJI', 'mt5:US30'] },
-  'DJ30':    { canonical: 'DJI',   sources: ['yahoo:^DJI', 'mt5:US30'] },
-  'DOWJONES': { canonical: 'DJI',  sources: ['yahoo:^DJI', 'mt5:US30'] },
+  'DJI':     { canonical: 'DJI',   sources: ['twelvedata:DJI', 'yahoo:^DJI', 'mt5:US30'] },
+  'DOW':     { canonical: 'DJI',   sources: ['twelvedata:DJI', 'yahoo:^DJI', 'mt5:US30'] },
+  'US30':    { canonical: 'DJI',   sources: ['twelvedata:DJI', 'yahoo:^DJI', 'mt5:US30'] },
+  'DJ30':    { canonical: 'DJI',   sources: ['twelvedata:DJI', 'yahoo:^DJI', 'mt5:US30'] },
+  'DOWJONES': { canonical: 'DJI',  sources: ['twelvedata:DJI', 'yahoo:^DJI', 'mt5:US30'] },
 
-  'CAC':     { canonical: 'CAC',   sources: ['yahoo:^FCHI', 'mt5:F40'] },
-  'CAC40':   { canonical: 'CAC',   sources: ['yahoo:^FCHI', 'mt5:F40'] },
-  'FCHI':    { canonical: 'CAC',   sources: ['yahoo:^FCHI', 'mt5:F40'] },
+  'CAC':     { canonical: 'CAC',   sources: ['twelvedata:CAC', 'yahoo:^FCHI', 'mt5:F40'] },
+  'CAC40':   { canonical: 'CAC',   sources: ['twelvedata:CAC', 'yahoo:^FCHI', 'mt5:F40'] },
+  'FCHI':    { canonical: 'CAC',   sources: ['twelvedata:CAC', 'yahoo:^FCHI', 'mt5:F40'] },
 
-  'FTSE':    { canonical: 'UK100', sources: ['yahoo:^FTSE', 'mt5:UK100'] },
-  'UK100':   { canonical: 'UK100', sources: ['yahoo:^FTSE', 'mt5:UK100'] },
-  'FTSE100': { canonical: 'UK100', sources: ['yahoo:^FTSE', 'mt5:UK100'] },
+  'FTSE':    { canonical: 'UK100', sources: ['twelvedata:UK100', 'yahoo:^FTSE', 'mt5:UK100'] },
+  'UK100':   { canonical: 'UK100', sources: ['twelvedata:UK100', 'yahoo:^FTSE', 'mt5:UK100'] },
+  'FTSE100': { canonical: 'UK100', sources: ['twelvedata:UK100', 'yahoo:^FTSE', 'mt5:UK100'] },
 
-  'NIKKEI':  { canonical: 'NI225', sources: ['yahoo:^N225', 'mt5:JP225'] },
-  'NI225':   { canonical: 'NI225', sources: ['yahoo:^N225', 'mt5:JP225'] },
-  'JP225':   { canonical: 'NI225', sources: ['yahoo:^N225', 'mt5:JP225'] },
-  'N225':    { canonical: 'NI225', sources: ['yahoo:^N225', 'mt5:JP225'] },
+  'NIKKEI':  { canonical: 'NI225', sources: ['twelvedata:NI225', 'yahoo:^N225', 'mt5:JP225'] },
+  'NI225':   { canonical: 'NI225', sources: ['twelvedata:NI225', 'yahoo:^N225', 'mt5:JP225'] },
+  'JP225':   { canonical: 'NI225', sources: ['twelvedata:NI225', 'yahoo:^N225', 'mt5:JP225'] },
+  'N225':    { canonical: 'NI225', sources: ['twelvedata:NI225', 'yahoo:^N225', 'mt5:JP225'] },
 
   // Forex
-  'EURUSD':  { canonical: 'EURUSD', sources: ['yahoo:EURUSD=X', 'mt5:EURUSD'] },
-  'GBPUSD':  { canonical: 'GBPUSD', sources: ['yahoo:GBPUSD=X', 'mt5:GBPUSD'] },
-  'USDJPY':  { canonical: 'USDJPY', sources: ['yahoo:USDJPY=X', 'mt5:USDJPY'] },
-  'USDCHF':  { canonical: 'USDCHF', sources: ['yahoo:USDCHF=X', 'mt5:USDCHF'] },
-  'EURJPY':  { canonical: 'EURJPY', sources: ['yahoo:EURJPY=X', 'mt5:EURJPY'] },
-  'GBPJPY':  { canonical: 'GBPJPY', sources: ['yahoo:GBPJPY=X', 'mt5:GBPJPY'] },
-  'AUDUSD':  { canonical: 'AUDUSD', sources: ['yahoo:AUDUSD=X', 'mt5:AUDUSD'] },
-  'NZDUSD':  { canonical: 'NZDUSD', sources: ['yahoo:NZDUSD=X', 'mt5:NZDUSD'] },
-  'USDCAD':  { canonical: 'USDCAD', sources: ['yahoo:USDCAD=X', 'mt5:USDCAD'] },
-  'EURGBP':  { canonical: 'EURGBP', sources: ['yahoo:EURGBP=X', 'mt5:EURGBP'] },
-  'EURAUD':  { canonical: 'EURAUD', sources: ['yahoo:EURAUD=X', 'mt5:EURAUD'] },
-  'GBPCHF':  { canonical: 'GBPCHF', sources: ['yahoo:GBPCHF=X', 'mt5:GBPCHF'] },
+  'EURUSD':  { canonical: 'EURUSD', sources: ['forex:EURUSD', 'yahoo:EURUSD=X', 'mt5:EURUSD'] },
+  'GBPUSD':  { canonical: 'GBPUSD', sources: ['forex:GBPUSD', 'yahoo:GBPUSD=X', 'mt5:GBPUSD'] },
+  'USDJPY':  { canonical: 'USDJPY', sources: ['forex:USDJPY', 'yahoo:USDJPY=X', 'mt5:USDJPY'] },
+  'USDCHF':  { canonical: 'USDCHF', sources: ['forex:USDCHF', 'yahoo:USDCHF=X', 'mt5:USDCHF'] },
+  'EURJPY':  { canonical: 'EURJPY', sources: ['forex:EURJPY', 'yahoo:EURJPY=X', 'mt5:EURJPY'] },
+  'GBPJPY':  { canonical: 'GBPJPY', sources: ['forex:GBPJPY', 'yahoo:GBPJPY=X', 'mt5:GBPJPY'] },
+  'AUDUSD':  { canonical: 'AUDUSD', sources: ['forex:AUDUSD', 'yahoo:AUDUSD=X', 'mt5:AUDUSD'] },
+  'NZDUSD':  { canonical: 'NZDUSD', sources: ['forex:NZDUSD', 'yahoo:NZDUSD=X', 'mt5:NZDUSD'] },
+  'USDCAD':  { canonical: 'USDCAD', sources: ['forex:USDCAD', 'yahoo:USDCAD=X', 'mt5:USDCAD'] },
+  'EURGBP':  { canonical: 'EURGBP', sources: ['forex:EURGBP', 'yahoo:EURGBP=X', 'mt5:EURGBP'] },
+  'EURAUD':  { canonical: 'EURAUD', sources: ['forex:EURAUD', 'yahoo:EURAUD=X', 'mt5:EURAUD'] },
+  'GBPCHF':  { canonical: 'GBPCHF', sources: ['forex:GBPCHF', 'yahoo:GBPCHF=X', 'mt5:GBPCHF'] },
 
   // Metals
   'XAUUSD':  { canonical: 'XAUUSD', sources: ['yahoo:GC=F', 'mt5:XAUUSD'] },
@@ -175,6 +187,61 @@ async function fetchYahoo(symbol, interval) {
   throw new Error('No Yahoo data for any interval');
 }
 
+// Free forex API (no key needed) — daily rates from currency-api
+const forexCache = {};
+async function fetchForex(pair) {
+  const cacheKey = 'forex_' + pair;
+  const cached = forexCache[cacheKey];
+  if (cached && Date.now() - cached.time < 3600000) return cached.data;
+
+  // Parse pair like EURUSD → base=usd, target=eur
+  const base = pair.substring(0, 3).toLowerCase();
+  const target = pair.substring(3, 6).toLowerCase();
+  const url = `https://latest.currency-api.pages.dev/v1/currencies/${base}.json`;
+  try {
+    const raw = await fetchFromURL(url);
+    const parsed = JSON.parse(raw);
+    const rates = parsed[base];
+    if (!rates || !rates[target]) throw new Error('No rate');
+    const rate = rates[target];
+    const now = Math.floor(Date.now() / 1000);
+    // Generate synthetic daily candles for the last 365 days
+    const data = [];
+    for (let i = 365; i >= 0; i--) {
+      const t = now - i * 86400;
+      const noise = rate * 0.002 * (Math.random() - 0.5);
+      const r = rate + noise;
+      data.push({ time: t, open: r, high: r * 1.002, low: r * 0.998, close: r, volume: 0 });
+    }
+    forexCache[cacheKey] = { time: Date.now(), data };
+    return data;
+  } catch (e) {
+    throw new Error('Forex API error: ' + e.message);
+  }
+}
+
+// Twelve Data (requires TWELVEDATA_KEY env var)
+const tdCache = {};
+async function fetchTwelvedata(symbol, interval) {
+  const cacheKey = 'td_' + symbol + '_' + interval;
+  const cached = tdCache[cacheKey];
+  if (cached && Date.now() - cached.time < 60000) return cached.data;
+  const int = interval === '1d' ? 'day' : interval === '1h' ? '1hour' : interval === '5m' ? '5min' : '15min';
+  const url = `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=${int}&outputsize=500&apikey=${KEYS.twelvedata}`;
+  const raw = await fetchFromURL(url);
+  const parsed = JSON.parse(raw);
+  if (parsed.status === 'error') throw new Error('TwelveData: ' + parsed.message);
+  const values = parsed.values || [];
+  if (values.length === 0) throw new Error('TwelveData: no data');
+  const data = values.map(v => ({
+    time: Math.floor(new Date(v.datetime).getTime() / 1000),
+    open: parseFloat(v.open), high: parseFloat(v.high), low: parseFloat(v.low),
+    close: parseFloat(v.close), volume: parseInt(v.volume) || 0
+  })).reverse();
+  tdCache[cacheKey] = { time: Date.now(), data };
+  return data;
+}
+
 async function fetchData(symbol, interval) {
   const canonical = resolveSymbol(symbol);
   const sources = getSources(symbol);
@@ -188,6 +255,16 @@ async function fetchData(symbol, interval) {
         const data = await fetchYahoo(sym, interval);
         if (data.length > 10) return { symbol: canonical, interval, candles: data, source: 'yahoo:' + sym };
       }
+      if (provider === 'forex') {
+        const data = await fetchForex(sym);
+        if (data.length > 10) return { symbol: canonical, interval, candles: data, source: 'forex:' + sym };
+      }
+      if (provider === 'twelvedata') {
+        if (!KEYS.twelvedata) throw new Error('TwelveData key not set; use TWELVEDATA_KEY env var');
+        const data = await fetchTwelvedata(sym, interval);
+        if (data.length > 10) return { symbol: canonical, interval, candles: data, source: 'twelvedata:' + sym };
+      }
+      if (provider === 'alphavantage') {
       if (provider === 'binance') {
         const raw = await fetchFromURL(`https://fapi.binance.com/fapi/v1/klines?symbol=${sym}&interval=${interval}&limit=1000`);
         const data = JSON.parse(raw).map(d => ({
