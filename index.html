@@ -1096,7 +1096,8 @@
                     // Convert to Binance kline format for backward compatibility
                     return resp.candles.map(c => [c.time * 1000, c.open.toString(), c.high.toString(), c.low.toString(), c.close.toString(), c.volume.toString(), c.time * 1000 + 60000, '0', 0, '0', '0', '0']);
                 }
-                throw new Error(resp?.error || 'Няма данни за ' + symbol);
+                const detail = resp?.details ? ' (' + resp.details + ')' : '';
+                throw new Error((resp?.error || 'Няма данни за ' + symbol) + detail);
             }
             // Direct mode: try Binance Spot → Futures → Yahoo
             let r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
@@ -1400,7 +1401,7 @@
                 chart.timeScale().setVisibleRange(range);
             } catch (e) {
                 console.error("Data loading error:", e);
-                showNotification(`Няма данни за ${currentSymbol} — символът не е намерен в Binance`, "error");
+                showNotification(`${e.message}`, "error");
             } finally {
                 showLoading(false);
             }

@@ -369,7 +369,8 @@ async function handleDataRequest(urlParams) {
     return {
       ok: false,
       symbol: resolveSymbol(symbol),
-      error: e.message || 'Unknown error'
+      error: e.message || 'Unknown error',
+      details: e.errors ? e.errors.join('; ') : ''
     };
   }
 }
