@@ -1091,14 +1091,12 @@
 
         async function fetchKlines(symbol, interval, limit) {
             if (API_BASE) {
-                // Try Binance first, then Yahoo Finance
-                const binance = await fetch(`${API_BASE}/binance?symbol=${symbol}&interval=${interval}&limit=${limit}`).then(r => r.json()).catch(() => null);
-                if (binance && Array.isArray(binance) && binance.length > 0) return binance;
-                // Fallback to Yahoo Finance (don't throw on Binance error)
-                const yhSym = YAHOO_SYMBOLS[symbol.toUpperCase()] || symbol;
-                const yahoo = await fetch(`${API_BASE}/yahoo?symbol=${encodeURIComponent(yhSym)}&interval=${interval}`).then(r => r.json()).catch(() => null);
-                if (yahoo && Array.isArray(yahoo) && yahoo.length > 0) return yahoo;
-                throw new Error('Няма данни за ' + symbol);
+                const resp = await fetch(`${API_BASE}/data?symbol=${symbol}&interval=${interval}&limit=${limit}`).then(r => r.json()).catch(() => null);
+                if (resp && resp.ok && resp.candles && resp.candles.length > 0) {
+                    // Convert to Binance kline format for backward compatibility
+                    return resp.candles.map(c => [c.time * 1000, c.open.toString(), c.high.toString(), c.low.toString(), c.close.toString(), c.volume.toString(), c.time * 1000 + 60000, '0', 0, '0', '0', '0']);
+                }
+                throw new Error(resp?.error || 'Няма данни за ' + symbol);
             }
             // Direct mode: try Binance Spot → Futures → Yahoo
             let r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
@@ -1727,20 +1725,14 @@
             const results = document.getElementById('ivSearchResults');
             if (!results) return;
             const query = q.toUpperCase().trim();
-            const all = getFullSymbolList();
-            // Search by ticker and by display name
-            const filtered = all.filter(s => {
-                const displayName = (symbolDetails[s]?.name || s.replace('USDT', '')).toUpperCase();
-                return s.includes(query) || s.replace('USDT', '').includes(query) || displayName.includes(query);
-            }).slice(0, 20);
-            results.innerHTML = filtered.map(s =>
-                `<div onclick="ivSelectSymbol('${s}')">${symbolDetails[s] ? symbolDetails[s].name : s.replace('USDT','')} <span style="color:var(--text-dim);font-size:11px">${s}</span></div>`
-            ).join('');
-            // Allow adding custom symbols - search exact user input first
-            if (query.length >= 2 && !all.includes(query) && !all.some(s => s.replace('USDT','') === query.replace('USDT',''))) {
-                results.innerHTML += `<div style="border-top:1px solid rgba(0,240,255,0.2);color:var(--accent-cyan)" onclick="tryAddCustomSymbol('${query}')">🔍 Намери "${query}" в Binance</div>`;
+            if (API_BASE && query.length >= 1) {
+                fetch(`${API_BASE}/symbols?query=${encodeURIComponent(query)}`).then(r => r.json()).then(list => {
+                    results.innerHTML = list.map(s =>
+                        `<div onclick="ivSelectSymbol('${s.canonical}')">${s.canonical} <span style="color:var(--text-dim);font-size:11px">${s.alias !== s.canonical ? s.alias : ''}</span></div>`
+                    ).join('');
+                    results.style.display = list.length ? 'block' : 'none';
+                }).catch(() => {});
             }
-            results.style.display = (filtered.length || query.length >= 2) ? 'block' : 'none';
         }
         function ivShowResults() {
             const inp = document.getElementById('ivSearch');

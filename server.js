@@ -210,6 +210,26 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // Data Provider Endpoint (unified, with symbol normalization)
+  if (url.pathname === '/data' && req.method === 'GET') {
+    const dp = require('./data-provider');
+    dp.handleDataRequest(url.searchParams).then(result => {
+      res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify(result));
+    });
+    return;
+  }
+
+  // Symbol Search Endpoint
+  if (url.pathname === '/symbols' && req.method === 'GET') {
+    const dp = require('./data-provider');
+    const query = url.searchParams.get('query') || '';
+    const results = dp.searchSymbols(query);
+    res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+    res.end(JSON.stringify(results));
+    return;
+  }
+
   // Static Files
   const filePath = path.join(__dirname, url.pathname === '/' ? 'index.html' : url.pathname);
   fs.readFile(filePath, (err, data) => {
