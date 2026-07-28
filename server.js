@@ -123,35 +123,90 @@ const server = http.createServer((req, res) => {
     const range = interval === '1d' ? '1y' : interval === '5m' ? '1mo' : interval === '1h' ? '6mo' : interval === '1wk' ? '5y' : '2y';
     const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${interval}&range=${range}&includePrePost=false`;
 
-    const req = https.get(yahooUrl, { timeout: 8000 }, (yhRes) => {
-      let data = '';
-      yhRes.on('data', (chunk) => data += chunk);
-      yhRes.on('end', () => {
-        if (yhRes.statusCode !== 200) { sendJson(res, 400, { error: 'Yahoo error ' + yhRes.statusCode }); return; }
-        try {
-          const parsed = JSON.parse(data);
-          const result = parsed.chart?.result?.[0];
-          if (!result) { sendJson(res, 400, { error: 'No data from Yahoo' }); return; }
-          const timestamps = result.timestamp || [];
-          const quote = result.indicators?.quote?.[0] || {};
-          const klines = timestamps.map((t, i) => [
-            t * 1000,
-            (quote.open?.[i] || 0).toString(),
-            (quote.high?.[i] || 0).toString(),
-            (quote.low?.[i] || 0).toString(),
-            (quote.close?.[i] || 0).toString(),
-            (quote.volume?.[i] || 0).toString(),
-            t * 1000 + 60000, '0', 0, '0', '0', '0'
-          ]).filter(k => parseFloat(k[4]) > 0);
-          yahooCache[cacheKey] = { time: Date.now(), data: klines };
-          res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
-          res.end(JSON.stringify(klines));
-        } catch (e) { sendJson(res, 500, { error: 'Yahoo parse: ' + e.message }); }
+    let triedIntervals = [interval];
+    const fallbacks = { '5m': '1h', '15m': '1h', '30m': '1h', '1h': '1d' };
+    let currentInterval = interval;
+    
+    function tryYahoo() {
+      const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${currentInterval}&range=${currentInterval === '1d' ? '1y' : '1mo'}&includePrePost=false`;
+      const req = https.get(url, { timeout: 8000 }, (yhRes) => {
+        let data = '';
+        yhRes.on('data', (chunk) => data += chunk);
+        yhRes.on('end', () => {
+          if (yhRes.statusCode !== 200) {
+            // Try fallback interval
+            const next = fallbacks[currentInterval];
+            if (next && !triedIntervals.includes(next)) {
+              triedIntervals.push(next);
+              currentInterval = next;
+              tryYahoo();
+              return;
+            }
+            sendJson(res, 400, { error: 'Yahoo error ' + yhRes.statusCode });
+            return;
+          }
+          try {
+            const parsed = JSON.parse(data);
+            const result = parsed.chart?.result?.[0];
+            if (!result) {
+              const next = fallbacks[currentInterval];
+              if (next && !triedIntervals.includes(next)) {
+                triedIntervals.push(next);
+                currentInterval = next;
+                tryYahoo();
+                return;
+              }
+              sendJson(res, 400, { error: 'No data from Yahoo' }); return;
+            }
+            const timestamps = result.timestamp || [];
+            const quote = result.indicators?.quote?.[0] || {};
+            const klines = timestamps.map((t, i) => [
+              t * 1000,
+              (quote.open?.[i] || 0).toString(),
+              (quote.high?.[i] || 0).toString(),
+              (quote.low?.[i] || 0).toString(),
+              (quote.close?.[i] || 0).toString(),
+              (quote.volume?.[i] || 0).toString(),
+              t * 1000 + 60000, '0', 0, '0', '0', '0'
+            ]).filter(k => parseFloat(k[4]) > 0);
+            yahooCache[cacheKey] = { time: Date.now(), data: klines };
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+            res.end(JSON.stringify(klines));
+          } catch (e) { sendJson(res, 500, { error: 'Yahoo parse: ' + e.message }); }
+        });
+        yhRes.on('error', () => {
+          const next = fallbacks[currentInterval];
+          if (next && !triedIntervals.includes(next)) {
+            triedIntervals.push(next);
+            currentInterval = next;
+            tryYahoo();
+            return;
+          }
+          sendJson(res, 504, { error: 'Yahoo unavailable' });
+        });
       });
-      yhRes.on('error', () => sendJson(res, 504, { error: 'Yahoo unavailable' }));
-    });
-    req.on('timeout', () => { req.destroy(); sendJson(res, 504, { error: 'Yahoo timeout' }); });
-    req.on('error', () => sendJson(res, 504, { error: 'Yahoo error' }));
+      req.on('timeout', () => { req.destroy();
+        const next = fallbacks[currentInterval];
+        if (next && !triedIntervals.includes(next)) {
+          triedIntervals.push(next);
+          currentInterval = next;
+          tryYahoo();
+          return;
+        }
+        sendJson(res, 504, { error: 'Yahoo timeout' });
+      });
+      req.on('error', () => {
+        const next = fallbacks[currentInterval];
+        if (next && !triedIntervals.includes(next)) {
+          triedIntervals.push(next);
+          currentInterval = next;
+          tryYahoo();
+          return;
+        }
+        sendJson(res, 504, { error: 'Yahoo error' });
+      });
+    }
+    tryYahoo();
     return;
   }
 
