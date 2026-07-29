@@ -11,7 +11,7 @@ const fs = require('fs');
 
 // API keys from environment variables
 const KEYS = {
-  twelvedata: process.env.TWELVEDATA_KEY || '',
+  twelvedata: process.env.TWELVEDATA_KEY || '60d414154e994106b75c789994aaa430',
   alphavantage: process.env.ALPHAVANTAGE_KEY || '',
   finnhub: process.env.FINNHUB_KEY || '',
   polygon: process.env.POLYGON_KEY || '',
