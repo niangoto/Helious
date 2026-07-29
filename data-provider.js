@@ -227,19 +227,37 @@ async function fetchTwelvedata(symbol, interval) {
   const cached = tdCache[cacheKey];
   if (cached && Date.now() - cached.time < 300000) return cached.data;
   const int = interval === '1d' ? 'day' : interval === '1h' ? '1hour' : interval === '5m' ? '5min' : '15min';
-  const url = `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=${int}&outputsize=500&apikey=${KEYS.twelvedata}`;
-  const raw = await fetchFromURL(url);
-  const parsed = JSON.parse(raw);
-  if (parsed.status === 'error') throw new Error('TwelveData: ' + parsed.message);
-  const values = parsed.values || [];
-  if (values.length === 0) throw new Error('TwelveData: no data');
-  const data = values.map(v => ({
-    time: Math.floor(new Date(v.datetime).getTime() / 1000),
-    open: parseFloat(v.open), high: parseFloat(v.high), low: parseFloat(v.low),
-    close: parseFloat(v.close), volume: parseInt(v.volume) || 0
-  })).reverse();
-  tdCache[cacheKey] = { time: Date.now(), data };
-  return data;
+
+  // Try multiple symbol variants for commodities
+  const variants = [symbol];
+  if (symbol === 'XAUUSD') variants.push('GOLD', 'FOREX:XAUUSD');
+  else if (symbol === 'XAGUSD') variants.push('SILVER', 'FOREX:XAGUSD');
+  else if (symbol === 'WTI') variants.push('OIL', 'CL');
+  else if (symbol === 'BRENT') variants.push('BZ');
+  else if (symbol === 'DAX') variants.push('DE30', 'XETR:DAX');
+  else if (symbol === 'NDX' || symbol === 'NASDAQ100') variants.push('NAS100.US', 'IXIC');
+  else if (symbol === 'SPX') variants.push('SPX500.US', 'SPY');
+  else if (symbol === 'CAC') variants.push('FCHI', 'CAC40');
+  else if (symbol === 'NI225') variants.push('JP225', 'NIKKEI');
+
+  for (const sym of variants) {
+    try {
+      const url = `https://api.twelvedata.com/time_series?symbol=${sym}&interval=${int}&outputsize=500&apikey=${KEYS.twelvedata}`;
+      const raw = await fetchFromURL(url);
+      const parsed = JSON.parse(raw);
+      if (parsed.status === 'error') continue;
+      const values = parsed.values || [];
+      if (values.length === 0) continue;
+      const data = values.map(v => ({
+        time: Math.floor(new Date(v.datetime).getTime() / 1000),
+        open: parseFloat(v.open), high: parseFloat(v.high), low: parseFloat(v.low),
+        close: parseFloat(v.close), volume: parseInt(v.volume) || 0
+      })).reverse();
+      tdCache[cacheKey] = { time: Date.now(), data };
+      return data;
+    } catch (e) {}
+  }
+  throw new Error('TwelveData: no data for any variant of ' + symbol);
 }
 
 // Negative cache — remember symbols that failed to avoid hitting APIs repeatedly
