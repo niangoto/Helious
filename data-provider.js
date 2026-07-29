@@ -73,17 +73,17 @@ const SYMBOL_ALIASES = {
   'GBPCHF':  { canonical: 'GBPCHF', sources: ['forex:GBPCHF', 'yahoo:GBPCHF=X', 'mt5:GBPCHF'] },
 
   // Metals
-  'XAUUSD':  { canonical: 'XAUUSD', sources: ['yahoo:GC=F', 'mt5:XAUUSD'] },
-  'GOLD':    { canonical: 'XAUUSD', sources: ['yahoo:GC=F', 'mt5:XAUUSD'] },
-  'XAGUSD':  { canonical: 'XAGUSD', sources: ['yahoo:SI=F', 'mt5:XAGUSD'] },
-  'SILVER':  { canonical: 'XAGUSD', sources: ['yahoo:SI=F', 'mt5:XAGUSD'] },
+  'XAUUSD':  { canonical: 'XAUUSD', sources: ['twelvedata:XAUUSD', 'yahoo:GC=F', 'mt5:XAUUSD'] },
+  'GOLD':    { canonical: 'XAUUSD', sources: ['twelvedata:XAUUSD', 'yahoo:GC=F', 'mt5:XAUUSD'] },
+  'XAGUSD':  { canonical: 'XAGUSD', sources: ['twelvedata:XAGUSD', 'yahoo:SI=F', 'mt5:XAGUSD'] },
+  'SILVER':  { canonical: 'XAGUSD', sources: ['twelvedata:XAGUSD', 'yahoo:SI=F', 'mt5:XAGUSD'] },
 
   // Energy
-  'WTI':     { canonical: 'WTI',   sources: ['yahoo:CL=F', 'mt5:WTI'] },
-  'OIL':     { canonical: 'WTI',   sources: ['yahoo:CL=F', 'mt5:WTI'] },
-  'CL':      { canonical: 'WTI',   sources: ['yahoo:CL=F', 'mt5:WTI'] },
-  'BRENT':   { canonical: 'BRENT', sources: ['yahoo:BZ=F', 'mt5:BRENT'] },
-  'BZ':      { canonical: 'BRENT', sources: ['yahoo:BZ=F', 'mt5:BRENT'] },
+  'WTI':     { canonical: 'WTI',   sources: ['twelvedata:WTI', 'yahoo:CL=F', 'mt5:WTI'] },
+  'OIL':     { canonical: 'WTI',   sources: ['twelvedata:WTI', 'yahoo:CL=F', 'mt5:WTI'] },
+  'CL':      { canonical: 'WTI',   sources: ['twelvedata:WTI', 'yahoo:CL=F', 'mt5:WTI'] },
+  'BRENT':   { canonical: 'BRENT', sources: ['twelvedata:BRENT', 'yahoo:BZ=F', 'mt5:BRENT'] },
+  'BZ':      { canonical: 'BRENT', sources: ['twelvedata:BRENT', 'yahoo:BZ=F', 'mt5:BRENT'] },
 
   // Crypto (canonical = Binance symbol)
   'BTC':     { canonical: 'BTCUSDT', sources: ['binance:BTCUSDT', 'yahoo:BTC-USD'] },
