@@ -1398,11 +1398,7 @@
                 if (typeof runForecast === 'function') runForecast(forecastData);
 
                 updateIndicatorCharts(candles);
-                const range = {
-                    from: candles[0].time,
-                    to: candles[candles.length - 1].time
-                };
-                chart.timeScale().setVisibleRange(range);
+                chart.timeScale().fitContent();
             } catch (e) {
                 console.error("Data loading error:", e);
                 showNotification(`${e.message}`, "error");
