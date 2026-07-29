@@ -1423,6 +1423,12 @@
             } catch (e) {
                 console.error("Data loading error:", e);
                 showNotification(`${e.message}`, "error");
+                // Clear forecast and candles to avoid stale data
+                latestForecastData = null;
+                predictionSeries.setData([]);
+                centerLineSeries.setData([]);
+                candleSeries.setData([]);
+                document.getElementById('currentPrice').innerText = '---';
             } finally {
                 showLoading(false);
             }
@@ -1781,7 +1787,10 @@
         function ivSelectSymbol(sym) {
             ivCurrentSymbol = sym;
             const inp = document.getElementById('ivSearch');
-            if (inp) inp.value = symbolDetails[sym] ? symbolDetails[sym].name : sym.replace('USDT', '');
+            if (inp) {
+                const displayName = symbolDetails[sym] ? symbolDetails[sym].name : sym.replace('USDT', '');
+                if (inp.value !== displayName) inp.value = displayName;
+            }
             const r = document.getElementById('ivSearchResults');
             if (r) r.style.display = 'none';
             ivReload();
