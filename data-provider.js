@@ -157,7 +157,7 @@ const yahooCache = {};
 async function fetchYahoo(symbol, interval) {
   const cacheKey = symbol + '_' + interval;
   const cached = yahooCache[cacheKey];
-  if (cached && Date.now() - cached.time < 60000) return cached.data;
+  if (cached && Date.now() - cached.time < 300000) return cached.data;
 
   const fallbacks = { '5m': '1h', '15m': '1h', '30m': '1h', '1h': '1d' };
   const tried = [];
@@ -225,7 +225,7 @@ const tdCache = {};
 async function fetchTwelvedata(symbol, interval) {
   const cacheKey = 'td_' + symbol + '_' + interval;
   const cached = tdCache[cacheKey];
-  if (cached && Date.now() - cached.time < 60000) return cached.data;
+  if (cached && Date.now() - cached.time < 300000) return cached.data;
   const int = interval === '1d' ? 'day' : interval === '1h' ? '1hour' : interval === '5m' ? '5min' : '15min';
   const url = `https://api.twelvedata.com/time_series?symbol=${symbol}&interval=${int}&outputsize=500&apikey=${KEYS.twelvedata}`;
   const raw = await fetchFromURL(url);
@@ -244,7 +244,7 @@ async function fetchTwelvedata(symbol, interval) {
 
 // Negative cache — remember symbols that failed to avoid hitting APIs repeatedly
 const failCache = {};
-const FAIL_TTL = 120000; // 2 minutes
+const FAIL_TTL = 300000; // 5 минути
 
 async function fetchData(symbol, interval) {
   const canonical = resolveSymbol(symbol);

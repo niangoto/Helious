@@ -1143,7 +1143,7 @@
             } catch (e) {}
             throw new Error('Symbol not available');
         }
-        let chart, candleSeries, predictionSeries, centerLineSeries;
+        let chart, candleSeries;
         let latestForecastData = null;
         let latestCandles = [];
         let indicatorData = { rsi: [], volume: [] };
@@ -1268,23 +1268,6 @@
                 borderVisible: false,
                 wickUpColor: '#00ff66',
                 wickDownColor: '#ff0055'
-            });
-
-            predictionSeries = chart.addLineSeries({
-                color: '#00f0ff',
-                lineWidth: 4,
-                lineStyle: 0,
-                title: 'Прогноза',
-                priceLineVisible: false
-            });
-
-            centerLineSeries = chart.addLineSeries({
-                color: 'rgba(255, 200, 50, 0.7)',
-                lineWidth: 1.5,
-                lineStyle: 0,
-                title: 'Център',
-                priceLineVisible: false,
-                lastValueVisible: false
             });
 
             setupPresentLine();
@@ -1425,8 +1408,6 @@
                 showNotification(`${e.message}`, "error");
                 // Clear forecast and candles to avoid stale data
                 latestForecastData = null;
-                predictionSeries.setData([]);
-                centerLineSeries.setData([]);
                 candleSeries.setData([]);
                 document.getElementById('currentPrice').innerText = '---';
             } finally {
@@ -1435,17 +1416,7 @@
         }
 
         function drawForecast() {
-            centerLineSeries.setMarkers([]);
-
-            if (!latestForecastData) {
-                predictionSeries.setData([]);
-                centerLineSeries.setData([]);
-                return;
-            }
-
-            const d = latestForecastData;
-            centerLineSeries.setData(d.centerPath || []);
-            predictionSeries.setData(d.forecastPath);
+            // Forecast removed — showing only raw price candles
         }
 
         function computeRSI(candles, period) {
