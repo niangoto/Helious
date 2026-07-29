@@ -58,19 +58,19 @@ const SYMBOL_ALIASES = {
   'JP225':   { canonical: 'NI225', sources: ['twelvedata:NI225', 'yahoo:^N225', 'mt5:JP225'] },
   'N225':    { canonical: 'NI225', sources: ['twelvedata:NI225', 'yahoo:^N225', 'mt5:JP225'] },
 
-  // Forex
-  'EURUSD':  { canonical: 'EURUSD', sources: ['forex:EURUSD', 'yahoo:EURUSD=X', 'mt5:EURUSD'] },
-  'GBPUSD':  { canonical: 'GBPUSD', sources: ['forex:GBPUSD', 'yahoo:GBPUSD=X', 'mt5:GBPUSD'] },
-  'USDJPY':  { canonical: 'USDJPY', sources: ['forex:USDJPY', 'yahoo:USDJPY=X', 'mt5:USDJPY'] },
-  'USDCHF':  { canonical: 'USDCHF', sources: ['forex:USDCHF', 'yahoo:USDCHF=X', 'mt5:USDCHF'] },
-  'EURJPY':  { canonical: 'EURJPY', sources: ['forex:EURJPY', 'yahoo:EURJPY=X', 'mt5:EURJPY'] },
-  'GBPJPY':  { canonical: 'GBPJPY', sources: ['forex:GBPJPY', 'yahoo:GBPJPY=X', 'mt5:GBPJPY'] },
-  'AUDUSD':  { canonical: 'AUDUSD', sources: ['forex:AUDUSD', 'yahoo:AUDUSD=X', 'mt5:AUDUSD'] },
-  'NZDUSD':  { canonical: 'NZDUSD', sources: ['forex:NZDUSD', 'yahoo:NZDUSD=X', 'mt5:NZDUSD'] },
-  'USDCAD':  { canonical: 'USDCAD', sources: ['forex:USDCAD', 'yahoo:USDCAD=X', 'mt5:USDCAD'] },
-  'EURGBP':  { canonical: 'EURGBP', sources: ['forex:EURGBP', 'yahoo:EURGBP=X', 'mt5:EURGBP'] },
-  'EURAUD':  { canonical: 'EURAUD', sources: ['forex:EURAUD', 'yahoo:EURAUD=X', 'mt5:EURAUD'] },
-  'GBPCHF':  { canonical: 'GBPCHF', sources: ['forex:GBPCHF', 'yahoo:GBPCHF=X', 'mt5:GBPCHF'] },
+  // Forex (TwelveData first, then free forex API, then Yahoo)
+  'EURUSD':  { canonical: 'EURUSD', sources: ['twelvedata:EURUSD', 'forex:EURUSD', 'yahoo:EURUSD=X', 'mt5:EURUSD'] },
+  'GBPUSD':  { canonical: 'GBPUSD', sources: ['twelvedata:GBPUSD', 'forex:GBPUSD', 'yahoo:GBPUSD=X', 'mt5:GBPUSD'] },
+  'USDJPY':  { canonical: 'USDJPY', sources: ['twelvedata:USDJPY', 'forex:USDJPY', 'yahoo:USDJPY=X', 'mt5:USDJPY'] },
+  'USDCHF':  { canonical: 'USDCHF', sources: ['twelvedata:USDCHF', 'forex:USDCHF', 'yahoo:USDCHF=X', 'mt5:USDCHF'] },
+  'EURJPY':  { canonical: 'EURJPY', sources: ['twelvedata:EURJPY', 'forex:EURJPY', 'yahoo:EURJPY=X', 'mt5:EURJPY'] },
+  'GBPJPY':  { canonical: 'GBPJPY', sources: ['twelvedata:GBPJPY', 'forex:GBPJPY', 'yahoo:GBPJPY=X', 'mt5:GBPJPY'] },
+  'AUDUSD':  { canonical: 'AUDUSD', sources: ['twelvedata:AUDUSD', 'forex:AUDUSD', 'yahoo:AUDUSD=X', 'mt5:AUDUSD'] },
+  'NZDUSD':  { canonical: 'NZDUSD', sources: ['twelvedata:NZDUSD', 'forex:NZDUSD', 'yahoo:NZDUSD=X', 'mt5:NZDUSD'] },
+  'USDCAD':  { canonical: 'USDCAD', sources: ['twelvedata:USDCAD', 'forex:USDCAD', 'yahoo:USDCAD=X', 'mt5:USDCAD'] },
+  'EURGBP':  { canonical: 'EURGBP', sources: ['twelvedata:EURGBP', 'forex:EURGBP', 'yahoo:EURGBP=X', 'mt5:EURGBP'] },
+  'EURAUD':  { canonical: 'EURAUD', sources: ['twelvedata:EURAUD', 'forex:EURAUD', 'yahoo:EURAUD=X', 'mt5:EURAUD'] },
+  'GBPCHF':  { canonical: 'GBPCHF', sources: ['twelvedata:GBPCHF', 'forex:GBPCHF', 'yahoo:GBPCHF=X', 'mt5:GBPCHF'] },
 
   // Metals
   'XAUUSD':  { canonical: 'XAUUSD', sources: ['twelvedata:XAUUSD', 'yahoo:GC=F', 'mt5:XAUUSD'] },
@@ -243,18 +243,29 @@ async function fetchTwelvedata(symbol, interval) {
   for (const sym of variants) {
     try {
       const url = `https://api.twelvedata.com/time_series?symbol=${sym}&interval=${int}&outputsize=500&apikey=${KEYS.twelvedata}`;
-      const raw = await fetchFromURL(url);
-      const parsed = JSON.parse(raw);
-      if (parsed.status === 'error') continue;
-      const values = parsed.values || [];
-      if (values.length === 0) continue;
-      const data = values.map(v => ({
-        time: Math.floor(new Date(v.datetime).getTime() / 1000),
-        open: parseFloat(v.open), high: parseFloat(v.high), low: parseFloat(v.low),
-        close: parseFloat(v.close), volume: parseInt(v.volume) || 0
-      })).reverse();
-      tdCache[cacheKey] = { time: Date.now(), data };
-      return data;
+
+      // For forex pairs, also try slash format (EUR/USD instead of EURUSD)
+      const slashUrl = sym.length === 6 && /^[A-Z]{6}$/.test(sym)
+        ? `https://api.twelvedata.com/time_series?symbol=${sym.slice(0, 3)}/${sym.slice(3)}&interval=${int}&outputsize=500&apikey=${KEYS.twelvedata}`
+        : null;
+
+      // Try both URL formats
+      for (const u of [url, slashUrl].filter(Boolean)) {
+        try {
+          const raw = await fetchFromURL(u);
+          const parsed = JSON.parse(raw);
+          if (parsed.status === 'error') continue;
+          const values = parsed.values || [];
+          if (values.length === 0) continue;
+          const data = values.map(v => ({
+            time: Math.floor(new Date(v.datetime).getTime() / 1000),
+            open: parseFloat(v.open), high: parseFloat(v.high), low: parseFloat(v.low),
+            close: parseFloat(v.close), volume: parseInt(v.volume) || 0
+          })).reverse();
+          tdCache[cacheKey] = { time: Date.now(), data };
+          return data;
+        } catch (e) {}
+      }
     } catch (e) {}
   }
   throw new Error('TwelveData: no data for any variant of ' + symbol);
