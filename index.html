@@ -1762,6 +1762,16 @@
                     ).join('');
                     results.style.display = list.length ? 'block' : 'none';
                 }).catch(() => {});
+            } else if (query.length >= 1) {
+                // Fallback for direct mode (no proxy)
+                const all = getFullSymbolList();
+                const filtered = all.filter(s => s.includes(query) || (symbolDetails[s]?.name || '').toUpperCase().includes(query)).slice(0, 15);
+                results.innerHTML = filtered.map(s =>
+                    `<div onclick="ivSelectSymbol('${s}')">${symbolDetails[s] ? symbolDetails[s].name : s.replace('USDT','')} <span style="color:var(--text-dim);font-size:11px">${s}</span></div>`
+                ).join('');
+                results.style.display = filtered.length ? 'block' : 'none';
+            } else {
+                results.style.display = 'none';
             }
         }
         function ivShowResults() {
