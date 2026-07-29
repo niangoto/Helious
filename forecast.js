@@ -6,12 +6,11 @@ function runForecast(candles) {
   const startTime = typeof presentCutoffTime === 'number' ? presentCutoffTime : candles[candles.length - 1].time;
   const stepBase = candles.length > 1 ? Math.round((candles[candles.length - 1].time - candles[0].time) / (candles.length - 1)) : 60;
 
-  const forecastSteps = typeof forecastSteps === 'number' ? Math.min(forecastSteps, 200) : 30;
-  const historyBars = Math.min(300, candles.length);
+  const steps = typeof forecastSteps === 'number' ? Math.min(forecastSteps, 200) : 30;
 
   // Get wavelet forecast data: trend slope + dominant cycle parameters
   const waveletData = typeof getWaveletForecastData === 'function'
-    ? getWaveletForecastData(prices, forecastSteps)
+    ? getWaveletForecastData(prices, steps)
     : null;
 
   const horizon = 2000;
