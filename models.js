@@ -239,6 +239,22 @@ function computeModelProbSequence(candles, modelIndex) {
       else if (modelIndex === 5) { const w = computeWaveletProbability(prices.slice(0, i + 1)); result.push({ time: t, value: w.buyPct }); }
     }
   }
+
+  // Add probability for the latest candle (no forward outcome needed)
+  // This uses the same lookup as computeCombinationProbability
+  const lastIdx = n - 1;
+  const lastT = candles[lastIdx].time;
+  if (modelIndex === 0) { result.push({ time: lastT, value: totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50 }); }
+  else if (modelIndex === 1 || modelIndex === 2) {
+    const lastMask = signalMask(lastIdx, rsiV[lastIdx] || 50, ema20[lastIdx], ema50[lastIdx], ema200[lastIdx], macd.macdLine[lastIdx], macd.signal[lastIdx], macd.histogram[lastIdx], atrV[lastIdx], adxR.adx[lastIdx], volV[lastIdx], meanAtr, meanVol);
+    let val = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
+    if (combos.has(lastMask)) { const cc = combos.get(lastMask); if (cc.total > 0) val = (cc.wins / cc.total) * 100; }
+    result.push({ time: lastT, value: val });
+  }
+  else if (modelIndex === 3) { const p = prevWin === 1 ? (bb / (bb + bs || 1)) : (sb / (sb + ss || 1)); result.push({ time: lastT, value: p * 100 }); }
+  else if (modelIndex === 4) { const wr = wins / (wins + losses || 1); result.push({ time: lastT, value: 50 + (wr - 0.5) * 40 }); }
+  else if (modelIndex === 5) { const w = computeWaveletProbability(prices); result.push({ time: lastT, value: w.buyPct }); }
+
   return result;
 }
 
