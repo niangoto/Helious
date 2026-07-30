@@ -1650,6 +1650,7 @@
             } else {
                 const c = document.getElementById('chart');
                 chart.resize(c.clientWidth, c.clientHeight);
+                chart.timeScale().fitContent();
                 // Retry drawing canvases until it works
                 let tries = 0;
                 function tryDraw() {
