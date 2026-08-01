@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="bg">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Хермес — Пазарен Бот Симулатор</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #06080f;
+            --panel-bg: rgba(13, 18, 30, 0.75);
+            --panel-border: rgba(255, 255, 255, 0.08);
+            --accent-cyan: #00f0ff;
+            --accent-purple: #8a2be2;
+            --accent-green: #00ff66;
+            --accent-red: #ff0055;
+            --text-main: #f1f5f9;
+            --text-dim: #94a3b8;
+        }
+
+        * {
+            box-sizing: border-box;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+        }
+
+        body {
+            margin: 0;
+            height: 100vh;
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            background: var(--bg-dark);
+            background-image:
+                radial-gradient(at 0% 0%, rgba(138, 43, 226, 0.12) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(0, 240, 255, 0.08) 0px, transparent 50%);
+            color: var(--text-main);
+            font-family: 'Outfit', sans-serif;
+            overflow: hidden;
+        }
+
+        header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+            padding: 12px 18px;
+            background: var(--panel-bg);
+            border-bottom: 1px solid var(--panel-border);
+            backdrop-filter: blur(12px);
+            flex-shrink: 0;
+        }
+
+        .hm-logo {
+            font-size: 16px;
+            font-weight: 800;
+            letter-spacing: 1px;
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            white-space: nowrap;
+        }
+
+        .hm-badges {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            min-width: 0;
+        }
+
+        .badge {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-dim);
+            border: 1px solid var(--panel-border);
+            background: rgba(255, 255, 255, 0.02);
+            padding: 5px 10px;
+            border-radius: 6px;
+            white-space: nowrap;
+        }
+
+        .badge.sym {
+            color: var(--accent-cyan);
+            border-color: rgba(0, 240, 255, 0.3);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .hdr-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .btn {
+            padding: 8px 14px;
+            border-radius: 7px;
+            border: 1px solid var(--panel-border);
+            background: rgba(255, 255, 255, 0.04);
+            color: var(--text-main);
+            font-family: 'Outfit', sans-serif;
+            font-weight: 700;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.25s;
+            white-space: nowrap;
+        }
+
+        .btn:hover {
+            border-color: var(--accent-cyan);
+            color: var(--accent-cyan);
+        }
+
+        .btn.start {
+            background: linear-gradient(135deg, rgba(0, 240, 255, 0.2), rgba(138, 43, 226, 0.2));
+            border-color: var(--accent-cyan);
+            color: var(--accent-cyan);
+        }
+
+        .btn.start:hover {
+            background: var(--accent-cyan);
+            color: #06080f;
+            box-shadow: 0 0 12px rgba(0, 240, 255, 0.4);
+        }
+
+        .btn.stop {
+            border-color: var(--accent-red);
+            color: var(--accent-red);
+        }
+
+        .btn.stop:hover {
+            background: var(--accent-red);
+            color: #06080f;
+        }
+
+        .btn.close {
+            border: none;
+            font-size: 14px;
+            padding: 6px 10px;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            padding: 12px 18px;
+            background: rgba(13, 18, 30, 0.5);
+            border-bottom: 1px solid var(--panel-border);
+            flex-shrink: 0;
+            align-items: flex-end;
+        }
+
+        .controls label {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            font-size: 9px;
+            font-weight: 700;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+        }
+
+        .controls input,
+        .controls select {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--panel-border);
+            color: var(--text-main);
+            padding: 7px 10px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-family: 'JetBrains Mono', monospace;
+            outline: none;
+            width: 110px;
+        }
+
+        .controls select {
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+        }
+
+        .controls input:focus,
+        .controls select:focus {
+            border-color: var(--accent-cyan);
+        }
+
+        .controls input[type="number"] {
+            text-align: right;
+        }
+
+        details.adv {
+            align-self: flex-end;
+            color: var(--text-dim);
+            font-size: 11px;
+            flex-basis: 100%;
+            margin-top: -2px;
+        }
+
+        details.adv summary {
+            cursor: pointer;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        details.adv summary:hover {
+            color: var(--accent-cyan);
+        }
+
+        .adv-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 8px;
+            margin-top: 8px;
+            padding: 10px;
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--panel-border);
+            border-radius: 8px;
+        }
+
+        .adv-grid label {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            font-size: 9px;
+            font-weight: 700;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .adv-grid input {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--panel-border);
+            color: var(--text-main);
+            padding: 6px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            outline: none;
+            width: 100%;
+            text-align: right;
+        }
+
+        .summary {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            padding: 12px 18px;
+            flex-shrink: 0;
+        }
+
+        .sum-item {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--panel-border);
+            border-radius: 9px;
+            padding: 10px 12px;
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+        }
+
+        .sum-item span {
+            font-size: 9px;
+            font-weight: 700;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+        }
+
+        .sum-item b {
+            font-size: 16px;
+            font-weight: 700;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .sum-item.pos b {
+            color: var(--accent-green);
+        }
+
+        .sum-item.neg b {
+            color: var(--accent-red);
+        }
+
+        .current {
+            margin: 0 18px 10px;
+            padding: 10px 12px;
+            border-radius: 9px;
+            border: 1px solid rgba(138, 43, 226, 0.4);
+            background: linear-gradient(135deg, rgba(138, 43, 226, 0.12), rgba(0, 240, 255, 0.06));
+            flex-shrink: 0;
+        }
+
+        .cp-head {
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.6px;
+            text-transform: uppercase;
+            color: var(--accent-cyan);
+            margin-bottom: 6px;
+        }
+
+        .cp-grid {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 18px;
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-dim);
+        }
+
+        .progress-wrap {
+            margin: 0 18px;
+            height: 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--panel-border);
+            border-radius: 8px;
+            overflow: hidden;
+            flex-shrink: 0;
+            position: relative;
+        }
+
+        .progress-bar {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple));
+            transition: width 0.15s;
+        }
+
+        .progress-bar.err {
+            background: var(--accent-red);
+        }
+
+        .progress-text {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 9px;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            color: var(--text-main);
+            text-shadow: 0 0 6px rgba(0, 0, 0, 0.9);
+        }
+
+        .orders {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-height: 0;
+            padding: 0 18px 12px;
+        }
+
+        .orders-head {
+            display: grid;
+            grid-template-columns: 44px 130px 64px 90px 90px 140px 100px 110px 120px;
+            gap: 8px;
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--panel-border);
+            font-size: 9px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--text-dim);
+            flex-shrink: 0;
+        }
+
+        .orders-list {
+            flex: 1;
+            overflow-y: auto;
+            min-height: 0;
+        }
+
+        .order-row {
+            display: grid;
+            grid-template-columns: 44px 130px 64px 90px 90px 140px 100px 110px 120px;
+            gap: 8px;
+            align-items: center;
+            padding: 7px 10px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            animation: rowIn 0.3s ease;
+        }
+
+        @keyframes rowIn {
+            from {
+                opacity: 0;
+                transform: translateY(-8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .order-row:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .order-row .c-num {
+            color: var(--text-dim);
+        }
+
+        .order-row .c-dir {
+            font-weight: 800;
+            letter-spacing: 0.5px;
+        }
+
+        .order-row .c-dir.buy {
+            color: var(--accent-green);
+        }
+
+        .order-row .c-dir.sell {
+            color: var(--accent-red);
+        }
+
+        .order-row .c-time,
+        .order-row .c-tpsl,
+        .order-row .c-exit small {
+            color: var(--text-dim);
+        }
+
+        .order-row .c-pnl {
+            font-weight: 700;
+        }
+
+        .order-row .c-pnl.pos {
+            color: var(--accent-green);
+        }
+
+        .order-row .c-pnl.neg {
+            color: var(--accent-red);
+        }
+
+        .order-row .c-eq {
+            color: var(--accent-cyan);
+        }
+
+        .pos {
+            color: var(--accent-green);
+        }
+
+        .neg {
+            color: var(--accent-red);
+        }
+
+        .footer {
+            padding: 6px 18px 8px;
+            font-size: 9px;
+            color: var(--text-dim);
+            letter-spacing: 0.4px;
+            flex-shrink: 0;
+            text-align: center;
+            opacity: 0.6;
+        }
+
+        @media (max-width: 900px) {
+            .orders-head,
+            .order-row {
+                grid-template-columns: 44px 120px 56px 80px 80px 120px 90px 100px 110px;
+                font-size: 10px;
+            }
+            .controls input,
+            .controls select {
+                width: 90px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <div class="hm-logo">☿ ХЕРМЕС</div>
+        <div class="hm-badges">
+            <span class="badge sym" id="hSymbol">---</span>
+            <span class="badge" id="hModelBadge">---</span>
+        </div>
+        <div class="hdr-actions">
+            <button class="btn start" id="btnStart" onclick="runSimulation()">▶ Стартирай</button>
+            <button class="btn stop" id="btnStop" onclick="stopSimulation()">■ Стоп</button>
+            <button class="btn close" onclick="window.close()">✕</button>
+        </div>
+    </header>
+
+    <section class="controls">
+        <label>Начален бюджет (€)
+            <input type="number" id="inpBudget" value="1000" min="10" step="100">
+        </label>
+        <label>Леверидж
+            <input type="number" id="inpLev" value="30" min="1" step="1">
+        </label>
+        <label>Период назад
+            <select id="inpPeriod"></select>
+        </label>
+        <label>Модел
+            <select id="inpModel"></select>
+        </label>
+        <details class="adv">
+            <summary>Разширени настройки (EV / Кели / TP-SL)</summary>
+            <div class="adv-grid">
+                <label>Buy праг (%) <input type="number" id="inpBuyTh" value="65" min="1" max="99" step="1"></label>
+                <label>Sell праг (%) <input type="number" id="inpSellTh" value="65" min="1" max="99" step="1"></label>
+                <label>Мин. EV (цена) <input type="number" id="inpMinEv" value="0" step="any"></label>
+                <label>TP = ×ATR <input type="number" id="inpTp" value="1.5" min="0.1" step="0.1"></label>
+                <label>SL = ×ATR <input type="number" id="inpSl" value="1.0" min="0.1" step="0.1"></label>
+                <label>Времево затваряне (барове) <input type="number" id="inpHold" value="50" min="1" step="1"></label>
+                <label>Кели (дробна част) <input type="number" id="inpKelly" value="0.25" min="0.01" step="0.05"></label>
+                <label>Кели (макс. фракция) <input type="number" id="inpMaxKelly" value="0.25" min="0.01" max="1" step="0.05"></label>
+            </div>
+        </details>
+    </section>
+
+    <section class="summary" id="summary"></section>
+
+    <section class="current" id="currentPos" style="display:none"></section>
+
+    <div class="progress-wrap">
+        <div class="progress-bar" id="progBar"></div>
+        <div class="progress-text" id="progText">Готово</div>
+    </div>
+
+    <section class="orders">
+        <div class="orders-head">
+            <span>#</span>
+            <span>Отваряне</span>
+            <span>Вид</span>
+            <span>Обем</span>
+            <span>Вход</span>
+            <span>TP / SL</span>
+            <span>Изход</span>
+            <span>P/L</span>
+            <span>Баланс</span>
+        </div>
+        <div class="orders-list" id="ordersList">
+            <div class="order-row" style="grid-template-columns:1fr;justify-items:center;color:var(--text-dim);font-family:'Outfit',sans-serif;padding:24px 0">
+                Натиснете „Стартирай“, за да стартирате историческата симулация. Всяка приключена поръчка ще се появява най-отгоре.
+            </div>
+        </div>
+    </section>
+
+    <div class="footer">
+        Историческа симулация: ботът знае само данните до текущата свещ. Бюджетът се третира в EUR. Не е финансов съвет.
+    </div>
+
+    <script src="models.js"></script>
+    <script>
+        const params = new URLSearchParams(location.search);
+        let currentSymbol = params.get('symbol') || 'BTCUSDT';
+        let activePeriod = params.get('period') || '24h';
+        let currentModel = parseInt(params.get('model') || '0', 10);
+        if (isNaN(currentModel) || currentModel < 0 || currentModel > 6) currentModel = 0;
+
+        const periodConfigs = {
+            '5m': { interval: '1m', limit: 500 },
+            '15m': { interval: '1m', limit: 1000 },
+            '30m': { interval: '1m', limit: 1000 },
+            '1h': { interval: '1m', limit: 1000 },
+            '4h': { interval: '5m', limit: 1000 },
+            '12h': { interval: '5m', limit: 1000 },
+            '24h': { interval: '5m', limit: 1000 },
+            '7d': { interval: '1h', limit: 1000 },
+            '30d': { interval: '4h', limit: 1000 },
+            '90d': { interval: '1d', limit: 500 }
+        };
+
+        const periodLabels = { '5m': '5м', '15m': '15м', '30m': '30м', '1h': '1ч', '4h': '4ч', '12h': '12ч', '24h': '1Д', '7d': '7Д', '30d': '30Д', '90d': '90Д' };
+
+        const modelNames = ['Историческа', 'Байесова', 'Логистична', 'Марковска', 'Очаквана стойност', 'Уейвлет', 'Средна вероятност'];
+
+        let cancelFlag = false;
+        let running = false;
+
+        function timeToLocal(originalTime) {
+            const d = new Date(originalTime * 1000);
+            return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds()) / 1000;
+        }
+
+        function fmt(n) {
+            if (n == null || isNaN(n)) return '---';
+            const abs = Math.abs(n);
+            let frac = 0;
+            if (abs >= 10000) frac = 0;
+            else if (abs >= 1000) frac = 1;
+            else if (abs >= 100) frac = 2;
+            else if (abs >= 1) frac = 4;
+            else frac = 6;
+            return n.toLocaleString('en-US', { maximumFractionDigits: frac });
+        }
+
+        function fmtTime(t) {
+            if (!t) return '---';
+            const d = new Date(t * 1000);
+            return d.toLocaleDateString('bg-BG', { day: '2-digit', month: '2-digit', year: '2-digit' }) + ' ' +
+                d.toLocaleTimeString('bg-BG', { hour: '2-digit', minute: '2-digit' });
+        }
+
+        const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+
+        function computeRSI(candles, period) {
+            period = period || 14;
+            if (candles.length < period + 1) return [];
+            const changes = [];
+            for (let i = 1; i < candles.length; i++) {
+                changes.push(candles[i].close - candles[i - 1].close);
+            }
+            let avgG = 0, avgL = 0;
+            for (let i = 0; i < period; i++) {
+                if (changes[i] > 0) avgG += changes[i];
+                else avgL += Math.abs(changes[i]);
+            }
+            avgG /= period;
+            avgL /= period;
+            const rsi = [avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL)];
+            for (let i = period; i < changes.length; i++) {
+                const g = changes[i] > 0 ? changes[i] : 0;
+                const l = changes[i] < 0 ? Math.abs(changes[i]) : 0;
+                avgG = (avgG * (period - 1) + g) / period;
+                avgL = (avgL * (period - 1) + l) / period;
+                rsi.push(avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL));
+            }
+            return rsi;
+        }
+
+        async function fetchCandles(symbol, interval, limit) {
+            try {
+                const resp = await fetch(`/data?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`).then(r => r.json());
+                if (resp && resp.ok && resp.candles && resp.candles.length > 0) {
+                    return resp.candles.map(c => ({
+                        time: timeToLocal(c.time),
+                        open: c.open,
+                        high: c.high,
+                        low: c.low,
+                        close: c.close,
+                        volume: c.volume
+                    }));
+                }
+                const detail = resp?.details ? ' (' + resp.details + ')' : '';
+                throw new Error((resp?.error || 'Няма данни за ' + symbol) + detail);
+            } catch (e) {
+                const r = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
+                if (!r.ok) throw e;
+                const d = await r.json();
+                return d.map(k => ({
+                    time: timeToLocal(Math.floor(k[0] / 1000)),
+                    open: parseFloat(k[1]),
+                    high: parseFloat(k[2]),
+                    low: parseFloat(k[3]),
+                    close: parseFloat(k[4]),
+                    volume: parseFloat(k[5])
+                }));
+            }
+        }
+
+        function setProgress(pct, text) {
+            const bar = document.getElementById('progBar');
+            const txt = document.getElementById('progText');
+            if (bar) bar.style.width = Math.max(0, Math.min(100, pct || 0)) + '%';
+            if (txt) txt.textContent = text || '';
+        }
+
+        function readParams() {
+            return {
+                budget: Math.max(1, parseFloat(document.getElementById('inpBudget').value) || 1000),
+                leverage: Math.max(1, parseFloat(document.getElementById('inpLev').value) || 30),
+                buyTh: parseFloat(document.getElementById('inpBuyTh').value) || 65,
+                sellTh: parseFloat(document.getElementById('inpSellTh').value) || 65,
+                minEv: parseFloat(document.getElementById('inpMinEv').value) || 0,
+                tpMult: parseFloat(document.getElementById('inpTp').value) || 1.5,
+                slMult: parseFloat(document.getElementById('inpSl').value) || 1.0,
+                holdBars: Math.max(1, parseInt(document.getElementById('inpHold').value) || 50),
+                kellyF: Math.min(1, Math.max(0.01, parseFloat(document.getElementById('inpKelly').value) || 0.25)),
+                maxKelly: Math.min(1, Math.max(0.01, parseFloat(document.getElementById('inpMaxKelly').value) || 0.25))
+            };
+        }
+
+        function prependOrder(pos, exitPrice, reason, pnl, equity, seq) {
+            const listEl = document.getElementById('ordersList');
+            const placeholder = listEl.querySelector('div:first-child');
+            if (placeholder && placeholder.dataset && placeholder.dataset.placeholder) listEl.innerHTML = '';
+            const row = document.createElement('div');
+            row.className = 'order-row';
+            row.innerHTML = `
+                <span class="c-num">#${seq}</span>
+                <span class="c-time">${fmtTime(pos.openTime)}</span>
+                <span class="c-dir ${pos.dir === 'BUY' ? 'buy' : 'sell'}">${pos.dir === 'BUY' ? 'BUY' : 'SELL'}</span>
+                <span class="c-vol">${pos.units.toFixed(4)}</span>
+                <span class="c-entry">${fmt(pos.entry)}</span>
+                <span class="c-tpsl">${fmt(pos.tp)} / ${fmt(pos.sl)}</span>
+                <span class="c-exit">${fmt(exitPrice)} <small>${reason}</small></span>
+                <span class="c-pnl ${pnl >= 0 ? 'pos' : 'neg'}">${(pnl >= 0 ? '+' : '') + pnl.toFixed(2)} €</span>
+                <span class="c-eq">${equity.toFixed(2)} €</span>
+            `;
+            listEl.prepend(row);
+        }
+
+        function renderCurrentPos(pos, equity) {
+            const el = document.getElementById('currentPos');
+            el.style.display = 'block';
+            el.innerHTML = `
+                <div class="cp-head">Отворена позиция — ${pos.dir} при ${fmt(pos.entry)} (зает маржин: ${pos.margin.toFixed(2)} €)</div>
+                <div class="cp-grid">
+                    <span>Обем: ${pos.units.toFixed(4)}</span>
+                    <span>TP: ${fmt(pos.tp)}</span>
+                    <span>SL: ${fmt(pos.sl)}</span>
+                    <span>Вероятност: ${pos.prob.toFixed(1)}%</span>
+                    <span id="cpFloat">Плаващ P/L: ---</span>
+                </div>
+            `;
+        }
+
+        function updateFloatPos(pos, c) {
+            const el = document.getElementById('cpFloat');
+            if (!el) return;
+            const floatPnl = pos.dir === 'BUY' ? (c.close - pos.entry) * pos.units : (pos.entry - c.close) * pos.units;
+            el.textContent = 'Плаващ P/L: ' + (floatPnl >= 0 ? '+' : '') + floatPnl.toFixed(2) + ' €';
+            el.className = 'pos';
+            el.style.color = floatPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+        }
+
+        function renderSummary(P, equity, trades, wins, maxDD) {
+            const pnl = equity - P.budget;
+            const pct = P.budget > 0 ? (pnl / P.budget) * 100 : 0;
+            const winRate = trades > 0 ? (wins / trades) * 100 : 0;
+            const el = document.getElementById('summary');
+            el.innerHTML = `
+                <div class="sum-item"><span>Начален капитал</span><b>${P.budget.toFixed(2)} €</b></div>
+                <div class="sum-item"><span>Краен капитал</span><b>${equity.toFixed(2)} €</b></div>
+                <div class="sum-item ${pnl >= 0 ? 'pos' : 'neg'}"><span>Печалба / Загуба</span><b>${(pnl >= 0 ? '+' : '') + pnl.toFixed(2)} € (${(pct >= 0 ? '+' : '') + pct.toFixed(2)}%)</b></div>
+                <div class="sum-item"><span>Сделки</span><b>${trades}</b></div>
+                <div class="sum-item"><span>Win rate</span><b>${winRate.toFixed(1)}%</b></div>
+                <div class="sum-item ${maxDD > 0 ? 'neg' : 'pos'}"><span>Макс. теглене</span><b>${maxDD.toFixed(2)}%</b></div>
+            `;
+        }
+
+        async function simulate(candles, atrSeries, probs, P) {
+            let equity = P.budget;
+            let peak = equity;
+            let maxDD = 0;
+            let tradeCount = 0, winsCount = 0;
+            let openPos = null;
+            const n = candles.length;
+
+            for (let i = 30; i < n; i++) {
+                if (cancelFlag) return;
+
+                if (openPos) {
+                    const c = candles[i];
+                    const held = i - openPos.openIdx;
+                    let exitPrice = null, reason = null;
+                    if (openPos.dir === 'BUY') {
+                        if (c.high >= openPos.tp) { exitPrice = openPos.tp; reason = 'TP'; }
+                        else if (c.low <= openPos.sl) { exitPrice = openPos.sl; reason = 'SL'; }
+                        else if (held >= P.holdBars) { exitPrice = c.close; reason = 'Време'; }
+                    } else {
+                        if (c.low <= openPos.tp) { exitPrice = openPos.tp; reason = 'TP'; }
+                        else if (c.high >= openPos.sl) { exitPrice = openPos.sl; reason = 'SL'; }
+                        else if (held >= P.holdBars) { exitPrice = c.close; reason = 'Време'; }
+                    }
+                    if (exitPrice !== null) {
+                        const pnl = openPos.dir === 'BUY'
+                            ? (exitPrice - openPos.entry) * openPos.units
+                            : (openPos.entry - exitPrice) * openPos.units;
+                        equity += pnl;
+                        tradeCount++;
+                        if (pnl > 0) winsCount++;
+                        if (equity > peak) peak = equity;
+                        const dd = (peak - equity) / peak * 100;
+                        if (dd > maxDD) maxDD = dd;
+                        prependOrder(openPos, exitPrice, reason, pnl, equity, tradeCount);
+                        openPos = null;
+                        document.getElementById('currentPos').style.display = 'none';
+                    }
+                }
+
+                if (!openPos && i < n - 1) {
+                    const pr = probs[i];
+                    if (pr) {
+                        const buyPct = pr.buyPct, sellPct = pr.sellPct;
+                        const atr = atrSeries[i] || atrSeries[atrSeries.length - 1] || 1;
+                        const entry = candles[i].close;
+                        const gain = P.tpMult * atr;
+                        const loss = P.slMult * atr;
+                        const evLong = (buyPct / 100) * gain - (sellPct / 100) * loss;
+                        const evShort = (sellPct / 100) * gain - (buyPct / 100) * loss;
+
+                        let dir = null;
+                        if (buyPct >= P.buyTh && evLong > P.minEv) dir = 'BUY';
+                        else if (sellPct >= P.sellTh && evShort > P.minEv) dir = 'SELL';
+
+                        if (dir) {
+                            const p = dir === 'BUY' ? buyPct / 100 : sellPct / 100;
+                            const q = 1 - p;
+                            const b = gain / loss;
+                            let fStar = p - q / b;
+                            if (fStar > 0) {
+                                let f = Math.min(fStar * P.kellyF, P.maxKelly);
+                                if (f > 0) {
+                                    const riskAmount = f * equity;
+                                    let units = riskAmount / loss;
+                                    const maxUnits = (equity * P.leverage) / entry;
+                                    units = Math.min(units, maxUnits);
+                                    const notional = units * entry;
+                                    const margin = notional / P.leverage;
+                                    if (units > 0 && margin > 0 && margin <= equity && notional >= 1) {
+                                        const tp = dir === 'BUY' ? entry + P.tpMult * atr : entry - P.tpMult * atr;
+                                        const sl = dir === 'BUY' ? entry - P.slMult * atr : entry + P.slMult * atr;
+                                        openPos = { dir, entry, units, tp, sl, atr, openIdx: i, prob: p * 100, margin, openTime: candles[i].time };
+                                        renderCurrentPos(openPos, equity);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (openPos) updateFloatPos(openPos, candles[i]);
+
+                if (i % 20 === 0) {
+                    const pct = Math.round(((i - 30) / (n - 30)) * 100);
+                    setProgress(pct, `Обработка на свещ ${i}/${n} — ${tradeCount} сделки`);
+                    await sleep(0);
+                }
+            }
+
+            if (openPos && n > 0) {
+                const c = candles[n - 1];
+                const pnl = openPos.dir === 'BUY'
+                    ? (c.close - openPos.entry) * openPos.units
+                    : (openPos.entry - c.close) * openPos.units;
+                equity += pnl;
+                tradeCount++;
+                if (pnl > 0) winsCount++;
+                prependOrder(openPos, c.close, 'Край', pnl, equity, tradeCount);
+                openPos = null;
+                document.getElementById('currentPos').style.display = 'none';
+            }
+
+            renderSummary(P, equity, tradeCount, winsCount, maxDD);
+            setProgress(100, 'Симулацията завърши — ' + tradeCount + ' сделки');
+        }
+
+        async function runSimulation() {
+            if (running) return;
+            running = true;
+            cancelFlag = false;
+
+            activePeriod = document.getElementById('inpPeriod').value;
+            currentModel = parseInt(document.getElementById('inpModel').value, 10);
+
+            const P = readParams();
+            const config = periodConfigs[activePeriod];
+            if (!config) { setProgress(0, 'Невалиден период'); running = false; return; }
+
+            document.getElementById('ordersList').innerHTML = '';
+            document.getElementById('summary').innerHTML = '';
+            document.getElementById('currentPos').style.display = 'none';
+            document.getElementById('btnStart').disabled = true;
+            document.getElementById('btnStart').textContent = '⏳ Работи...';
+            document.getElementById('progBar').classList.remove('err');
+
+            try {
+                setProgress(2, 'Зареждане на исторически данни...');
+                const candles = await fetchCandles(currentSymbol, config.interval, config.limit);
+                if (!candles || candles.length < 30) throw new Error('Недостатъчно данни (минимум 30 свещи).');
+
+                setProgress(10, 'Изчисляване на вероятностите по модела...');
+                await sleep(30);
+                const probs = computeModelProbSeries(candles, currentModel);
+                if (cancelFlag) return;
+
+                const atrSeries = computeATR(candles, 14);
+                setProgress(15, 'Стартиране на търговската симулация...');
+                await sleep(30);
+                await simulate(candles, atrSeries, probs, P);
+            } catch (e) {
+                console.error(e);
+                setProgress(0, 'Грешка: ' + e.message);
+                document.getElementById('progBar').classList.add('err');
+            } finally {
+                running = false;
+                document.getElementById('btnStart').disabled = false;
+                document.getElementById('btnStart').textContent = '▶ Стартирай отново';
+            }
+        }
+
+        function stopSimulation() {
+            cancelFlag = true;
+            setProgress(0, 'Спиране...');
+        }
+
+        function initUI() {
+            document.getElementById('hSymbol').textContent = currentSymbol;
+
+            const pSel = document.getElementById('inpPeriod');
+            Object.keys(periodConfigs).forEach(k => {
+                const opt = document.createElement('option');
+                opt.value = k;
+                opt.textContent = periodLabels[k] || k;
+                pSel.appendChild(opt);
+            });
+            pSel.value = periodConfigs[activePeriod] ? activePeriod : '24h';
+
+            const mSel = document.getElementById('inpModel');
+            modelNames.forEach((name, idx) => {
+                const opt = document.createElement('option');
+                opt.value = idx;
+                opt.textContent = name;
+                mSel.appendChild(opt);
+            });
+            mSel.value = currentModel;
+            document.getElementById('hModelBadge').textContent = modelNames[currentModel];
+            mSel.addEventListener('change', () => {
+                document.getElementById('hModelBadge').textContent = modelNames[parseInt(mSel.value, 10)];
+            });
+
+            const placeholder = document.querySelector('#ordersList div');
+            if (placeholder) placeholder.dataset.placeholder = '1';
+
+            runSimulation();
+        }
+
+        initUI();
+    </script>
+</body>
+
+</html>

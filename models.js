@@ -258,6 +258,118 @@ function computeModelProbSequence(candles, modelIndex) {
   return result;
 }
 
+// ─── Causal per-candle probability series (for the Hermes bot) ───
+// Resolve the outcome of a trade entered at candle `j` (TP/SL hit and the
+// candle index where it resolved). Returns null if neither level is reached
+// within `maxBars` bars (used as time-exit horizon by the bot).
+function resolveTrade(candles, j, atrVal, tpMult, slMult, maxBars) {
+  const entry = candles[j].close;
+  const tp = entry + tpMult * atrVal;
+  const sl = entry - slMult * atrVal;
+  const limit = Math.min(j + maxBars, candles.length);
+  for (let k = j + 1; k < limit; k++) {
+    if (candles[k].high >= tp) return { win: 1, closeIdx: k };
+    if (candles[k].low <= sl) return { win: 0, closeIdx: k };
+  }
+  return null;
+}
+
+// Compute the model buy/sell probability at every candle index in a strictly
+// causal (walk-forward) way: at index i the statistics only include trades
+// entered before i whose outcome was already known by time i.
+// modelIndex: 0=historical, 1=bayesian, 2=logistic, 3=markov, 4=EV,
+//             5=wavelet, 6=average of 0..4
+// Returns an array aligned with `candles` (null for the warm-up window).
+function computeModelProbSeries(candles, modelIndex) {
+  const n = candles.length;
+  if (n < 30) return [];
+  const result = new Array(n).fill(null);
+  const prices = candles.map(c => c.close);
+  const rsiV = typeof computeRSI === 'function' ? computeRSI(candles, 14) : prices.map(() => 50);
+  const ema20 = computeEMA(prices, 20);
+  const ema50 = computeEMA(prices, 50);
+  const ema200 = computeEMA(prices, 200);
+  const macd = computeMACD(prices);
+  const atrV = computeATR(candles, 14);
+  const adxR = computeADX(candles, 14);
+  const volV = candles.map(c => c.volume || 0);
+  const meanAtr = atrV.reduce((s, v) => s + v, 0) / atrV.length;
+  const meanVol = volV.reduce((s, v) => s + v, 0) / volV.length;
+  const maxBars = Math.min(50, n);
+
+  // Pre-resolve every historical trade outcome and bucket by resolution index.
+  const entries = new Array(n).fill(null);
+  const resolvedAt = new Array(n).fill(null).map(() => []);
+  for (let j = 30; j < n - 1; j++) {
+    const r = resolveTrade(candles, j, atrV[j] || 1, 1.5, 1.0, maxBars);
+    if (r) {
+      const mask = signalMask(j, rsiV[j] || 50, ema20[j], ema50[j], ema200[j], macd.macdLine[j], macd.signal[j], macd.histogram[j], atrV[j], adxR.adx[j], volV[j], meanAtr, meanVol);
+      entries[j] = { mask, win: r.win };
+      resolvedAt[r.closeIdx].push(j);
+    }
+  }
+
+  const combos = new Map();
+  let totalWins = 0, totalTrades = 0;
+  let prevWin = -1, bb = 0, bs = 0, sb = 0, ss = 0;
+  let wins = 0, losses = 0, tpSum = 0, slSum = 0;
+
+  for (let i = 30; i < n; i++) {
+    // Fold in all trades that resolved exactly at candle i (entry order).
+    if (resolvedAt[i].length) {
+      resolvedAt[i].sort((a, b) => a - b);
+      for (const j of resolvedAt[i]) {
+        const e = entries[j];
+        totalTrades++;
+        if (e.win === 1) totalWins++;
+        if (!combos.has(e.mask)) combos.set(e.mask, { total: 0, wins: 0 });
+        const c = combos.get(e.mask); c.total++;
+        if (e.win === 1) c.wins++;
+        if (prevWin >= 0) {
+          if (prevWin === 1 && e.win === 1) bb++;
+          else if (prevWin === 1 && e.win === 0) bs++;
+          else if (prevWin === 0 && e.win === 1) sb++;
+          else if (prevWin === 0 && e.win === 0) ss++;
+        }
+        prevWin = e.win;
+        if (e.win === 1) { wins++; tpSum += (atrV[j] || 1) * 1.5; }
+        else { losses++; slSum += (atrV[j] || 1) * 1.0; }
+      }
+    }
+
+    let val;
+    if (modelIndex === 0) {
+      val = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
+    } else if (modelIndex === 1 || modelIndex === 2) {
+      const mask = signalMask(i, rsiV[i] || 50, ema20[i], ema50[i], ema200[i], macd.macdLine[i], macd.signal[i], macd.histogram[i], atrV[i], adxR.adx[i], volV[i], meanAtr, meanVol);
+      val = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
+      if (combos.has(mask)) { const cc = combos.get(mask); if (cc.total > 0) val = (cc.wins / cc.total) * 100; }
+    } else if (modelIndex === 3) {
+      const p = prevWin === 1 ? (bb / (bb + bs || 1)) : (sb / (sb + ss || 1));
+      val = (p || 0.5) * 100;
+    } else if (modelIndex === 4) {
+      const wr = wins / (wins + losses || 1);
+      val = 50 + (wr - 0.5) * 40;
+    } else if (modelIndex === 5) {
+      const w = computeWaveletProbability(prices.slice(0, i + 1));
+      val = w.buyPct;
+    } else if (modelIndex === 6) {
+      let sum = 0, cnt = 0;
+      const v0 = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50; sum += v0; cnt++;
+      const mask = signalMask(i, rsiV[i] || 50, ema20[i], ema50[i], ema200[i], macd.macdLine[i], macd.signal[i], macd.histogram[i], atrV[i], adxR.adx[i], volV[i], meanAtr, meanVol);
+      let v1 = v0; if (combos.has(mask)) { const cc = combos.get(mask); if (cc.total > 0) v1 = (cc.wins / cc.total) * 100; } sum += v1; cnt++;
+      sum += v1; cnt++; // logistic = same combination model
+      const p = prevWin === 1 ? (bb / (bb + bs || 1)) : (sb / (sb + ss || 1));
+      sum += (p || 0.5) * 100; cnt++;
+      const wr = wins / (wins + losses || 1);
+      sum += 50 + (wr - 0.5) * 40; cnt++;
+      val = cnt > 0 ? sum / cnt : 50;
+    }
+    result[i] = { time: candles[i].time, buyPct: Math.max(1, Math.min(99, val)), sellPct: Math.max(1, Math.min(99, 100 - val)) };
+  }
+  return result;
+}
+
 // ════════════════════════════════════════════════════════════════
 //  Professional Wavelet Analysis — Daubechies 4 (db4)
 //  Multi-Resolution Analysis (MRA) + Soft Thresholding Denoising
