@@ -568,10 +568,10 @@
         <label>Свещи назад
             <input type="number" id="inpCount" value="500" min="30" max="10000" step="50" title="Брой свещи назад (до 10000 — тегли се на пакети по 1000)">
         </label>
-        <label class="cal-label">Обратна поръчка
+        <label class="cal-label">Обърната посока
             <span class="cal-controls">
-                <input type="checkbox" id="inpHedge" checked title="При всяка поръчка се отваря и точно обратната със същия обем (хедж)">
-                <span class="cal-sep" style="font-size:11px;text-transform:none;letter-spacing:0.3px">хедж със същия обем</span>
+                <input type="checkbox" id="inpReverse" checked title="Отваря се само обратната поръчка (контра) вместо определената, със същия обем">
+                <span class="cal-sep" style="font-size:11px;text-transform:none;letter-spacing:0.3px">контра със същия обем</span>
             </span>
         </label>
         <label class="cal-label">Календарен период
@@ -772,7 +772,7 @@
                 holdBars: Math.max(1, parseInt(document.getElementById('inpHold').value) || 50),
                 kellyF: Math.min(1, Math.max(0.01, parseFloat(document.getElementById('inpKelly').value) || 0.25)),
                 maxKelly: Math.min(1, Math.max(0.01, parseFloat(document.getElementById('inpMaxKelly').value) || 0.25)),
-                hedge: document.getElementById('inpHedge').checked
+                reverse: document.getElementById('inpReverse').checked
             };
         }
 
@@ -926,35 +926,29 @@
                                 // (1) Множител на размера на позицията: Size_final = α × Size_calc
                                 let f = Math.min(fStar * P.kellyF * alpha, P.maxKelly);
                                 if (f > 0) {
-                                    const legCount = P.hedge ? 2 : 1;
                                     const riskAmount = f * equity;
                                     let units = riskAmount / loss;
-                                    // Таванът се дели на броя крака, за да побере и обратната поръчка
-                                    const maxUnits = (equity * P.leverage) / (legCount * entry);
+                                    const maxUnits = (equity * P.leverage) / entry;
                                     units = Math.min(units, maxUnits);
                                     const notional = units * entry;
                                     const margin = notional / P.leverage;
-                                    if (units > 0 && margin > 0 && margin * legCount <= equity && notional >= 1) {
+                                    if (units > 0 && margin > 0 && margin <= equity && notional >= 1) {
+                                        // Отваря се само обратната поръчка вместо определената, със същия обем
+                                        if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
                                         const t = candles[i].time;
-                                        const makeLeg = (d) => ({
-                                            dir: d,
+                                        legs = [{
+                                            dir,
                                             entry,
                                             units,
-                                            tp: d === 'BUY' ? entry + tpDist : entry - tpDist,
-                                            sl: d === 'BUY' ? entry - slDist : entry + slDist,
+                                            tp: dir === 'BUY' ? entry + tpDist : entry - tpDist,
+                                            sl: dir === 'BUY' ? entry - slDist : entry + slDist,
                                             atr,
                                             openIdx: i,
-                                            prob: (d === 'BUY' ? pRise : pFall) * 100,
+                                            prob: (dir === 'BUY' ? pRise : pFall) * 100,
                                             margin,
                                             openTime: t,
                                             alpha
-                                        });
-                                        const primary = makeLeg(dir);
-                                        legs = [primary];
-                                        if (P.hedge) {
-                                            // Точно обратна поръчка със същия обем
-                                            legs.push(makeLeg(dir === 'BUY' ? 'SELL' : 'BUY'));
-                                        }
+                                        }];
                                         renderCurrentPos(legs, equity);
                                     }
                                 }
