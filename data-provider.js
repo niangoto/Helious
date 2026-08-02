@@ -137,6 +137,42 @@ function searchSymbols(query) {
 }
 
 // ─── Data Fetching ──────────────────────────────────────────────
+// Извличане на свещи от Binance с пейджинг: Binance връща най-много 1000
+// свещи на заявка, затова при по-голям limit се теглят по-стари пакети
+// (endTime) докато не се съберат исканите свещи или свърши историята.
+async function fetchBinanceKlines(symbol, interval, limit, spot) {
+  const base = spot ? 'https://api.binance.com/api/v3/klines' : 'https://fapi.binance.com/fapi/v1/klines';
+  const batchSize = 1000;
+  const batches = [];
+  let endTime;
+  let fetched = 0;
+  limit = Math.max(limit || 1000, 1);
+  while (fetched < limit) {
+    const want = Math.min(batchSize, limit - fetched);
+    let url = `${base}?symbol=${symbol}&interval=${interval}&limit=${want}`;
+    if (endTime) url += `&endTime=${endTime}`;
+    let batch;
+    try {
+      const raw = await fetchFromURL(url);
+      batch = JSON.parse(raw);
+    } catch (e) {
+      break;
+    }
+    if (!Array.isArray(batch) || batch.length === 0) break;
+    const data = batch.map(d => ({
+      time: Math.floor(d[0] / 1000), open: parseFloat(d[1]), high: parseFloat(d[2]),
+      low: parseFloat(d[3]), close: parseFloat(d[4]), volume: parseFloat(d[5])
+    }));
+    batches.push(data);
+    fetched += data.length;
+    endTime = data[0].time * 1000 - 1;
+    if (data.length < want) break;
+  }
+  const out = [];
+  for (let i = batches.length - 1; i >= 0; i--) out.push(...batches[i]);
+  return out;
+}
+
 function fetchFromURL(url) {
   return new Promise((resolve, reject) => {
     const mod = url.startsWith('https') ? https : http;
@@ -275,7 +311,7 @@ async function fetchTwelvedata(symbol, interval) {
 const failCache = {};
 const FAIL_TTL = 300000; // 5 минути
 
-async function fetchData(symbol, interval) {
+async function fetchData(symbol, interval, limit) {
   const canonical = resolveSymbol(symbol);
   const cacheKey = canonical + '_' + interval;
   const failed = failCache[cacheKey];
@@ -303,11 +339,7 @@ async function fetchData(symbol, interval) {
         if (data.length > 10) return { symbol: canonical, interval, candles: data, source: 'twelvedata:' + sym };
       }
       if (provider === 'binance') {
-        const raw = await fetchFromURL(`https://fapi.binance.com/fapi/v1/klines?symbol=${sym}&interval=${interval}&limit=1000`);
-        const data = JSON.parse(raw).map(d => ({
-          time: Math.floor(d[0] / 1000), open: parseFloat(d[1]), high: parseFloat(d[2]),
-          low: parseFloat(d[3]), close: parseFloat(d[4]), volume: parseFloat(d[5])
-        }));
+        const data = await fetchBinanceKlines(sym, interval, limit);
         if (data.length > 10) return { symbol: canonical, interval, candles: data, source: 'binance:' + sym };
       }
       if (provider === 'mt5') {
@@ -323,11 +355,7 @@ async function fetchData(symbol, interval) {
   // Try Binance Spot as last resort for crypto
   if (!symbol.includes('USDT')) {
     try {
-      const raw = await fetchFromURL(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=1000`);
-      const data = JSON.parse(raw).map(d => ({
-        time: Math.floor(d[0] / 1000), open: parseFloat(d[1]), high: parseFloat(d[2]),
-        low: parseFloat(d[3]), close: parseFloat(d[4]), volume: parseFloat(d[5])
-      }));
+      const data = await fetchBinanceKlines(symbol, interval, limit, true);
       if (data.length > 10) return { symbol: canonical, interval, candles: data, source: 'binance:' + symbol };
     } catch (e) { errors.push(`binance:${symbol}: ${e.message}`); }
   }
@@ -392,7 +420,7 @@ async function handleDataRequest(urlParams) {
   log('INFO', `Fetching ${symbol} @ ${interval}`);
 
   try {
-    const result = await fetchData(symbol, interval);
+    const result = await fetchData(symbol, interval, limit);
     const sliced = result.candles.slice(-limit);
 
     log('OK', `${symbol}: ${sliced.length} candles from ${result.source}`);

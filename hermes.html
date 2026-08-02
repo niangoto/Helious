@@ -185,8 +185,54 @@
             border-color: var(--accent-cyan);
         }
 
+        .controls input,
+        .controls select {
+            color-scheme: dark;
+        }
+
         .controls input[type="number"] {
             text-align: right;
+        }
+
+        .cal-label {
+            align-self: flex-end;
+        }
+
+        .cal-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .cal-controls input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+            accent-color: var(--accent-cyan);
+            cursor: pointer;
+        }
+
+        .cal-dates {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .cal-dates input[type="date"] {
+            width: 138px;
+            font-family: 'Outfit', sans-serif;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .cal-dates input:disabled {
+            opacity: 0.35;
+            cursor: not-allowed;
+        }
+
+        .cal-sep {
+            color: var(--text-dim);
+            font-size: 13px;
         }
 
         details.adv {
@@ -493,8 +539,27 @@
         <label>Леверидж
             <input type="number" id="inpLev" value="30" min="1" step="1">
         </label>
-        <label>Период назад
+        <label>Риск (α)
+            <input type="number" id="inpAlpha" value="1.0" min="0.1" step="0.1" title="Рисков апетит: 0.1–0.5 консервативен · 1.0 умерен · >1.0 агресивен">
+        </label>
+        <label>Бърз избор
             <select id="inpPeriod"></select>
+        </label>
+        <label>Интервал на свещта
+            <select id="inpInterval"></select>
+        </label>
+        <label>Свещи назад
+            <input type="number" id="inpCount" value="500" min="30" max="10000" step="50" title="Брой свещи назад (до 10000 — тегли се на пакети по 1000)">
+        </label>
+        <label class="cal-label">Календарен период
+            <span class="cal-controls">
+                <input type="checkbox" id="inpUseDates" checked onchange="toggleDates()">
+                <span class="cal-dates">
+                    <input type="date" id="inpDateFrom" title="Начало на периода">
+                    <span class="cal-sep">—</span>
+                    <input type="date" id="inpDateTo" title="Край на периода">
+                </span>
+            </span>
         </label>
         <label>Модел
             <select id="inpModel"></select>
@@ -502,11 +567,11 @@
         <details class="adv">
             <summary>Разширени настройки (EV / Кели / TP-SL)</summary>
             <div class="adv-grid">
-                <label>Buy праг (%) <input type="number" id="inpBuyTh" value="65" min="1" max="99" step="1"></label>
-                <label>Sell праг (%) <input type="number" id="inpSellTh" value="65" min="1" max="99" step="1"></label>
+                <label>Buy праг (%) при α=1 <input type="number" id="inpBuyTh" value="65" min="1" max="99" step="1"></label>
+                <label>Sell праг (%) при α=1 <input type="number" id="inpSellTh" value="65" min="1" max="99" step="1"></label>
                 <label>Мин. EV (цена) <input type="number" id="inpMinEv" value="0" step="any"></label>
-                <label>TP = ×ATR <input type="number" id="inpTp" value="1.5" min="0.1" step="0.1"></label>
-                <label>SL = ×ATR <input type="number" id="inpSl" value="1.0" min="0.1" step="0.1"></label>
+                <label>TP = ×ATR (α=1) <input type="number" id="inpTp" value="1.5" min="0.1" step="0.1"></label>
+                <label>SL = ×ATR (α=1) <input type="number" id="inpSl" value="1.0" min="0.1" step="0.1"></label>
                 <label>Времево затваряне (барове) <input type="number" id="inpHold" value="50" min="1" step="1"></label>
                 <label>Кели (дробна част) <input type="number" id="inpKelly" value="0.25" min="0.01" step="0.05"></label>
                 <label>Кели (макс. фракция) <input type="number" id="inpMaxKelly" value="0.25" min="0.01" max="1" step="0.05"></label>
@@ -543,7 +608,7 @@
     </section>
 
     <div class="footer">
-        Историческа симулация: ботът знае само данните до текущата свещ. Бюджетът се третира в EUR. Не е финансов съвет.
+        Историческа симулация: ботът знае само данните до текущата свещ. Бюджетът се третира в EUR. Риск (α): 0.1–0.5 консервативен · 1.0 умерен · &gt;1.0 агресивен. Не е финансов съвет.
     </div>
 
     <script src="models.js"></script>
@@ -569,10 +634,19 @@
 
         const periodLabels = { '5m': '5м', '15m': '15м', '30m': '30м', '1h': '1ч', '4h': '4ч', '12h': '12ч', '24h': '1Д', '7d': '7Д', '30d': '30Д', '90d': '90Д' };
 
+        const intervalLabels = { '1m': '1м', '5m': '5м', '15m': '15м', '30m': '30м', '1h': '1ч', '4h': '4ч', '1d': '1Д' };
+
         const modelNames = ['Историческа', 'Байесова', 'Логистична', 'Марковска', 'Очаквана стойност', 'Уейвлет', 'Средна вероятност'];
 
         let cancelFlag = false;
         let running = false;
+        let datesTouched = false;
+
+        function toggleDates() {
+            const on = document.getElementById('inpUseDates').checked;
+            document.getElementById('inpDateFrom').disabled = !on;
+            document.getElementById('inpDateTo').disabled = !on;
+        }
 
         function timeToLocal(originalTime) {
             const d = new Date(originalTime * 1000);
@@ -666,6 +740,7 @@
             return {
                 budget: Math.max(1, parseFloat(document.getElementById('inpBudget').value) || 1000),
                 leverage: Math.max(1, parseFloat(document.getElementById('inpLev').value) || 30),
+                alpha: Math.min(10, Math.max(0.1, parseFloat(document.getElementById('inpAlpha').value) || 1.0)),
                 buyTh: parseFloat(document.getElementById('inpBuyTh').value) || 65,
                 sellTh: parseFloat(document.getElementById('inpSellTh').value) || 65,
                 minEv: parseFloat(document.getElementById('inpMinEv').value) || 0,
@@ -707,6 +782,7 @@
                     <span>TP: ${fmt(pos.tp)}</span>
                     <span>SL: ${fmt(pos.sl)}</span>
                     <span>Вероятност: ${pos.prob.toFixed(1)}%</span>
+                    <span>Риск (α): ${pos.alpha.toFixed(2)}</span>
                     <span id="cpFloat">Плаващ P/L: ---</span>
                 </div>
             `;
@@ -782,22 +858,34 @@
                         const buyPct = pr.buyPct, sellPct = pr.sellPct;
                         const atr = atrSeries[i] || atrSeries[atrSeries.length - 1] || 1;
                         const entry = candles[i].close;
-                        const gain = P.tpMult * atr;
-                        const loss = P.slMult * atr;
-                        const evLong = (buyPct / 100) * gain - (sellPct / 100) * loss;
-                        const evShort = (sellPct / 100) * gain - (buyPct / 100) * loss;
+                        const alpha = P.alpha;
+
+                        // (3) R:R — рискът разширява/стеснява TP и SL (агресивен: далечен SL + голям TP)
+                        const tpDist = P.tpMult * alpha * atr;
+                        const slDist = P.slMult * alpha * atr;
+                        const gain = tpDist;
+                        const loss = slDist;
+
+                        const pRise = buyPct / 100, pFall = sellPct / 100;
+                        // (4) Penalty за несигурност: EV = (P_rise·α)·Gain − (P_fall/α)·Loss
+                        const evLong = (pRise * alpha) * gain - (pFall / alpha) * loss;
+                        const evShort = (pFall * alpha) * gain - (pRise / alpha) * loss;
+                        // (2) Динамичен праг на увереност: P_min = 0.5 + K/α
+                        const buyPmin = 50 + (P.buyTh - 50) / alpha;
+                        const sellPmin = 50 + (P.sellTh - 50) / alpha;
 
                         let dir = null;
-                        if (buyPct >= P.buyTh && evLong > P.minEv) dir = 'BUY';
-                        else if (sellPct >= P.sellTh && evShort > P.minEv) dir = 'SELL';
+                        if (buyPct >= buyPmin && evLong > P.minEv) dir = 'BUY';
+                        else if (sellPct >= sellPmin && evShort > P.minEv) dir = 'SELL';
 
                         if (dir) {
-                            const p = dir === 'BUY' ? buyPct / 100 : sellPct / 100;
+                            const p = dir === 'BUY' ? pRise : pFall;
                             const q = 1 - p;
                             const b = gain / loss;
                             let fStar = p - q / b;
                             if (fStar > 0) {
-                                let f = Math.min(fStar * P.kellyF, P.maxKelly);
+                                // (1) Множител на размера на позицията: Size_final = α × Size_calc
+                                let f = Math.min(fStar * P.kellyF * alpha, P.maxKelly);
                                 if (f > 0) {
                                     const riskAmount = f * equity;
                                     let units = riskAmount / loss;
@@ -806,9 +894,9 @@
                                     const notional = units * entry;
                                     const margin = notional / P.leverage;
                                     if (units > 0 && margin > 0 && margin <= equity && notional >= 1) {
-                                        const tp = dir === 'BUY' ? entry + P.tpMult * atr : entry - P.tpMult * atr;
-                                        const sl = dir === 'BUY' ? entry - P.slMult * atr : entry + P.slMult * atr;
-                                        openPos = { dir, entry, units, tp, sl, atr, openIdx: i, prob: p * 100, margin, openTime: candles[i].time };
+                                        const tp = dir === 'BUY' ? entry + tpDist : entry - tpDist;
+                                        const sl = dir === 'BUY' ? entry - slDist : entry + slDist;
+                                        openPos = { dir, entry, units, tp, sl, atr, openIdx: i, prob: p * 100, margin, openTime: candles[i].time, alpha };
                                         renderCurrentPos(openPos, equity);
                                     }
                                 }
@@ -852,8 +940,9 @@
             currentModel = parseInt(document.getElementById('inpModel').value, 10);
 
             const P = readParams();
-            const config = periodConfigs[activePeriod];
-            if (!config) { setProgress(0, 'Невалиден период'); running = false; return; }
+            const preset = periodConfigs[activePeriod];
+            const interval = document.getElementById('inpInterval').value || (preset ? preset.interval : '5m');
+            const limit = Math.min(10000, Math.max(30, parseInt(document.getElementById('inpCount').value, 10) || (preset ? preset.limit : 500)));
 
             document.getElementById('ordersList').innerHTML = '';
             document.getElementById('summary').innerHTML = '';
@@ -863,19 +952,42 @@
             document.getElementById('progBar').classList.remove('err');
 
             try {
-                setProgress(2, 'Зареждане на исторически данни...');
-                const candles = await fetchCandles(currentSymbol, config.interval, config.limit);
+                setProgress(2, `Зареждане на исторически данни (${interval}, ${limit} свещи)...`);
+                const candles = await fetchCandles(currentSymbol, interval, limit);
                 if (!candles || candles.length < 30) throw new Error('Недостатъчно данни (минимум 30 свещи).');
 
-                setProgress(10, 'Изчисляване на вероятностите по модела...');
+                // Попълване на календара с реалния обхват на данните (само ако не е пипан от потребителя)
+                if (!datesTouched && candles.length) {
+                    const pad = n => String(n).padStart(2, '0');
+                    const dFrom = new Date(candles[0].time * 1000);
+                    const dTo = new Date(candles[candles.length - 1].time * 1000);
+                    document.getElementById('inpDateFrom').value = `${dFrom.getFullYear()}-${pad(dFrom.getMonth() + 1)}-${pad(dFrom.getDate())}`;
+                    document.getElementById('inpDateTo').value = `${dTo.getFullYear()}-${pad(dTo.getMonth() + 1)}-${pad(dTo.getDate())}`;
+                }
+
+                let simCandles = candles;
+                if (document.getElementById('inpUseDates').checked) {
+                    const fromVal = document.getElementById('inpDateFrom').value;
+                    const toVal = document.getElementById('inpDateTo').value;
+                    if (fromVal && toVal) {
+                        const fromSec = timeToLocal(new Date(fromVal + 'T00:00:00').getTime() / 1000);
+                        const toSec = timeToLocal(new Date(toVal + 'T23:59:59').getTime() / 1000);
+                        simCandles = candles.filter(c => c.time >= fromSec && c.time <= toSec);
+                        if (simCandles.length < 30) {
+                            throw new Error(`Избраният период (${fromVal} → ${toVal}) покрива само ${simCandles.length} свещи (нужни са минимум 30). Удължете периода или изберете по-дребен времеви мащаб.`);
+                        }
+                    }
+                }
+
+                setProgress(10, `Изчисляване на вероятностите по модела (${simCandles.length} свещи)...`);
                 await sleep(30);
-                const probs = computeModelProbSeries(candles, currentModel);
+                const probs = computeModelProbSeries(simCandles, currentModel);
                 if (cancelFlag) return;
 
-                const atrSeries = computeATR(candles, 14);
+                const atrSeries = computeATR(simCandles, 14);
                 setProgress(15, 'Стартиране на търговската симулация...');
                 await sleep(30);
-                await simulate(candles, atrSeries, probs, P);
+                await simulate(simCandles, atrSeries, probs, P);
             } catch (e) {
                 console.error(e);
                 setProgress(0, 'Грешка: ' + e.message);
@@ -904,6 +1016,23 @@
             });
             pSel.value = periodConfigs[activePeriod] ? activePeriod : '24h';
 
+            const iSel = document.getElementById('inpInterval');
+            Object.keys(intervalLabels).forEach(iv => {
+                const opt = document.createElement('option');
+                opt.value = iv;
+                opt.textContent = intervalLabels[iv];
+                iSel.appendChild(opt);
+            });
+
+            function applyPreset(period) {
+                const cfg = periodConfigs[period];
+                if (!cfg) return;
+                iSel.value = cfg.interval;
+                document.getElementById('inpCount').value = cfg.limit;
+            }
+            applyPreset(activePeriod);
+            pSel.addEventListener('change', () => applyPreset(pSel.value));
+
             const mSel = document.getElementById('inpModel');
             modelNames.forEach((name, idx) => {
                 const opt = document.createElement('option');
@@ -915,6 +1044,12 @@
             document.getElementById('hModelBadge').textContent = modelNames[currentModel];
             mSel.addEventListener('change', () => {
                 document.getElementById('hModelBadge').textContent = modelNames[parseInt(mSel.value, 10)];
+            });
+
+            toggleDates();
+            ['inpDateFrom', 'inpDateTo'].forEach(id => {
+                document.getElementById(id).addEventListener('input', () => { datesTouched = true; });
+                document.getElementById(id).addEventListener('change', () => { datesTouched = true; });
             });
 
             const placeholder = document.querySelector('#ordersList div');

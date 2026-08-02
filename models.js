@@ -351,7 +351,9 @@ function computeModelProbSeries(candles, modelIndex) {
       const wr = wins / (wins + losses || 1);
       val = 50 + (wr - 0.5) * 40;
     } else if (modelIndex === 5) {
-      const w = computeWaveletProbability(prices.slice(0, i + 1));
+      // Плъзгащ прозорец (последни 500 цени) — пази O(n) при големи серии
+      const win = Math.max(0, i - 499);
+      const w = computeWaveletProbability(prices.slice(win, i + 1));
       val = w.buyPct;
     } else if (modelIndex === 6) {
       let sum = 0, cnt = 0;
