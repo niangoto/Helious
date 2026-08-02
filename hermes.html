@@ -355,6 +355,23 @@
             color: var(--text-dim);
         }
 
+        .cp-leg {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px 14px;
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-dim);
+            border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
+            padding-bottom: 4px;
+            width: 100%;
+        }
+
+        .cp-leg b {
+            font-weight: 800;
+            letter-spacing: 0.5px;
+        }
+
         .progress-wrap {
             margin: 0 18px;
             height: 16px;
@@ -550,6 +567,12 @@
         </label>
         <label>Свещи назад
             <input type="number" id="inpCount" value="500" min="30" max="10000" step="50" title="Брой свещи назад (до 10000 — тегли се на пакети по 1000)">
+        </label>
+        <label class="cal-label">Обратна поръчка
+            <span class="cal-controls">
+                <input type="checkbox" id="inpHedge" checked title="При всяка поръчка се отваря и точно обратната със същия обем (хедж)">
+                <span class="cal-sep" style="font-size:11px;text-transform:none;letter-spacing:0.3px">хедж със същия обем</span>
+            </span>
         </label>
         <label class="cal-label">Календарен период
             <span class="cal-controls">
@@ -748,7 +771,8 @@
                 slMult: parseFloat(document.getElementById('inpSl').value) || 1.0,
                 holdBars: Math.max(1, parseInt(document.getElementById('inpHold').value) || 50),
                 kellyF: Math.min(1, Math.max(0.01, parseFloat(document.getElementById('inpKelly').value) || 0.25)),
-                maxKelly: Math.min(1, Math.max(0.01, parseFloat(document.getElementById('inpMaxKelly').value) || 0.25))
+                maxKelly: Math.min(1, Math.max(0.01, parseFloat(document.getElementById('inpMaxKelly').value) || 0.25)),
+                hedge: document.getElementById('inpHedge').checked
             };
         }
 
@@ -772,28 +796,38 @@
             listEl.prepend(row);
         }
 
-        function renderCurrentPos(pos, equity) {
+        function renderCurrentPos(legs, equity) {
             const el = document.getElementById('currentPos');
             el.style.display = 'block';
+            const totalMargin = legs.reduce((s, p) => s + p.margin, 0);
+            const legRow = (pos) => `
+                <div class="cp-leg">
+                    <b class="${pos.dir === 'BUY' ? 'pos' : 'neg'}">${pos.dir === 'BUY' ? 'BUY' : 'SELL'}</b>
+                    <span>Обем ${pos.units.toFixed(4)}</span>
+                    <span>Вход ${fmt(pos.entry)}</span>
+                    <span>TP ${fmt(pos.tp)}</span>
+                    <span>SL ${fmt(pos.sl)}</span>
+                    <span>Вер. ${pos.prob.toFixed(1)}%</span>
+                </div>
+            `;
             el.innerHTML = `
-                <div class="cp-head">Отворена позиция — ${pos.dir} при ${fmt(pos.entry)} (зает маржин: ${pos.margin.toFixed(2)} €)</div>
+                <div class="cp-head">Отворени позиции — зает маржин: ${totalMargin.toFixed(2)} €</div>
                 <div class="cp-grid">
-                    <span>Обем: ${pos.units.toFixed(4)}</span>
-                    <span>TP: ${fmt(pos.tp)}</span>
-                    <span>SL: ${fmt(pos.sl)}</span>
-                    <span>Вероятност: ${pos.prob.toFixed(1)}%</span>
-                    <span>Риск (α): ${pos.alpha.toFixed(2)}</span>
+                    ${legs.map(legRow).join('')}
+                    <span>Риск (α): ${legs[0].alpha.toFixed(2)}</span>
                     <span id="cpFloat">Плаващ P/L: ---</span>
                 </div>
             `;
         }
 
-        function updateFloatPos(pos, c) {
+        function updateFloatPos(legs, c) {
             const el = document.getElementById('cpFloat');
             if (!el) return;
-            const floatPnl = pos.dir === 'BUY' ? (c.close - pos.entry) * pos.units : (pos.entry - c.close) * pos.units;
+            let floatPnl = 0;
+            for (const pos of legs) {
+                floatPnl += pos.dir === 'BUY' ? (c.close - pos.entry) * pos.units : (pos.entry - c.close) * pos.units;
+            }
             el.textContent = 'Плаващ P/L: ' + (floatPnl >= 0 ? '+' : '') + floatPnl.toFixed(2) + ' €';
-            el.className = 'pos';
             el.style.color = floatPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
         }
 
@@ -817,42 +851,47 @@
             let peak = equity;
             let maxDD = 0;
             let tradeCount = 0, winsCount = 0;
-            let openPos = null;
+            let legs = [];
             const n = candles.length;
 
             for (let i = 30; i < n; i++) {
                 if (cancelFlag) return;
 
-                if (openPos) {
+                if (legs.length) {
                     const c = candles[i];
-                    const held = i - openPos.openIdx;
-                    let exitPrice = null, reason = null;
-                    if (openPos.dir === 'BUY') {
-                        if (c.high >= openPos.tp) { exitPrice = openPos.tp; reason = 'TP'; }
-                        else if (c.low <= openPos.sl) { exitPrice = openPos.sl; reason = 'SL'; }
-                        else if (held >= P.holdBars) { exitPrice = c.close; reason = 'Време'; }
-                    } else {
-                        if (c.low <= openPos.tp) { exitPrice = openPos.tp; reason = 'TP'; }
-                        else if (c.high >= openPos.sl) { exitPrice = openPos.sl; reason = 'SL'; }
-                        else if (held >= P.holdBars) { exitPrice = c.close; reason = 'Време'; }
+                    const stillOpen = [];
+                    for (const pos of legs) {
+                        const held = i - pos.openIdx;
+                        let exitPrice = null, reason = null;
+                        if (pos.dir === 'BUY') {
+                            if (c.high >= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
+                            else if (c.low <= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
+                            else if (held >= P.holdBars) { exitPrice = c.close; reason = 'Време'; }
+                        } else {
+                            if (c.low <= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
+                            else if (c.high >= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
+                            else if (held >= P.holdBars) { exitPrice = c.close; reason = 'Време'; }
+                        }
+                        if (exitPrice !== null) {
+                            const pnl = pos.dir === 'BUY'
+                                ? (exitPrice - pos.entry) * pos.units
+                                : (pos.entry - exitPrice) * pos.units;
+                            equity += pnl;
+                            tradeCount++;
+                            if (pnl > 0) winsCount++;
+                            if (equity > peak) peak = equity;
+                            const dd = (peak - equity) / peak * 100;
+                            if (dd > maxDD) maxDD = dd;
+                            prependOrder(pos, exitPrice, reason, pnl, equity, tradeCount);
+                        } else {
+                            stillOpen.push(pos);
+                        }
                     }
-                    if (exitPrice !== null) {
-                        const pnl = openPos.dir === 'BUY'
-                            ? (exitPrice - openPos.entry) * openPos.units
-                            : (openPos.entry - exitPrice) * openPos.units;
-                        equity += pnl;
-                        tradeCount++;
-                        if (pnl > 0) winsCount++;
-                        if (equity > peak) peak = equity;
-                        const dd = (peak - equity) / peak * 100;
-                        if (dd > maxDD) maxDD = dd;
-                        prependOrder(openPos, exitPrice, reason, pnl, equity, tradeCount);
-                        openPos = null;
-                        document.getElementById('currentPos').style.display = 'none';
-                    }
+                    legs = stillOpen;
+                    if (!legs.length) document.getElementById('currentPos').style.display = 'none';
                 }
 
-                if (!openPos && i < n - 1) {
+                if (!legs.length && i < n - 1) {
                     const pr = probs[i];
                     if (pr) {
                         const buyPct = pr.buyPct, sellPct = pr.sellPct;
@@ -887,17 +926,36 @@
                                 // (1) Множител на размера на позицията: Size_final = α × Size_calc
                                 let f = Math.min(fStar * P.kellyF * alpha, P.maxKelly);
                                 if (f > 0) {
+                                    const legCount = P.hedge ? 2 : 1;
                                     const riskAmount = f * equity;
                                     let units = riskAmount / loss;
-                                    const maxUnits = (equity * P.leverage) / entry;
+                                    // Таванът се дели на броя крака, за да побере и обратната поръчка
+                                    const maxUnits = (equity * P.leverage) / (legCount * entry);
                                     units = Math.min(units, maxUnits);
                                     const notional = units * entry;
                                     const margin = notional / P.leverage;
-                                    if (units > 0 && margin > 0 && margin <= equity && notional >= 1) {
-                                        const tp = dir === 'BUY' ? entry + tpDist : entry - tpDist;
-                                        const sl = dir === 'BUY' ? entry - slDist : entry + slDist;
-                                        openPos = { dir, entry, units, tp, sl, atr, openIdx: i, prob: p * 100, margin, openTime: candles[i].time, alpha };
-                                        renderCurrentPos(openPos, equity);
+                                    if (units > 0 && margin > 0 && margin * legCount <= equity && notional >= 1) {
+                                        const t = candles[i].time;
+                                        const makeLeg = (d) => ({
+                                            dir: d,
+                                            entry,
+                                            units,
+                                            tp: d === 'BUY' ? entry + tpDist : entry - tpDist,
+                                            sl: d === 'BUY' ? entry - slDist : entry + slDist,
+                                            atr,
+                                            openIdx: i,
+                                            prob: (d === 'BUY' ? pRise : pFall) * 100,
+                                            margin,
+                                            openTime: t,
+                                            alpha
+                                        });
+                                        const primary = makeLeg(dir);
+                                        legs = [primary];
+                                        if (P.hedge) {
+                                            // Точно обратна поръчка със същия обем
+                                            legs.push(makeLeg(dir === 'BUY' ? 'SELL' : 'BUY'));
+                                        }
+                                        renderCurrentPos(legs, equity);
                                     }
                                 }
                             }
@@ -905,7 +963,7 @@
                     }
                 }
 
-                if (openPos) updateFloatPos(openPos, candles[i]);
+                if (legs.length) updateFloatPos(legs, candles[i]);
 
                 if (i % 20 === 0) {
                     const pct = Math.round(((i - 30) / (n - 30)) * 100);
@@ -914,16 +972,18 @@
                 }
             }
 
-            if (openPos && n > 0) {
+            if (legs.length && n > 0) {
                 const c = candles[n - 1];
-                const pnl = openPos.dir === 'BUY'
-                    ? (c.close - openPos.entry) * openPos.units
-                    : (openPos.entry - c.close) * openPos.units;
-                equity += pnl;
-                tradeCount++;
-                if (pnl > 0) winsCount++;
-                prependOrder(openPos, c.close, 'Край', pnl, equity, tradeCount);
-                openPos = null;
+                for (const pos of legs) {
+                    const pnl = pos.dir === 'BUY'
+                        ? (c.close - pos.entry) * pos.units
+                        : (pos.entry - c.close) * pos.units;
+                    equity += pnl;
+                    tradeCount++;
+                    if (pnl > 0) winsCount++;
+                    prependOrder(pos, c.close, 'Край', pnl, equity, tradeCount);
+                }
+                legs = [];
                 document.getElementById('currentPos').style.display = 'none';
             }
 
