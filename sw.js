@@ -1,4 +1,4 @@
-const CACHE = 'helious-v3';
+const CACHE = 'helious-v6';
 const URLS = ['/', '/forecast.js', '/models.js', '/manifest.json'];
 
 self.addEventListener('install', e => {

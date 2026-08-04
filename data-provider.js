@@ -45,9 +45,9 @@ const SYMBOL_ALIASES = {
   'DJ30':    { canonical: 'DJI',   sources: ['twelvedata:DJI', 'yahoo:^DJI', 'mt5:US30'] },
   'DOWJONES': { canonical: 'DJI',  sources: ['twelvedata:DJI', 'yahoo:^DJI', 'mt5:US30'] },
 
-  'CAC':     { canonical: 'CAC',   sources: ['twelvedata:CAC', 'yahoo:^FCHI', 'mt5:F40'] },
-  'CAC40':   { canonical: 'CAC',   sources: ['twelvedata:CAC', 'yahoo:^FCHI', 'mt5:F40'] },
-  'FCHI':    { canonical: 'CAC',   sources: ['twelvedata:CAC', 'yahoo:^FCHI', 'mt5:F40'] },
+  'CAC':     { canonical: 'CAC',   sources: ['yahoo:^FCHI', 'mt5:F40'] },
+  'CAC40':   { canonical: 'CAC',   sources: ['yahoo:^FCHI', 'mt5:F40'] },
+  'FCHI':    { canonical: 'CAC',   sources: ['yahoo:^FCHI', 'mt5:F40'] },
 
   'FTSE':    { canonical: 'UK100', sources: ['twelvedata:UK100', 'yahoo:^FTSE', 'mt5:UK100'] },
   'UK100':   { canonical: 'UK100', sources: ['twelvedata:UK100', 'yahoo:^FTSE', 'mt5:UK100'] },
@@ -176,7 +176,7 @@ async function fetchBinanceKlines(symbol, interval, limit, spot) {
 function fetchFromURL(url) {
   return new Promise((resolve, reject) => {
     const mod = url.startsWith('https') ? https : http;
-    mod.get(url, { timeout: 10000 }, (res) => {
+    mod.get(url, { timeout: 10000, headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36' } }, (res) => {
       let data = '';
       res.on('data', c => data += c);
       res.on('end', () => {

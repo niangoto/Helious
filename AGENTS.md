@@ -3,7 +3,7 @@
 ## Architecture
 - **Single-page app** with a zero-dep Node.js proxy server (`server.js`).
 - **UI**: `index.html` (inline CSS + inline JS). **Forecast engine**: `forecast.js`.
-- **Models**: `models.js` (statistical probability models: historical, Bayesian, logistic regression, Markov chain, expected value). **Data provider**: `data-provider.js` (symbol normalization, multi-source data fetching, MT5 bridge).
+- **Models**: `models.js` (statistical probability models: historical, logistic regression, Markov chain, expected value, wavelet). **Data provider**: `data-provider.js` (symbol normalization, multi-source data fetching, MT5 bridge).
 - **Only CDN dep**: Lightweight Charts 4.1.1 (`unpkg.com`). No `package.json` — never run `npm install/test/start`.
 - **UI language**: Bulgarian (`lang="bg"`). All labels, tooltips, and notifications are in Bulgarian.
 - **Server** (`server.js`): Static file serving + `/data` endpoint (unified data via `data-provider.js`), plus legacy `/binance`, `/yahoo`, `/ticker` endpoints.

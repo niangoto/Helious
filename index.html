@@ -858,7 +858,7 @@
         <!-- Top statistics and info bar -->
         <div id="top-bar">
             <div class="title-badge-group">
-                <span id="displaySymbol">BTC / USDT <span style="font-size:9px;font-weight:400;color:var(--text-dim);font-family:'JetBrains Mono',monospace;opacity:0.4">v1.0.2</span></span>
+                <span id="displaySymbol">BTC / USDT <span style="font-size:9px;font-weight:400;color:var(--text-dim);font-family:'JetBrains Mono',monospace;opacity:0.4">v1.0.5</span></span>
                 <span id="displayInterval"><span class="live-dot"></span>Времеви мащаб: 5m</span>
                 <div class="period-selector" style="margin-top:6px">
                     <button class="period-btn" onclick="changeAnalysisPeriod('5m')">5м</button>
@@ -963,7 +963,7 @@
                         </div>
                         <div class="iv-ratio-bar"><div class="ratio-buy" id="avgBuyBar" style="width:50%"></div><div class="ratio-sell" id="avgSellBar" style="width:50%"></div></div>
                         <div class="iv-ratio-labels"><span id="avgBuyLbl">Buy 50%</span><span id="avgSellLbl">Sell 50%</span></div>
-                        <button class="hermes-btn" onclick="openHermes(6)"><span class="hm-icon">☿</span> Хермес — Бот Симулация</button>
+                        <button class="hermes-btn" onclick="openHermes(5)"><span class="hm-icon">☿</span> Хермес — Бот Симулация</button>
                     </div>
 
                     <!-- Page 2: Historical Probability -->
@@ -974,40 +974,18 @@
                                 <div class="iv-card-title buy">Вероятност за Buy</div>
                                 <div class="iv-card-value neutral" id="modHistBuy">---</div>
                                 <div class="iv-gauge"><div class="iv-gauge-fill" id="modHistBuyGauge" style="width:0%"></div></div>
-                                <div class="iv-assessment-meta">Close > Open → Buy</div>
+                                <div class="iv-assessment-meta">Последни 40 движения · Close &gt; предишен Close</div>
                             </div>
                             <div class="iv-card">
                                 <div class="iv-card-title sell">Вероятност за Sell</div>
                                 <div class="iv-card-value neutral" id="modHistSell">---</div>
                                 <div class="iv-gauge"><div class="iv-gauge-fill" id="modHistSellGauge" style="width:0%"></div></div>
-                                <div class="iv-assessment-meta">Close ≤ Open → Sell</div>
+                                <div class="iv-assessment-meta">Последни 40 движения · Close ≤ предишен Close</div>
                             </div>
                         </div>
                         <div class="iv-ratio-bar"><div class="ratio-buy" id="modHistBuyBar" style="width:50%"></div><div class="ratio-sell" id="modHistSellBar" style="width:50%"></div></div>
                         <div class="iv-ratio-labels"><span id="modHistBuyLbl">Buy 50%</span><span id="modHistSellLbl">Sell 50%</span></div>
                         <button class="hermes-btn" onclick="openHermes(0)"><span class="hm-icon">☿</span> Хермес — Бот Симулация</button>
-                    </div>
-
-                    <!-- Page 2: Bayesian Probability -->
-                    <div class="iv-page">
-                        <div class="iv-model-label" style="margin-bottom:8px">БАЙЕСОВА ВЕРОЯТНОСТ</div>
-                        <div class="iv-assessment">
-                            <div class="iv-card">
-                                <div class="iv-card-title buy">Вероятност за Buy</div>
-                                <div class="iv-card-value neutral" id="modBayesBuy">---</div>
-                                <div class="iv-gauge"><div class="iv-gauge-fill" id="modBayesBuyGauge" style="width:0%"></div></div>
-                                <div class="iv-assessment-meta">P(B|Signal) = P(Signal|B) × P(B) / P(Signal)</div>
-                            </div>
-                            <div class="iv-card">
-                                <div class="iv-card-title sell">Вероятност за Sell</div>
-                                <div class="iv-card-value neutral" id="modBayesSell">---</div>
-                                <div class="iv-gauge"><div class="iv-gauge-fill" id="modBayesSellGauge" style="width:0%"></div></div>
-                                <div class="iv-assessment-meta">Апостериорна вероятност</div>
-                            </div>
-                        </div>
-                        <div class="iv-ratio-bar"><div class="ratio-buy" id="modBayesBuyBar" style="width:50%"></div><div class="ratio-sell" id="modBayesSellBar" style="width:50%"></div></div>
-                        <div class="iv-ratio-labels"><span id="modBayesBuyLbl">Buy 50%</span><span id="modBayesSellLbl">Sell 50%</span></div>
-                        <button class="hermes-btn" onclick="openHermes(1)"><span class="hm-icon">☿</span> Хермес — Бот Симулация</button>
                     </div>
 
                     <!-- Page 3: Logistic Regression -->
@@ -1029,7 +1007,7 @@
                         </div>
                         <div class="iv-ratio-bar"><div class="ratio-buy" id="modLogBuyBar" style="width:50%"></div><div class="ratio-sell" id="modLogSellBar" style="width:50%"></div></div>
                         <div class="iv-ratio-labels"><span id="modLogBuyLbl">Buy 50%</span><span id="modLogSellLbl">Sell 50%</span></div>
-                        <button class="hermes-btn" onclick="openHermes(2)"><span class="hm-icon">☿</span> Хермес — Бот Симулация</button>
+                        <button class="hermes-btn" onclick="openHermes(1)"><span class="hm-icon">☿</span> Хермес — Бот Симулация</button>
                     </div>
 
                     <!-- Page 4: Markov Chain -->
@@ -1051,7 +1029,7 @@
                         </div>
                         <div class="iv-ratio-bar"><div class="ratio-buy" id="modMarkovBuyBar" style="width:50%"></div><div class="ratio-sell" id="modMarkovSellBar" style="width:50%"></div></div>
                         <div class="iv-ratio-labels"><span id="modMarkovBuyLbl">Buy 50%</span><span id="modMarkovSellLbl">Sell 50%</span></div>
-                        <button class="hermes-btn" onclick="openHermes(3)"><span class="hm-icon">☿</span> Хермес — Бот Симулация</button>
+                        <button class="hermes-btn" onclick="openHermes(2)"><span class="hm-icon">☿</span> Хермес — Бот Симулация</button>
                     </div>
 
                     <!-- Page 5: Expected Value -->
@@ -1077,7 +1055,7 @@
                             <span>EV: <span id="modEvVal">---</span></span>
                             <span>WinRate: <span id="modEvWinRate">---</span></span>
                         </div>
-                        <button class="hermes-btn" onclick="openHermes(4)"><span class="hm-icon">☿</span> Хермес — Бот Симулация</button>
+                        <button class="hermes-btn" onclick="openHermes(3)"><span class="hm-icon">☿</span> Хермес — Бот Симулация</button>
                     </div>
 
                     <!-- Page 6: Wavelet Transform -->
@@ -1099,7 +1077,7 @@
                         </div>
                         <div class="iv-ratio-bar"><div class="ratio-buy" id="modWaveletBuyBar" style="width:50%"></div><div class="ratio-sell" id="modWaveletSellBar" style="width:50%"></div></div>
                         <div class="iv-ratio-labels"><span id="modWaveletBuyLbl">Buy 50%</span><span id="modWaveletSellLbl">Sell 50%</span></div>
-                        <button class="hermes-btn" onclick="openHermes(5)"><span class="hm-icon">☿</span> Хермес — Бот Симулация</button>
+                        <button class="hermes-btn" onclick="openHermes(4)"><span class="hm-icon">☿</span> Хермес — Бот Симулация</button>
                     </div>
                 </div>
                 <button class="iv-nav-arrow next" id="ivArrowNext" onclick="scrollIvPage(1)">›</button>
@@ -1311,7 +1289,7 @@
             // Build page dots
             const dotContainer = document.getElementById('ivPageDots');
             if (dotContainer) {
-                for (let i = 0; i < 8; i++) {
+                for (let i = 0; i < 7; i++) {
                     const dot = document.createElement('div');
                     dot.className = 'iv-page-dot' + (i === 0 ? ' active' : '');
                     dot.id = 'ivDot' + i;
@@ -1513,8 +1491,7 @@
                     computeModelProbSequence(candles, 1),
                     computeModelProbSequence(candles, 2),
                     computeModelProbSequence(candles, 3),
-                    computeModelProbSequence(candles, 4),
-                    computeModelProbSequence(candles, 5)
+                    computeModelProbSequence(candles, 4)
                 ];
             }
             drawIndicatorCanvases();
@@ -1579,19 +1556,19 @@
                 return;
             }
 
-            // Pages 2-6: individual model probability
-            if (currentPage >= 2 && currentPage <= 6 && d.modelProbs && d.modelProbs[currentPage - 2]) {
+            // Pages 2-5: individual model probability
+            if (currentPage >= 2 && currentPage <= 5 && d.modelProbs && d.modelProbs[currentPage - 2]) {
                 const probData = d.modelProbs[currentPage - 2];
-                const modelNames = ['Историческа', 'Байесова', 'Логистична', 'Марковска', 'Очаквана стойност'];
+                const modelNames = ['Историческа', 'Логистична', 'Марковска', 'Очаквана стойност'];
                 label.textContent = modelNames[currentPage - 2] + ' вероятност';
                 drawProbLine(ctx, w, h, probData);
                 return;
             }
 
-            // Page 7: Wavelet
-            if (currentPage === 7 && d.modelProbs && d.modelProbs[5]) {
+            // Page 6: Wavelet
+            if (currentPage === 6 && d.modelProbs && d.modelProbs[4]) {
                 label.textContent = 'Уейвлет трансформация';
-                drawProbLine(ctx, w, h, d.modelProbs[5]);
+                drawProbLine(ctx, w, h, d.modelProbs[4]);
                 return;
             }
         }
@@ -1701,7 +1678,7 @@
         function onIvPageScroll() {
             const pages = document.getElementById('ivPages');
             if (!pages) return;
-            const count = 8;
+            const count = 7;
             const idx = Math.round(pages.scrollLeft / pages.clientWidth);
             currentPage = idx;
             for (let i = 0; i < count; i++) {
@@ -1724,7 +1701,7 @@
             const idx = Math.round(pages.scrollLeft / w);
             const target = idx + dir;
             if (dir < 0 && target < 0) return;
-            const maxPage = 7;
+            const maxPage = 6;
             if (dir > 0 && target > maxPage) {
                 showNotification('Модел A — активен модел', 'success');
                 return;
@@ -1841,7 +1818,7 @@
                 document.getElementById('ivRsiVal').textContent = '--';
                 document.getElementById('ivVolVal').textContent = '--';
                 document.getElementById('ivObvVal').textContent = '--';
-                ['modHist','modBayes','modLog','modMarkov','modEv','modWavelet'].forEach(p => {
+                ['modHist','modLog','modMarkov','modEv','modWavelet'].forEach(p => {
                     const b = document.getElementById(p + 'Buy');
                     const s = document.getElementById(p + 'Sell');
                     if (b) b.textContent = '--';
@@ -1913,7 +1890,6 @@
             if (models) {
                 const sets = [
                     { p: 'modHist', m: models.models.historical },
-                    { p: 'modBayes', m: models.models.bayesian },
                     { p: 'modLog', m: models.models.logistic },
                     { p: 'modMarkov', m: models.models.markov },
                     { p: 'modEv', m: models.models.expectedValue },

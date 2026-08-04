@@ -640,7 +640,7 @@
         let currentSymbol = params.get('symbol') || 'BTCUSDT';
         let activePeriod = params.get('period') || '24h';
         let currentModel = parseInt(params.get('model') || '0', 10);
-        if (isNaN(currentModel) || currentModel < 0 || currentModel > 6) currentModel = 0;
+        if (isNaN(currentModel) || currentModel < 0 || currentModel > 5) currentModel = 0;
 
         const periodConfigs = {
             '5m': { interval: '1m', limit: 500 },
@@ -659,7 +659,7 @@
 
         const intervalLabels = { '1m': '1м', '5m': '5м', '15m': '15м', '30m': '30м', '1h': '1ч', '4h': '4ч', '1d': '1Д' };
 
-        const modelNames = ['Историческа', 'Байесова', 'Логистична', 'Марковска', 'Очаквана стойност', 'Уейвлет', 'Средна вероятност'];
+        const modelNames = ['Историческа', 'Логистична', 'Марковска', 'Очаквана стойност', 'Уейвлет', 'Средна вероятност'];
 
         let cancelFlag = false;
         let running = false;

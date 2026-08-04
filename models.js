@@ -85,7 +85,7 @@ function simulateTrade(candles, i, atrVal, maxBars) {
 }
 
 // --- Cached statistics ---
-let statsCache = { hash: 0, combos: null, histBuyPct: 50, markovMatrix: null, evData: null };
+let statsCache = { hash: 0, combos: null, histBuyPct: 50, evData: null };
 
 function candlesHash(candles) {
   let h = 0;
@@ -112,8 +112,6 @@ function buildStats(candles) {
   const maxBars = Math.min(50, n);
   const combos = new Map();
   let totalWins = 0, totalTrades = 0;
-  let prevWin = -1;
-  let bb = 0, bs = 0, sb = 0, ss = 0;
   let wins = 0, losses = 0, tpSum = 0, slSum = 0;
   for (let i = 20; i < n - 1; i++) {
     const atr = atrV[i] || atrV[atrV.length - 1] || 1;
@@ -125,20 +123,12 @@ function buildStats(candles) {
     if (!combos.has(mask)) combos.set(mask, { total: 0, wins: 0 });
     const c = combos.get(mask); c.total++;
     if (result === 1) c.wins++;
-    if (prevWin >= 0) {
-      if (prevWin === 1 && result === 1) bb++;
-      else if (prevWin === 1 && result === 0) bs++;
-      else if (prevWin === 0 && result === 1) sb++;
-      else if (prevWin === 0 && result === 0) ss++;
-    }
-    prevWin = result;
     if (result === 1) { wins++; tpSum += atr * 1.5; } else { losses++; slSum += atr * 1.0; }
   }
   const hTotal = totalTrades || 1;
+
   return {
     hash: candlesHash(candles), combos, histBuyPct: (totalWins / hTotal) * 100,
-    markovMatrix: { bb: bb / (bb + bs || 1), bs: bs / (bb + bs || 1), sb: sb / (sb + ss || 1), ss: ss / (sb + ss || 1) },
-    prevWin,
     ev: { wins, losses, tpSum, slSum, winRate: wins / (wins + losses || 1) * 100, avgProfit: wins > 0 ? tpSum / wins : 0, avgLoss: losses > 0 ? slSum / losses : 0 }
   };
 }
@@ -146,16 +136,73 @@ function buildStats(candles) {
 function getStats(candles) {
   const h = candlesHash(candles);
   if (statsCache.hash !== h) {
-    statsCache = { hash: 0, combos: null, histBuyPct: 50, markovMatrix: null, evData: null };
+    statsCache = { hash: 0, combos: null, histBuyPct: 50, evData: null };
     const s = buildStats(candles); if (s) statsCache = s;
   }
   return statsCache;
 }
 
-// --- Models ---
+// ─── Модели ───
+// На ефективен пазар глобалната вероятност посоката на една свещ да е "нагоре"
+// е винаги ~50/50 — това не е грешка, а математическа реалност. Затова
+// историческата и марковската вероятност се оценяват върху ПОСЛЕДНИТЕ N движения
+// (прозорец = текущият пазарен режим) — така реагират на актуалния тренд/застой.
+const MODEL_WINDOW = 40;
+
+// Коефициент на усилване на отклонението от 50%: без него стойностите стоят
+// плътно около 50 и не се виждат резките пазарни движения. С усилването
+// отклонение от ±10% става ±16%, т.е. сигналът е видимо различен.
+const SIGNAL_AMP = 1.6;
+
+// Усилва отклонение спрямо неутралното 50% и го ограничава до [1, 99].
+function amplify(px) {
+  return Math.max(1, Math.min(99, 50 + (px - 50) * SIGNAL_AMP));
+}
+
+function windowDirections(candles, windowSize) {
+  const n = candles.length;
+  const start = Math.max(1, n - windowSize);
+  const dirs = [];
+  for (let i = start; i < n; i++) dirs.push(candles[i].close >= candles[i - 1].close ? 1 : 0);
+  return dirs;
+}
+
+// Историческа вероятност: P(следваща свещ нагоре) = дял на up-движенията в прозореца.
+function directionalProb(dirs) {
+  if (!dirs.length) return 50;
+  let up = 0;
+  for (const d of dirs) if (d === 1) up++;
+  return (up / dirs.length) * 100;
+}
+
+// Марковска верига от 1-ви ред върху 2-състояниевите up/down движения в прозореца:
+// преходна матрица P(U|U), P(D|U), P(U|D), P(D|D) + последно наблюдавано състояние,
+// с Laplace (add-1) изглаждане, за да няма нулеви вероятности.
+function markovProb(dirs) {
+  if (dirs.length < 2) return 50;
+  let uu = 0, ud = 0, du = 0, dd = 0;
+  for (let k = 1; k < dirs.length; k++) {
+    const a = dirs[k - 1], b = dirs[k];
+    if (a === 1 && b === 1) uu++;
+    else if (a === 1 && b === 0) ud++;
+    else if (a === 0 && b === 1) du++;
+    else dd++;
+  }
+  const lastDir = dirs[dirs.length - 1];
+  const s = 1;
+  return (lastDir === 1 ? (uu + s) / (uu + ud + 2 * s) : (du + s) / (du + dd + 2 * s)) * 100;
+}
+
+// Изравнителен win-rate за дадено R:R (R = gain/loss): p* = 1 / (1 + R).
+// За TP=1.5×ATR и SL=1.0×ATR → R = 1.5 → p* = 40%.
+function breakevenWinRate(tpMult, slMult) {
+  return 1 / (1 + tpMult / slMult) * 100;
+}
+
 function computeHistoricalProbability(candles) {
-  const s = getStats(candles);
-  return { buyPct: s.histBuyPct, sellPct: 100 - s.histBuyPct };
+  const dirs = windowDirections(candles, MODEL_WINDOW);
+  const buyPct = amplify(directionalProb(dirs));
+  return { buyPct, sellPct: 100 - buyPct };
 }
 
 function computeCombinationProbability(candles) {
@@ -179,25 +226,43 @@ function computeCombinationProbability(candles) {
 }
 
 function computeMarkovChain(candles) {
-  const s = getStats(candles);
-  if (!s.markovMatrix) return { buyPct: s.histBuyPct, sellPct: 100 - s.histBuyPct };
-  const prob = s.prevWin === 1 ? s.markovMatrix.bb : s.markovMatrix.sb;
-  return { buyPct: Math.max(1, Math.min(99, prob * 100)), sellPct: Math.max(1, Math.min(99, (1 - prob) * 100)) };
+  const dirs = windowDirections(candles, MODEL_WINDOW);
+  const buyPct = amplify(markovProb(dirs));
+  return { buyPct: Math.max(1, Math.min(99, buyPct)), sellPct: Math.max(1, Math.min(99, 100 - buyPct)) };
 }
 
+// Очаквана стойност: win-rate на симулирани TP/SL сделки върху последните ~50
+// приключили сделки. Buy вероятността се отчита спрямо ИЗРАВНИТЕЛНИЯ win-rate
+// (p* = 40% за R:R 1.5/1), а не спрямо 50% — иначе моделът винаги стои близо до 50.
 function computeExpectedValue(candles) {
-  const s = getStats(candles);
-  if (!s.ev) return { buyPct: 50, sellPct: 50, ev: 0, winRate: 50, avgProfit: 0, avgLoss: 0 };
-  const ev = s.ev;
-  const buyPct = 50 + (ev.winRate - 50) * 0.5;
-  return { buyPct: Math.max(1, Math.min(99, buyPct)), sellPct: Math.max(1, Math.min(99, 100 - buyPct)), ev: (ev.winRate / 100) * ev.avgProfit - (1 - ev.winRate / 100) * ev.avgLoss, winRate: ev.winRate, avgProfit: ev.avgProfit, avgLoss: ev.avgLoss };
+  const n = candles.length;
+  if (n < 30) return { buyPct: 50, sellPct: 50, ev: 0, winRate: 50, avgProfit: 0, avgLoss: 0 };
+  const atrV = computeATR(candles, 14);
+  const maxBars = Math.min(50, n);
+  const trades = [];
+  for (let i = Math.max(20, n - 150); i < n - 1; i++) {
+    const r = resolveTrade(candles, i, atrV[i] || 1, 1.5, 1.0, maxBars);
+    if (r) {
+      trades.push({ win: r.win, atr: atrV[i] || 1 });
+      if (trades.length > 50) trades.shift();
+    }
+  }
+  let wins = 0, tpSum = 0, slSum = 0;
+  for (const t of trades) { if (t.win === 1) { wins++; tpSum += t.atr * 1.5; } else slSum += t.atr * 1.0; }
+  const total = trades.length;
+  const winRate = total > 0 ? (wins / total) * 100 : 50;
+  const avgProfit = wins > 0 ? tpSum / wins : 0;
+  const avgLoss = total > wins ? slSum / (total - wins) : 0;
+  const ev = (winRate / 100) * avgProfit - (1 - winRate / 100) * avgLoss;
+  const buyPct = 50 + (winRate - breakevenWinRate(1.5, 1.0)) * 1.5;
+  return { buyPct: Math.max(1, Math.min(99, buyPct)), sellPct: Math.max(1, Math.min(99, 100 - buyPct)), ev, winRate, avgProfit, avgLoss };
 }
 
 function computeAllModels(candles) {
   if (!candles || candles.length < 30) return null;
   const prices = candles.map(c => c.close);
   const hist = computeHistoricalProbability(candles);
-  return { models: { historical: hist, bayesian: computeCombinationProbability(candles), logistic: computeCombinationProbability(candles), markov: computeMarkovChain(candles), expectedValue: computeExpectedValue(candles), wavelet: computeWaveletProbability(prices) } };
+  return { models: { historical: hist, logistic: computeCombinationProbability(candles), markov: computeMarkovChain(candles), expectedValue: computeExpectedValue(candles), wavelet: computeWaveletProbability(prices) } };
 }
 
 function computeModelProbSequence(candles, modelIndex) {
@@ -217,43 +282,67 @@ function computeModelProbSequence(candles, modelIndex) {
   const meanVol = volV.reduce((s, v) => s + v, 0) / volV.length;
   const maxBars = Math.min(50, n);
   const combos = new Map();
-  let totalWins = 0, totalTrades = 0, bb = 0, bs = 0, sb = 0, ss = 0, prevWin = -1, wins = 0, losses = 0, tpSum = 0, slSum = 0;
+  let totalWins = 0, totalTrades = 0;
+  const recentTrades = [];
+  const dirs = [];
+
+  const maskAt = (i) => signalMask(i, rsiV[i] || 50, ema20[i], ema50[i], ema200[i], macd.macdLine[i], macd.signal[i], macd.histogram[i], atrV[i], adxR.adx[i], volV[i], meanAtr, meanVol);
+  const combosVal = (i, fallback) => { const m = maskAt(i); if (combos.has(m)) { const cc = combos.get(m); if (cc.total > 0) return (cc.wins / cc.total) * 100; } return fallback; };
+
+  const evStats = () => {
+    let wins = 0, tpSum = 0, slSum = 0;
+    for (const t of recentTrades) { if (t.win === 1) { wins++; tpSum += t.atr * 1.5; } else slSum += t.atr * 1.0; }
+    const total = recentTrades.length;
+    const winRate = total > 0 ? (wins / total) * 100 : 50;
+    const avgProfit = wins > 0 ? tpSum / wins : 0;
+    const avgLoss = total > wins ? slSum / (total - wins) : 0;
+    return { winRate, ev: (winRate / 100) * avgProfit - (1 - winRate / 100) * avgLoss };
+  };
+  const evVal = () => 50 + (evStats().winRate - breakevenWinRate(1.5, 1.0)) * 1.5;
+
+  const sampleVal = (i, hPct) => {
+    const histVal = amplify(directionalProb(dirs));
+    if (modelIndex === 0) return histVal;
+    if (modelIndex === 1) return combosVal(i, hPct);
+    if (modelIndex === 2) return amplify(markovProb(dirs));
+    if (modelIndex === 3) return evVal();
+    if (modelIndex === 4) return computeWaveletProbability(prices.slice(0, i + 1)).buyPct;
+    return (histVal + combosVal(i, hPct) + amplify(markovProb(dirs)) + evVal() + computeWaveletProbability(prices.slice(0, i + 1)).buyPct) / 5;
+  };
+
+  const pushDir = (i) => {
+    const d = candles[i].close >= candles[i - 1].close ? 1 : 0;
+    dirs.push(d);
+    if (dirs.length > MODEL_WINDOW) dirs.shift();
+  };
+
   for (let i = 30; i < n - 1; i++) {
+    // Насочена статистика в плъзгащ прозорец — винаги се обновява
+    pushDir(i);
+
     const atr = atrV[i] || 1;
     const tradeResult = simulateTrade(candles, i, atr, maxBars);
-    if (tradeResult < 0) continue;
-    totalTrades++; if (tradeResult === 1) totalWins++;
-    const mask = signalMask(i, rsiV[i] || 50, ema20[i], ema50[i], ema200[i], macd.macdLine[i], macd.signal[i], macd.histogram[i], atrV[i], adxR.adx[i], volV[i], meanAtr, meanVol);
-    if (!combos.has(mask)) combos.set(mask, { total: 0, wins: 0 });
-    const c = combos.get(mask); c.total++; if (tradeResult === 1) c.wins++;
-    if (prevWin >= 0) { if (prevWin === 1 && tradeResult === 1) bb++; else if (prevWin === 1 && tradeResult === 0) bs++; else if (prevWin === 0 && tradeResult === 1) sb++; else if (prevWin === 0 && tradeResult === 0) ss++; }
-    prevWin = tradeResult;
-    if (tradeResult === 1) { wins++; tpSum += atr * 1.5; } else { losses++; slSum += atr * 1.0; }
+    if (tradeResult >= 0) {
+      totalTrades++; if (tradeResult === 1) totalWins++;
+      const mask = maskAt(i);
+      if (!combos.has(mask)) combos.set(mask, { total: 0, wins: 0 });
+      const c = combos.get(mask); c.total++; if (tradeResult === 1) c.wins++;
+      recentTrades.push({ win: tradeResult, atr });
+      if (recentTrades.length > 100) recentTrades.shift();
+    }
+
     if (i % step === 0 || i === n - 2) {
       const t = candles[i].time;
       const hPct = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
-      if (modelIndex === 0) result.push({ time: t, value: hPct });
-      else if (modelIndex === 1 || modelIndex === 2) { const tMask = mask; let val = hPct; if (combos.has(tMask)) { const cc = combos.get(tMask); if (cc.total > 0) val = (cc.wins / cc.total) * 100; } result.push({ time: t, value: val }); }
-      else if (modelIndex === 3) { const p = prevWin === 1 ? (bb / (bb + bs || 1)) : (sb / (sb + ss || 1)); result.push({ time: t, value: p * 100 }); }
-      else if (modelIndex === 4) { const wr = wins / (wins + losses || 1); result.push({ time: t, value: 50 + (wr - 0.5) * 40 }); }
-      else if (modelIndex === 5) { const w = computeWaveletProbability(prices.slice(0, i + 1)); result.push({ time: t, value: w.buyPct }); }
+      result.push({ time: t, value: Math.max(1, Math.min(99, sampleVal(i, hPct))) });
     }
   }
 
-  // Add probability for the latest candle (no forward outcome needed)
-  // This uses the same lookup as computeCombinationProbability
+  // Добавяне на вероятността за последната свещ (без бъдещ изход)
   const lastIdx = n - 1;
-  const lastT = candles[lastIdx].time;
-  if (modelIndex === 0) { result.push({ time: lastT, value: totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50 }); }
-  else if (modelIndex === 1 || modelIndex === 2) {
-    const lastMask = signalMask(lastIdx, rsiV[lastIdx] || 50, ema20[lastIdx], ema50[lastIdx], ema200[lastIdx], macd.macdLine[lastIdx], macd.signal[lastIdx], macd.histogram[lastIdx], atrV[lastIdx], adxR.adx[lastIdx], volV[lastIdx], meanAtr, meanVol);
-    let val = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
-    if (combos.has(lastMask)) { const cc = combos.get(lastMask); if (cc.total > 0) val = (cc.wins / cc.total) * 100; }
-    result.push({ time: lastT, value: val });
-  }
-  else if (modelIndex === 3) { const p = prevWin === 1 ? (bb / (bb + bs || 1)) : (sb / (sb + ss || 1)); result.push({ time: lastT, value: p * 100 }); }
-  else if (modelIndex === 4) { const wr = wins / (wins + losses || 1); result.push({ time: lastT, value: 50 + (wr - 0.5) * 40 }); }
-  else if (modelIndex === 5) { const w = computeWaveletProbability(prices); result.push({ time: lastT, value: w.buyPct }); }
+  pushDir(lastIdx);
+  const hPctLast = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
+  result.push({ time: candles[lastIdx].time, value: Math.max(1, Math.min(99, sampleVal(lastIdx, hPctLast))) });
 
   return result;
 }
@@ -277,8 +366,8 @@ function resolveTrade(candles, j, atrVal, tpMult, slMult, maxBars) {
 // Compute the model buy/sell probability at every candle index in a strictly
 // causal (walk-forward) way: at index i the statistics only include trades
 // entered before i whose outcome was already known by time i.
-// modelIndex: 0=historical, 1=bayesian, 2=logistic, 3=markov, 4=EV,
-//             5=wavelet, 6=average of 0..4
+// modelIndex: 0=historical, 1=logistic, 2=markov, 3=EV,
+//             4=wavelet, 5=average of 0..4
 // Returns an array aligned with `candles` (null for the warm-up window).
 function computeModelProbSeries(candles, modelIndex) {
   const n = candles.length;
@@ -311,10 +400,28 @@ function computeModelProbSeries(candles, modelIndex) {
 
   const combos = new Map();
   let totalWins = 0, totalTrades = 0;
-  let prevWin = -1, bb = 0, bs = 0, sb = 0, ss = 0;
-  let wins = 0, losses = 0, tpSum = 0, slSum = 0;
+  const recentTrades = [];
+  const dirs = [];
+
+  const maskAt = (i) => signalMask(i, rsiV[i] || 50, ema20[i], ema50[i], ema200[i], macd.macdLine[i], macd.signal[i], macd.histogram[i], atrV[i], adxR.adx[i], volV[i], meanAtr, meanVol);
+
+  const evStats = () => {
+    let wins = 0, tpSum = 0, slSum = 0;
+    for (const t of recentTrades) { if (t.win === 1) { wins++; tpSum += t.atr * 1.5; } else slSum += t.atr * 1.0; }
+    const total = recentTrades.length;
+    const winRate = total > 0 ? (wins / total) * 100 : 50;
+    const avgProfit = wins > 0 ? tpSum / wins : 0;
+    const avgLoss = total > wins ? slSum / (total - wins) : 0;
+    return { winRate, ev: (winRate / 100) * avgProfit - (1 - winRate / 100) * avgLoss };
+  };
+  const evVal = () => 50 + (evStats().winRate - breakevenWinRate(1.5, 1.0)) * 1.5;
 
   for (let i = 30; i < n; i++) {
+    // Насочена статистика в плъзгащ прозорец — посоката е известна към време i
+    const d = candles[i].close >= candles[i - 1].close ? 1 : 0;
+    dirs.push(d);
+    if (dirs.length > MODEL_WINDOW) dirs.shift();
+
     // Fold in all trades that resolved exactly at candle i (entry order).
     if (resolvedAt[i].length) {
       resolvedAt[i].sort((a, b) => a - b);
@@ -325,46 +432,37 @@ function computeModelProbSeries(candles, modelIndex) {
         if (!combos.has(e.mask)) combos.set(e.mask, { total: 0, wins: 0 });
         const c = combos.get(e.mask); c.total++;
         if (e.win === 1) c.wins++;
-        if (prevWin >= 0) {
-          if (prevWin === 1 && e.win === 1) bb++;
-          else if (prevWin === 1 && e.win === 0) bs++;
-          else if (prevWin === 0 && e.win === 1) sb++;
-          else if (prevWin === 0 && e.win === 0) ss++;
-        }
-        prevWin = e.win;
-        if (e.win === 1) { wins++; tpSum += (atrV[j] || 1) * 1.5; }
-        else { losses++; slSum += (atrV[j] || 1) * 1.0; }
+        recentTrades.push({ win: e.win, atr: atrV[j] || 1 });
+        if (recentTrades.length > 50) recentTrades.shift();
       }
     }
 
     let val;
     if (modelIndex === 0) {
-      val = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
-    } else if (modelIndex === 1 || modelIndex === 2) {
-      const mask = signalMask(i, rsiV[i] || 50, ema20[i], ema50[i], ema200[i], macd.macdLine[i], macd.signal[i], macd.histogram[i], atrV[i], adxR.adx[i], volV[i], meanAtr, meanVol);
+      val = amplify(directionalProb(dirs));
+    } else if (modelIndex === 1) {
+      const mask = maskAt(i);
       val = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
       if (combos.has(mask)) { const cc = combos.get(mask); if (cc.total > 0) val = (cc.wins / cc.total) * 100; }
+    } else if (modelIndex === 2) {
+      val = amplify(markovProb(dirs));
     } else if (modelIndex === 3) {
-      const p = prevWin === 1 ? (bb / (bb + bs || 1)) : (sb / (sb + ss || 1));
-      val = (p || 0.5) * 100;
+      val = evVal();
     } else if (modelIndex === 4) {
-      const wr = wins / (wins + losses || 1);
-      val = 50 + (wr - 0.5) * 40;
-    } else if (modelIndex === 5) {
       // Плъзгащ прозорец (последни 500 цени) — пази O(n) при големи серии
       const win = Math.max(0, i - 499);
       const w = computeWaveletProbability(prices.slice(win, i + 1));
       val = w.buyPct;
-    } else if (modelIndex === 6) {
+    } else if (modelIndex === 5) {
       let sum = 0, cnt = 0;
-      const v0 = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50; sum += v0; cnt++;
-      const mask = signalMask(i, rsiV[i] || 50, ema20[i], ema50[i], ema200[i], macd.macdLine[i], macd.signal[i], macd.histogram[i], atrV[i], adxR.adx[i], volV[i], meanAtr, meanVol);
-      let v1 = v0; if (combos.has(mask)) { const cc = combos.get(mask); if (cc.total > 0) v1 = (cc.wins / cc.total) * 100; } sum += v1; cnt++;
-      sum += v1; cnt++; // logistic = same combination model
-      const p = prevWin === 1 ? (bb / (bb + bs || 1)) : (sb / (sb + ss || 1));
-      sum += (p || 0.5) * 100; cnt++;
-      const wr = wins / (wins + losses || 1);
-      sum += 50 + (wr - 0.5) * 40; cnt++;
+      const v0 = amplify(directionalProb(dirs)); sum += v0; cnt++;
+      const mask = maskAt(i);
+      let v1 = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
+      if (combos.has(mask)) { const cc = combos.get(mask); if (cc.total > 0) v1 = (cc.wins / cc.total) * 100; } sum += v1; cnt++;
+      const v2 = amplify(markovProb(dirs)); sum += v2; cnt++;
+      const v3 = evVal(); sum += v3; cnt++;
+      const win = Math.max(0, i - 499);
+      const v4 = computeWaveletProbability(prices.slice(win, i + 1)).buyPct; sum += v4; cnt++;
       val = cnt > 0 ? sum / cnt : 50;
     }
     result[i] = { time: candles[i].time, buyPct: Math.max(1, Math.min(99, val)), sellPct: Math.max(1, Math.min(99, 100 - val)) };
