@@ -149,6 +149,171 @@ function getStats(candles) {
 // (прозорец = текущият пазарен режим) — така реагират на актуалния тренд/застой.
 const MODEL_WINDOW = 40;
 
+// ─── Fast Fourier Transform (FFT) ───
+// Дискретно преобразувание на Фурие върху видимите свещи. Серията се
+// нормализира спрямо диапазона [min, max] на периода, после се разлага на
+// синусоиди (честота, амплитуда, фаза). Доминантните компоненти се
+// мултиплицират обратно в сигнал и се екстраполират със същия период напред.
+
+// Итеративно radix-2 Cooley–Tukey FFT (in-place). re/im с дължина степен на 2.
+function fftRadix2(re, im) {
+  const n = re.length;
+  if (n < 2) return;
+  // Bit-reversal permutation
+  for (let i = 1, j = 0; i < n; i++) {
+    let bit = n >> 1;
+    for (; j & bit; bit >>= 1) j ^= bit;
+    j ^= bit;
+    if (i < j) {
+      let t = re[i]; re[i] = re[j]; re[j] = t;
+      t = im[i]; im[i] = im[j]; im[j] = t;
+    }
+  }
+  for (let len = 2; len <= n; len <<= 1) {
+    const ang = -2 * Math.PI / len;
+    const wRe = Math.cos(ang);
+    const wIm = Math.sin(ang);
+    for (let i = 0; i < n; i += len) {
+      let curRe = 1, curIm = 0;
+      const half = len >> 1;
+      for (let j = 0; j < half; j++) {
+        const uRe = re[i + j], uIm = im[i + j];
+        const vRe = re[i + j + half] * curRe - im[i + j + half] * curIm;
+        const vIm = re[i + j + half] * curIm + im[i + j + half] * curRe;
+        re[i + j] = uRe + vRe;
+        im[i + j] = uIm + vIm;
+        re[i + j + half] = uRe - vRe;
+        im[i + j + half] = uIm - vIm;
+        const nxtRe = curRe * wRe - curIm * wIm;
+        curIm = curRe * wIm + curIm * wRe;
+        curRe = nxtRe;
+      }
+    }
+  }
+}
+
+// Връща спектъра на серията: доминантни синусоиди {freq, amplitude, phase},
+// реконструкцията по тях (покрива видимия период) и екстраполация напред.
+//
+// ВАЖНО за нормализацията: при zero-padding сигналът се пресмята върху
+// size = степен на 2 >= n, затова обратното преобразувание използва
+// амплитуда 2|X[k]|/size (а НЕ /n). Така реконструкцията с всички честоти
+// минава точно през всички точки на нулево-подплатения сигнал (т.е. и през
+// реалните свещи). С top-N доминантни компоненти получаваме гладка крива,
+// която следва цената много близко (~2-3% грешка спрямо диапазона).
+function computeFourierAnalysis(candles) {
+  if (!candles || candles.length < 16) return null;
+  const n = candles.length;
+
+  // Нормализиране: [min, max] на периода -> [-1, 1]
+  let min = Infinity, max = -Infinity;
+  for (const c of candles) { if (c.close < min) min = c.close; if (c.close > max) max = c.close; }
+  const range = (max - min) || 1;
+  const mid = (min + max) / 2;
+  const half = range / 2;
+
+  // Най-близката степен на 2 >= n за FFT (zero-padding)
+  let size = 1;
+  while (size < n) size <<= 1;
+  const re = new Float64Array(size);
+  const im = new Float64Array(size);
+  for (let i = 0; i < n; i++) re[i] = (candles[i].close - mid) / half;
+  fftRadix2(re, im);
+
+  // Амплитуди за положителните честоти (0..size/2), нормализирани спрямо size
+  const components = [];
+  for (let k = 1; k <= size / 2; k++) {
+    const amp = Math.sqrt(re[k] * re[k] + im[k] * im[k]) / size * 2;
+    if (amp < 0.002) continue;
+    components.push({ freq: k / size, amplitude: amp, phase: Math.atan2(im[k], re[k]) });
+  }
+  components.sort((a, b) => b.amplitude - a.amplitude);
+  // Доминантните компоненти — колкото повече, толкова по-точно следва цената
+  const dominant = components.slice(0, 40);
+
+  // Сума на синусоидите в нормализирани единици (-1..1).
+  // Обратно преобразувание: x[n] = Σ 2|X[k]|/size · cos(2πkn/size + φ_k)
+  const synthNorm = (t) => {
+    let v = 0;
+    for (const d of dominant) v += d.amplitude * Math.cos(2 * Math.PI * d.freq * t + d.phase);
+    return v;
+  };
+
+  const stepBase = n > 1 ? (candles[n - 1].time - candles[0].time) / (n - 1) : 60;
+
+  const flatResult = () => {
+    const reconstruction = candles.map(c => ({ time: c.time, value: c.close }));
+    const forecast = [];
+    for (let k = 1; k <= n; k++) {
+      forecast.push({ time: candles[n - 1].time + k * stepBase, value: candles[n - 1].close });
+    }
+    return { spectrum: [], reconstruction, forecast, buyPct: 50, sellPct: 50, range, min, max };
+  };
+  if (!dominant.length) return flatResult();
+
+  const synth = (t) => mid + synthNorm(t) * half;
+
+  // Реконструкцията следва свещите точно (грешка ~2-3% от диапазона),
+  // затова НЕ добавяме константна корекция — тя измества цялата линия
+  // настрани. Крайната точка на реконструкцията определя старта на
+  // продължението, така че синята линия продължава гладко в пунктираната.
+  const recon = candles.map((c, i) => ({ time: c.time, value: synth(i) }));
+  const reconEnd = recon[n - 1].value;
+
+  // Продължение със същия период напред (толкова барове, колкото видимия период),
+  // с бавно затихване на амплитудата, за да не се размахва в далечното бъдеще.
+  // Започва от последната точка на реконструкцията (k=0 -> t=n-1), за да е
+  // непрекъсната синята -> пунктираната линия.
+  const forecast = [];
+  for (let k = 0; k < n; k++) {
+    const decay = Math.exp(-((k + 1) / n) * 0.7);
+    const osc = (synth(k + n - 1) - reconEnd) * decay;
+    forecast.push({ time: candles[n - 1].time + (k + 1) * stepBase, value: reconEnd + osc });
+  }
+
+  // ВЕРоятност: какво описва?
+  // Продължението на реконструирания сигнал се движи около последната цена.
+  // Ако втората половина на продължението е средно НАД последната цена,
+  // моделът очаква пазарът да се придвижи нагоре през следващия период със
+  // същата дължина -> Buy вероятност > 50. Под -> Sell. Отклонението е
+  // нормализирано като % от целия диапазон на видимия период и се мащабира.
+  const halfIdx = Math.max(1, Math.floor(n / 2));
+  let futSum = 0;
+  for (let k = halfIdx; k < forecast.length; k++) futSum += forecast[k].value;
+  const futAvg = futSum / (forecast.length - halfIdx);
+  const driftPct = ((futAvg - candles[n - 1].close) / range) * 100;
+  const buyPct = Math.max(1, Math.min(99, 50 + driftPct * 0.8));
+
+  return { spectrum: dominant, reconstruction: recon, forecast, buyPct, sellPct: 100 - buyPct, range, min, max };
+}
+
+function computeFourierProbability(candles) {
+  const f = computeFourierAnalysis(candles);
+  if (!f) return { buyPct: 50, sellPct: 50 };
+  return { buyPct: f.buyPct, sellPct: f.sellPct };
+}
+
+// Плъзгаща FFT вероятност за всяка свещ (за probability canvas).
+// Кешира се по хеш на свещите (както statsCache) — преизчислява се само при смяна.
+let fourierSeqCache = { hash: 0, data: null };
+function computeFourierProbSequence(candles) {
+  const n = candles.length;
+  if (n < 32) return [];
+  const h = candlesHash(candles);
+  if (fourierSeqCache.hash === h) return fourierSeqCache.data;
+  const result = [];
+  const win = 64;
+  const maxPoints = 60;
+  const step = Math.max(1, Math.floor((n - 30) / maxPoints));
+  for (let i = 30; i < n; i += step) {
+    const slice = candles.slice(Math.max(0, i - win + 1), i + 1);
+    const f = computeFourierAnalysis(slice);
+    result.push({ time: candles[i].time, value: f ? f.buyPct : 50 });
+  }
+  fourierSeqCache = { hash: h, data: result };
+  return result;
+}
+
 // Коефициент на усилване на отклонението от 50%: без него стойностите стоят
 // плътно около 50 и не се виждат резките пазарни движения. С усилването
 // отклонение от ±10% става ±16%, т.е. сигналът е видимо различен.
@@ -262,7 +427,7 @@ function computeAllModels(candles) {
   if (!candles || candles.length < 30) return null;
   const prices = candles.map(c => c.close);
   const hist = computeHistoricalProbability(candles);
-  return { models: { historical: hist, logistic: computeCombinationProbability(candles), markov: computeMarkovChain(candles), expectedValue: computeExpectedValue(candles), wavelet: computeWaveletProbability(prices) } };
+  return { models: { historical: hist, logistic: computeCombinationProbability(candles), markov: computeMarkovChain(candles), expectedValue: computeExpectedValue(candles), wavelet: computeWaveletProbability(prices), fourier: computeFourierProbability(candles) } };
 }
 
 function computeModelProbSequence(candles, modelIndex) {

@@ -302,13 +302,17 @@
             border-top: 1px solid var(--panel-border);
             z-index: 10;
             flex-shrink: 0;
-            height: 80px;
+            height: 150px;
         }
 
         .indicator-canvas-row {
             height: 80px;
             position: relative;
             overflow: hidden;
+        }
+
+        .indicator-canvas-row.fft-row {
+            height: 70px;
         }
 
         .indicator-canvas-row canvas {
@@ -689,6 +693,25 @@
             font-size: 14px;
         }
 
+        .iv-fft-bins {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            margin-top: 8px;
+            font-size: 10px;
+            color: var(--text-dim);
+        }
+        .iv-fft-bin {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 10px;
+            border: 1px solid rgba(0, 240, 255, 0.1);
+            border-radius: 6px;
+            background: rgba(0, 240, 255, 0.03);
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .iv-fft-bin .iv-fft-freq { color: var(--accent-cyan); }
+
         /* Responsive / App layout */
         @media (max-width: 768px) {
             #top-bar {
@@ -718,6 +741,7 @@
             .stat-group { padding: 3px 8px; }
             .stat-label { font-size: 8px; }
             .indicator-canvas-row { height: 55px; }
+            .indicator-canvas-row.fft-row { height: 45px; }
             #pendulumCanvas { width: 60px; height: 60px; bottom: 6px; right: 6px; }
             .iv-cards { grid-template-columns: 1fr; gap: 8px; }
             .iv-card { padding: 12px; }
@@ -730,7 +754,7 @@
         }
 
         @media (max-width: 768px) {
-            #indicator-canvases { height: 105px; }
+            #indicator-canvases { height: 100px; }
         }
         }
 
@@ -898,6 +922,10 @@
                     <span class="indicator-canvas-label" id="chartIndicatorLabel">RSI</span>
                     <canvas id="chartIndicatorCanvas"></canvas>
                 </div>
+                <div class="indicator-canvas-row fft-row" id="fftSpectrumRow">
+                    <span class="indicator-canvas-label" id="fftSpectrumLabel">FFT Спектър</span>
+                    <canvas id="fftSpectrumCanvas"></canvas>
+                </div>
             </div>
         </div>
 
@@ -952,7 +980,7 @@
                                 <div class="iv-card-title buy">Вероятност за Buy</div>
                                 <div class="iv-card-value neutral" id="avgBuy">---</div>
                                 <div class="iv-gauge"><div class="iv-gauge-fill" id="avgBuyGauge" style="width:0%"></div></div>
-                                <div class="iv-assessment-meta">Средно от 5-те модела</div>
+                                <div class="iv-assessment-meta">Средно от 6-те модела</div>
                             </div>
                             <div class="iv-card">
                                 <div class="iv-card-title sell">Вероятност за Sell</div>
@@ -1079,6 +1107,29 @@
                         <div class="iv-ratio-labels"><span id="modWaveletBuyLbl">Buy 50%</span><span id="modWaveletSellLbl">Sell 50%</span></div>
                         <button class="hermes-btn" onclick="openHermes(4)"><span class="hm-icon">☿</span> Хермес — Бот Симулация</button>
                     </div>
+
+                    <!-- Page 7: Fast Fourier Transform -->
+                    <div class="iv-page">
+                        <div class="iv-model-label" style="margin-bottom:8px">ПРЕОБРАЗУВАНИЕ НА ФУРИЕ (FFT)</div>
+                        <div class="iv-assessment">
+                            <div class="iv-card">
+                                <div class="iv-card-title buy">Вероятност за Buy</div>
+                                <div class="iv-card-value neutral" id="modFftBuy">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="modFftBuyGauge" style="width:0%"></div></div>
+                                <div class="iv-assessment-meta">Дискретно преобразувание на Фурие (DFT)</div>
+                            </div>
+                            <div class="iv-card">
+                                <div class="iv-card-title sell">Вероятност за Sell</div>
+                                <div class="iv-card-value neutral" id="modFftSell">---</div>
+                                <div class="iv-gauge"><div class="iv-gauge-fill" id="modFftSellGauge" style="width:0%"></div></div>
+                                <div class="iv-assessment-meta">Синусоиди · амплитуди · честоти</div>
+                            </div>
+                        </div>
+                        <div class="iv-ratio-bar"><div class="ratio-buy" id="modFftBuyBar" style="width:50%"></div><div class="ratio-sell" id="modFftSellBar" style="width:50%"></div></div>
+                        <div class="iv-ratio-labels"><span id="modFftBuyLbl">Buy 50%</span><span id="modFftSellLbl">Sell 50%</span></div>
+                        <div class="iv-fft-bins" id="fftBins"></div>
+                        <button class="hermes-btn" onclick="openHermes(5)"><span class="hm-icon">☿</span> Хермес — Бот Симулация</button>
+                    </div>
                 </div>
                 <button class="iv-nav-arrow next" id="ivArrowNext" onclick="scrollIvPage(1)">›</button>
             </div>
@@ -1158,13 +1209,13 @@
             } catch (e) {}
             throw new Error('Symbol not available');
         }
-        let chart, candleSeries;
+        let chart, candleSeries, fftSeries, fftForecastSeries;
         let latestForecastData = null;
         let latestCandles = [];
         let indicatorData = { rsi: [], volume: [] };
         let presentCutoffTime = null;
         let presentLineLocked = false;
-
+        let latestFft = null;
         function timeToLocal(originalTime) {
             const d = new Date(originalTime * 1000);
             return Date.UTC(
@@ -1285,11 +1336,29 @@
                 wickDownColor: '#ff0055'
             });
 
+            fftSeries = chart.addLineSeries({
+                color: 'rgba(0, 240, 255, 0.75)',
+                lineWidth: 2,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                crosshairMarkerVisible: false,
+                lineStyle: 0
+            });
+
+            fftForecastSeries = chart.addLineSeries({
+                color: 'rgba(138, 43, 226, 0.7)',
+                lineWidth: 2,
+                priceLineVisible: false,
+                lastValueVisible: false,
+                crosshairMarkerVisible: false,
+                lineStyle: 2
+            });
+
             setupPresentLine();
             // Build page dots
             const dotContainer = document.getElementById('ivPageDots');
             if (dotContainer) {
-                for (let i = 0; i < 7; i++) {
+                for (let i = 0; i < 8; i++) {
                     const dot = document.createElement('div');
                     dot.className = 'iv-page-dot' + (i === 0 ? ' active' : '');
                     dot.id = 'ivDot' + i;
@@ -1309,8 +1378,12 @@
             window.addEventListener('resize', () => {
                 chart.resize(container.clientWidth, container.clientHeight);
                 drawIndicatorCanvases();
+                drawFftSpectrum();
             });
-            chart.timeScale().subscribeVisibleTimeRangeChange(() => drawIndicatorCanvases());
+            chart.timeScale().subscribeVisibleTimeRangeChange(() => {
+                drawIndicatorCanvases();
+                if (latestCandles.length) updateFftOverlay(latestCandles);
+            });
         }
 
         function selectSymbol(sym) {
@@ -1419,7 +1492,11 @@
                 showNotification(`${e.message}`, "error");
                 // Clear forecast and candles to avoid stale data
                 latestForecastData = null;
+                latestFft = null;
                 candleSeries.setData([]);
+                if (fftSeries) fftSeries.setData([]);
+                if (fftForecastSeries) fftForecastSeries.setData([]);
+                drawFftSpectrum();
                 document.getElementById('currentPrice').innerText = '---';
             } finally {
                 showLoading(false);
@@ -1491,10 +1568,96 @@
                     computeModelProbSequence(candles, 1),
                     computeModelProbSequence(candles, 2),
                     computeModelProbSequence(candles, 3),
-                    computeModelProbSequence(candles, 4)
+                    computeModelProbSequence(candles, 4),
+                    computeFourierProbSequence(candles)
                 ];
             }
+            updateFftOverlay(candles);
             drawIndicatorCanvases();
+        }
+
+        // FFT: спектър върху видимия период + мултиплициран резултат върху графиката
+        function updateFftOverlay(candles) {
+            if (typeof computeFourierAnalysis !== 'function' || !candles || candles.length < 16) {
+                latestFft = null;
+                if (fftSeries) fftSeries.setData([]);
+                if (fftForecastSeries) fftForecastSeries.setData([]);
+                drawFftSpectrum();
+                return;
+            }
+            const vis = getVisibleCandles(candles);
+            latestFft = computeFourierAnalysis(vis);
+            if (!latestFft) {
+                if (fftSeries) fftSeries.setData([]);
+                if (fftForecastSeries) fftForecastSeries.setData([]);
+                drawFftSpectrum();
+                return;
+            }
+            if (fftSeries) fftSeries.setData(latestFft.reconstruction);
+            if (fftForecastSeries) fftForecastSeries.setData(latestFft.forecast);
+            drawFftSpectrum();
+        }
+
+        function getVisibleCandles(candles) {
+            try {
+                const range = chart.timeScale().getVisibleRange();
+                if (range && range.from && range.to) {
+                    const vis = candles.filter(c => c.time >= range.from && c.time <= range.to);
+                    if (vis.length >= 16) return vis;
+                }
+            } catch (e) {}
+            return candles;
+        }
+
+        function drawFftSpectrum() {
+            const cvs = document.getElementById('fftSpectrumCanvas');
+            const label = document.getElementById('fftSpectrumLabel');
+            if (!cvs || !label) return;
+            const parent = cvs.parentElement;
+            const w = parent.clientWidth;
+            const h = parent.clientHeight;
+            if (w <= 0 || h <= 0) return;
+            const dpr = window.devicePixelRatio || 1;
+            cvs.width = w * dpr;
+            cvs.height = h * dpr;
+            cvs.style.width = w + 'px';
+            cvs.style.height = h + 'px';
+            const ctx = cvs.getContext('2d');
+            ctx.scale(dpr, dpr);
+            ctx.clearRect(0, 0, w, h);
+            if (!latestFft || !latestFft.spectrum || !latestFft.spectrum.length) {
+                label.textContent = 'FFT Спектър';
+                ctx.fillStyle = 'rgba(255,255,255,0.25)';
+                ctx.font = '10px JetBrains Mono';
+                ctx.fillText('—', w / 2, h / 2);
+                return;
+            }
+            const spec = latestFft.spectrum;
+            const maxAmp = Math.max(...spec.map(s => s.amplitude), 1e-6);
+            const binW = w / spec.length;
+            const baseY = h - 4;
+            const maxH = h - 12;
+            ctx.font = '9px JetBrains Mono';
+            spec.forEach((s, i) => {
+                const barH = Math.max(2, (s.amplitude / maxAmp) * maxH);
+                const x = i * binW + binW / 2;
+                const grad = ctx.createLinearGradient(0, baseY - barH, 0, baseY);
+                grad.addColorStop(0, 'rgba(0, 240, 255, 0.9)');
+                grad.addColorStop(1, 'rgba(138, 43, 226, 0.4)');
+                ctx.fillStyle = grad;
+                ctx.fillRect(x - binW * 0.3, baseY - barH, binW * 0.6, barH);
+            });
+            // Честотни етикети: период в барове за топ-3 компонента
+            const top3 = spec.slice(0, 3);
+            const visRange = latestFft.reconstruction.length > 1 ? (latestFft.reconstruction[latestFft.reconstruction.length - 1].time - latestFft.reconstruction[0].time) / (latestFft.reconstruction.length - 1) : 60;
+            top3.forEach((s, i) => {
+                const periodBars = visRange > 0 ? Math.max(1, Math.round(1 / (s.freq || 1e-6))) : '?';
+                const x = (i + 0.5) * (w / top3.length);
+                ctx.fillStyle = 'rgba(255,255,255,0.6)';
+                ctx.textAlign = 'center';
+                ctx.fillText(String(periodBars) + 'б', x, h - 5);
+            });
+            label.textContent = 'FFT Спектър';
         }
 
         function drawIndicatorCanvases() {
@@ -1569,6 +1732,13 @@
             if (currentPage === 6 && d.modelProbs && d.modelProbs[4]) {
                 label.textContent = 'Уейвлет трансформация';
                 drawProbLine(ctx, w, h, d.modelProbs[4]);
+                return;
+            }
+
+            // Page 7: Fourier (FFT) probability
+            if (currentPage === 7 && d.modelProbs && d.modelProbs[5]) {
+                label.textContent = 'Фурие (FFT) вероятност';
+                drawProbLine(ctx, w, h, d.modelProbs[5]);
                 return;
             }
         }
@@ -1678,7 +1848,7 @@
         function onIvPageScroll() {
             const pages = document.getElementById('ivPages');
             if (!pages) return;
-            const count = 7;
+            const count = 8;
             const idx = Math.round(pages.scrollLeft / pages.clientWidth);
             currentPage = idx;
             for (let i = 0; i < count; i++) {
@@ -1701,7 +1871,7 @@
             const idx = Math.round(pages.scrollLeft / w);
             const target = idx + dir;
             if (dir < 0 && target < 0) return;
-            const maxPage = 6;
+            const maxPage = 7;
             if (dir > 0 && target > maxPage) {
                 showNotification('Модел A — активен модел', 'success');
                 return;
@@ -1818,7 +1988,7 @@
                 document.getElementById('ivRsiVal').textContent = '--';
                 document.getElementById('ivVolVal').textContent = '--';
                 document.getElementById('ivObvVal').textContent = '--';
-                ['modHist','modLog','modMarkov','modEv','modWavelet'].forEach(p => {
+                ['modHist','modLog','modMarkov','modEv','modWavelet','modFft'].forEach(p => {
                     const b = document.getElementById(p + 'Buy');
                     const s = document.getElementById(p + 'Sell');
                     if (b) b.textContent = '--';
@@ -1893,7 +2063,8 @@
                     { p: 'modLog', m: models.models.logistic },
                     { p: 'modMarkov', m: models.models.markov },
                     { p: 'modEv', m: models.models.expectedValue },
-                    { p: 'modWavelet', m: models.models.wavelet }
+                    { p: 'modWavelet', m: models.models.wavelet },
+                    { p: 'modFft', m: models.models.fourier }
                 ];
                 sets.forEach(({ p, m }) => {
                     setModelDisplay(p, m.buyPct, m.sellPct);
@@ -1908,7 +2079,28 @@
                 const wrEl = document.getElementById('modEvWinRate');
                 if (evEl) evEl.textContent = ev.ev ? (ev.ev > 0 ? '+' : '') + ev.ev.toFixed(2) : '---';
                 if (wrEl) wrEl.textContent = ev.winRate ? ev.winRate.toFixed(1) + '%' : '---';
+                updateFftBins(candles);
             }
+        }
+
+        function updateFftBins(candles) {
+            const binsEl = document.getElementById('fftBins');
+            if (!binsEl) return;
+            if (typeof computeFourierAnalysis !== 'function') return;
+            const vis = getVisibleCandles(candles);
+            const fft = computeFourierAnalysis(vis);
+            if (!fft || !fft.spectrum || !fft.spectrum.length) {
+                binsEl.innerHTML = '';
+                return;
+            }
+            const rangeBars = vis.length > 1 ? (vis[vis.length - 1].time - vis[0].time) / (vis.length - 1) : 60;
+            const top = fft.spectrum.slice(0, 5);
+            binsEl.innerHTML = '<div class="iv-section-label" style="margin:6px 0 2px">Доминантни синусоиди</div>' +
+                top.map(s => {
+                    const periodBars = rangeBars > 0 ? Math.max(1, Math.round(1 / (s.freq || 1e-6))) : '?';
+                    const ampPrice = (s.amplitude * fft.range / 2).toFixed(2);
+                    return `<div class="iv-fft-bin"><span class="iv-fft-freq">${s.freq.toFixed(4)} c/бр</span><span>Период: ${periodBars} бр</span><span>Амплитуда: ${ampPrice}</span></div>`;
+                }).join('');
         }
 
         function setModelDisplay(prefix, buyPct, sellPct) {
