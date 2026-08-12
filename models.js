@@ -195,32 +195,52 @@ function fftRadix2(re, im) {
 // Връща спектъра на серията: доминантни синусоиди {freq, amplitude, phase},
 // реконструкцията по тях (покрива видимия период) и екстраполация напред.
 //
+// ЗАЩО detrend (линеен тренд) ПРЕДИ FFT: преобразуванието на Фурие приема
+// периодичен сигнал. Ако приложим FFT направо върху цената, реконструкцията
+// се върти около средата на диапазона и продължението просто ПОВТАРЯ формата
+// на синята линия (понеже прозорецът ≈ 1 основен период). Затова:
+//   1) изчисляваме линеен тренд a + b·i (метод на най-малките квадрати),
+//   2) FFT се прилага върху остатъка (цена − тренд), който осцилира около 0,
+//   3) реконструкция = тренд + сума от синусоидите,
+//   4) продължение = продълженият линеен тренд + същите синусоиди (със
+//      същите честоти, фази, амплитуди) със затихване на амплитудата.
+// Така пунктираната линия НЕ е повторение на синята, а нейно смислено
+// продължение — трендът продължава, а циклите се въртят около него.
+//
 // ВАЖНО за нормализацията: при zero-padding сигналът се пресмята върху
 // size = степен на 2 >= n, затова обратното преобразувание използва
-// амплитуда 2|X[k]|/size (а НЕ /n). Така реконструкцията с всички честоти
-// минава точно през всички точки на нулево-подплатения сигнал (т.е. и през
-// реалните свещи). С top-N доминантни компоненти получаваме гладка крива,
-// която следва цената много близко (~2-3% грешка спрямо диапазона).
+// амплитуда 2|X[k]|/size (а НЕ /n). Амплитудите са в ценови единици
+// (остатъкът не се нормализира в [-1,1]).
 function computeFourierAnalysis(candles) {
   if (!candles || candles.length < 16) return null;
   const n = candles.length;
 
-  // Нормализиране: [min, max] на периода -> [-1, 1]
+  // Диапазон за вероятностите и за мащаба на спектъра
   let min = Infinity, max = -Infinity;
   for (const c of candles) { if (c.close < min) min = c.close; if (c.close > max) max = c.close; }
   const range = (max - min) || 1;
   const mid = (min + max) / 2;
-  const half = range / 2;
+
+  // Линеен тренд (least squares): close[i] = a + b·i + residual[i]
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (let i = 0; i < n; i++) {
+    const v = candles[i].close;
+    sx += i; sy += v; sxx += i * i; sxy += i * v;
+  }
+  const b = (n * sxy - sx * sy) / (n * sxx - sx * sx || 1);
+  const a = (sy - b * sx) / n;
+  const trendAt = (i) => a + b * i;
 
   // Най-близката степен на 2 >= n за FFT (zero-padding)
   let size = 1;
   while (size < n) size <<= 1;
   const re = new Float64Array(size);
   const im = new Float64Array(size);
-  for (let i = 0; i < n; i++) re[i] = (candles[i].close - mid) / half;
+  for (let i = 0; i < n; i++) re[i] = candles[i].close - trendAt(i);
   fftRadix2(re, im);
 
-  // Амплитуди за положителните честоти (0..size/2), нормализирани спрямо size
+  // Амплитуди за положителните честоти (0..size/2), нормализирани спрямо size.
+  // Амплитудата е в ценови единици (остатъкът е в ценови единици).
   const components = [];
   for (let k = 1; k <= size / 2; k++) {
     const amp = Math.sqrt(re[k] * re[k] + im[k] * im[k]) / size * 2;
@@ -230,14 +250,6 @@ function computeFourierAnalysis(candles) {
   components.sort((a, b) => b.amplitude - a.amplitude);
   // Доминантните компоненти — колкото повече, толкова по-точно следва цената
   const dominant = components.slice(0, 40);
-
-  // Сума на синусоидите в нормализирани единици (-1..1).
-  // Обратно преобразувание: x[n] = Σ 2|X[k]|/size · cos(2πkn/size + φ_k)
-  const synthNorm = (t) => {
-    let v = 0;
-    for (const d of dominant) v += d.amplitude * Math.cos(2 * Math.PI * d.freq * t + d.phase);
-    return v;
-  };
 
   const stepBase = n > 1 ? (candles[n - 1].time - candles[0].time) / (n - 1) : 60;
 
@@ -251,38 +263,43 @@ function computeFourierAnalysis(candles) {
   };
   if (!dominant.length) return flatResult();
 
-  const synth = (t) => mid + synthNorm(t) * half;
+  // Сума на синусоидите в ценови единици (частта, която се върти около тренда).
+  // Обратно преобразувание: x[n] = Σ 2|X[k]|/size · cos(2πkn/size + φ_k)
+  const synthCycle = (t) => {
+    let v = 0;
+    for (const d of dominant) v += d.amplitude * Math.cos(2 * Math.PI * d.freq * t + d.phase);
+    return v;
+  };
 
-  // Реконструкцията следва свещите точно (грешка ~2-3% от диапазона),
-  // затова НЕ добавяме константна корекция — тя измества цялата линия
-  // настрани. Крайната точка на реконструкцията определя старта на
-  // продължението, така че синята линия продължава гладко в пунктираната.
-  const recon = candles.map((c, i) => ({ time: c.time, value: synth(i) }));
+  // Реконструкция = линеен тренд + сума от синусоидите
+  const recon = candles.map((c, i) => ({ time: c.time, value: trendAt(i) + synthCycle(i) }));
   const reconEnd = recon[n - 1].value;
 
-  // Продължение със същия период напред (толкова барове, колкото видимия период),
-  // с бавно затихване на амплитудата, за да не се размахва в далечното бъдеще.
-  // Започва от последната точка на реконструкцията (k=0 -> t=n-1), за да е
-  // непрекъсната синята -> пунктираната линия.
+  // Продължение със същия период напред (толкова барове, колкото видимия период).
+  // Продължава линейния тренд и прибавя същите синусоиди (същите честоти, фази
+  // и амплитуди) със затихване на амплитудата — трендът върви напред, циклите
+  // се въртят около него, без да повтарят формата на видимия период.
+  // k=0 започва от последната точка на реконструкцията (непрекъснатост).
   const forecast = [];
   for (let k = 0; k < n; k++) {
-    const decay = Math.exp(-((k + 1) / n) * 0.7);
-    const osc = (synth(k + n - 1) - reconEnd) * decay;
-    forecast.push({ time: candles[n - 1].time + (k + 1) * stepBase, value: reconEnd + osc });
+    const t = n - 1 + k;
+    const decay = k === 0 ? 1 : Math.exp(-(k / n) * 0.7);
+    const cycle = synthCycle(t) * decay;
+    forecast.push({ time: candles[n - 1].time + (k + 1) * stepBase, value: trendAt(t) + cycle });
   }
 
-  // ВЕРоятност: какво описва?
-  // Продължението на реконструирания сигнал се движи около последната цена.
-  // Ако втората половина на продължението е средно НАД последната цена,
-  // моделът очаква пазарът да се придвижи нагоре през следващия период със
-  // същата дължина -> Buy вероятност > 50. Под -> Sell. Отклонението е
-  // нормализирано като % от целия диапазон на видимия период и се мащабира.
+  // Вероятност: какво описва?
+  // Продължението на реконструирания сигнал = продължен тренд + циклични
+  // осцилации. Ако втората половина на продължението е средно НАД последната
+  // цена, моделът очаква движение нагоре през следващия период със същата
+  // дължина -> Buy вероятност > 50. Под -> Sell. Отклонението е нормализирано
+  // като % от целия диапазон на видимия период и се мащабира.
   const halfIdx = Math.max(1, Math.floor(n / 2));
   let futSum = 0;
   for (let k = halfIdx; k < forecast.length; k++) futSum += forecast[k].value;
   const futAvg = futSum / (forecast.length - halfIdx);
   const driftPct = ((futAvg - candles[n - 1].close) / range) * 100;
-  const buyPct = Math.max(1, Math.min(99, 50 + driftPct * 0.8));
+  const buyPct = Math.max(5, Math.min(95, 50 + driftPct * 0.6));
 
   return { spectrum: dominant, reconstruction: recon, forecast, buyPct, sellPct: 100 - buyPct, range, min, max };
 }
@@ -302,16 +319,62 @@ function computeFourierProbSequence(candles) {
   const h = candlesHash(candles);
   if (fourierSeqCache.hash === h) return fourierSeqCache.data;
   const result = [];
-  const win = 64;
-  const maxPoints = 60;
+  // По-лека версия за линията на вероятността: малък прозорец и по-малко
+  // компоненти са достатъчни, защото това е само сигналната линия (0-100%).
+  const win = 48;
+  const maxPoints = 36;
   const step = Math.max(1, Math.floor((n - 30) / maxPoints));
   for (let i = 30; i < n; i += step) {
     const slice = candles.slice(Math.max(0, i - win + 1), i + 1);
-    const f = computeFourierAnalysis(slice);
+    const f = computeFourierAnalysisLight(slice);
     result.push({ time: candles[i].time, value: f ? f.buyPct : 50 });
   }
   fourierSeqCache = { hash: h, data: result };
   return result;
+}
+
+// Лека FFT вероятност: същият алгоритъм, но с по-малко доминантни компоненти
+// (по-бърза за плъзгащата се поредица на probability canvas).
+function computeFourierAnalysisLight(candles) {
+  if (!candles || candles.length < 16) return null;
+  const n = candles.length;
+  let min = Infinity, max = -Infinity;
+  for (const c of candles) { if (c.close < min) min = c.close; if (c.close > max) max = c.close; }
+  const range = (max - min) || 1;
+  let sx = 0, sy = 0, sxx = 0, sxy = 0;
+  for (let i = 0; i < n; i++) {
+    const v = candles[i].close;
+    sx += i; sy += v; sxx += i * i; sxy += i * v;
+  }
+  const b = (n * sxy - sx * sy) / (n * sxx - sx * sx || 1);
+  const a = (sy - b * sx) / n;
+  const trendAt = (i) => a + b * i;
+  let size = 1;
+  while (size < n) size <<= 1;
+  const re = new Float64Array(size);
+  const im = new Float64Array(size);
+  for (let i = 0; i < n; i++) re[i] = candles[i].close - trendAt(i);
+  fftRadix2(re, im);
+  const components = [];
+  for (let k = 1; k <= size / 2; k++) {
+    const amp = Math.sqrt(re[k] * re[k] + im[k] * im[k]) / size * 2;
+    if (amp < 0.002) continue;
+    components.push({ freq: k / size, amplitude: amp, phase: Math.atan2(im[k], re[k]) });
+  }
+  components.sort((a, b) => b.amplitude - a.amplitude);
+  const dominant = components.slice(0, 12);
+  if (!dominant.length) return { buyPct: 50, sellPct: 50 };
+  const synthCycle = (t) => {
+    let v = 0;
+    for (const d of dominant) v += d.amplitude * Math.cos(2 * Math.PI * d.freq * t + d.phase);
+    return v;
+  };
+  const halfIdx = Math.max(1, Math.floor(n / 2));
+  let futSum = 0;
+  for (let k = halfIdx; k < n; k++) futSum += trendAt(n - 1 + k) + synthCycle(n - 1 + k);
+  const futAvg = futSum / (n - halfIdx);
+  const driftPct = ((futAvg - candles[n - 1].close) / range) * 100;
+  return { buyPct: Math.max(5, Math.min(95, 50 + driftPct * 0.6)), sellPct: Math.max(5, Math.min(95, 50 - driftPct * 0.6)) };
 }
 
 // Коефициент на усилване на отклонението от 50%: без него стойностите стоят
