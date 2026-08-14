@@ -1602,6 +1602,15 @@
             try {
                 const range = chart.timeScale().getVisibleRange();
                 if (range && range.from && range.to) {
+                    // Когато се сменя символът, видимият диапазон може да е от
+                    // ПРЕДИШНИЯ символ (напр. BTC), докато данните вече са от новия
+                    // (напр. злато). Тогава филтрирането би върнало грешен поднабор
+                    // и прогнозната линия ще започне от средата на графиката.
+                    // Затова филтрираме само ако обхватът завършва близо до
+                    // последната свещ на текущия символ (разлика ≤ 3 стъпки).
+                    const lastTime = candles[candles.length - 1].time;
+                    const step = candles.length > 1 ? (candles[candles.length - 1].time - candles[0].time) / (candles.length - 1) : 60;
+                    if (Math.abs(range.to - lastTime) > step * 3) return candles;
                     const vis = candles.filter(c => c.time >= range.from && c.time <= range.to);
                     if (vis.length >= 16) return vis;
                 }
