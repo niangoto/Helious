@@ -195,22 +195,23 @@ function fftRadix2(re, im) {
 // Връща спектъра на серията: доминантни синусоиди {freq, amplitude, phase},
 // реконструкцията по тях (покрива видимия период) и екстраполация напред.
 //
-// МЕТОД: анализираният период се разделя на 5 по-малки части (под-прозорци).
-// За всяка част се прилага дискретно преобразувание на Фурие върху
-// детрендирания остатък (линеен тренд a+b·i се отделя преди това) и се
-// намират нейните доминантни синусоиди (честота, амплитуда, фаза).
-// След това ВСИЧКИ части се екстраполират напред от своите последни моменти
-// до крайната точка на целия период (със същите синусоиди и техните фази) и
-// крайният резултат е СРЕДНАТА стойност на тези 5 екстраполации (ансамбъл).
-//
-// ЗАЩО detrend ПРЕДИ FFT: преобразуванието на Фурие приема периодичен
-// сигнал; трендът се отделя, за да не доминира и да не предизвиква повторение.
+// МЕТОД — анализ на ОТНОСИТЕЛНИТЕ ДВИЖЕНИЯ (returns):
+// Всички свещи се "разполагат една до друга" математически само чрез това
+// дали всяка е била нагоре или надолу и с колко (в %), БЕЗ текущото ниво на
+// цената:  ret[i] = close[i]/close[i-1] - 1. Така серията е ниво-независима.
+// След това върху returns се прилага дискретно преобразувание на Фурие
+// (след отделяне на средната доходност), намират се доминантните синусоиди
+// (честота, амплитуда, фаза) на ДВИЖЕНИЯТА, и се определят очакваните
+// размери на бъдещите свещи. Синята линия показва натрупаните движения едно
+// след друго: за миналото — реалните свещи, за бъдещето — очакваните размери,
+// умножени последователно (price *= 1 + очакван return).
 //
 // ВАЖНО за нормализацията: при zero-padding сигналът се пресмята върху
-// size = степен на 2 >= m (дължина на частта), затова обратното преобразувание
-// използва амплитуда 2|X[k]|/size (а НЕ /m). Амплитудите са в ценови единици.
+// size = степен на 2 >= m (брой returns), затова обратното преобразувание
+// използва амплитуда 2|X[k]|/size (а НЕ /m). Амплитудите са в относителни
+// единици (дроб от цената), напр. 0.0012 = 0.12%.
 function computeFourierAnalysis(candles) {
-  if (!candles || candles.length < 16) return null;
+  if (!candles || candles.length < 17) return null;
   const n = candles.length;
 
   // Диапазон за вероятностите и за мащаба на спектъра
@@ -230,110 +231,66 @@ function computeFourierAnalysis(candles) {
     return { spectrum: [], reconstruction, forecast, buyPct: 50, sellPct: 50, range, min, max };
   };
 
-  // Брой части: до 5, всяка с поне ~12 свещи, за да има смисъл FFT.
-  const partsCount = Math.max(1, Math.min(5, Math.floor(n / 12)));
+  // ── 1. Относителни движения (ниво-независими) ──
+  const rets = [];
+  for (let i = 1; i < n; i++) rets.push(candles[i].close / candles[i - 1].close - 1);
+  const m = rets.length;
+  const meanRet = rets.reduce((s, v) => s + v, 0) / m;
 
-  // ── 1. За всяка част: детрендинг + FFT + доминантни синусоиди ──
-  const parts = [];
-  for (let p = 0; p < partsCount; p++) {
-    const start = Math.floor(p * n / partsCount);
-    const end = Math.floor((p + 1) * n / partsCount) - 1;
-    const m = end - start + 1;
-    if (m < 8) continue;
-    const seg = candles.slice(start, end + 1);
+  // ── 2. FFT върху детрендираните returns ──
+  let size = 1;
+  while (size < m) size <<= 1;
+  const re = new Float64Array(size);
+  const im = new Float64Array(size);
+  for (let i = 0; i < m; i++) re[i] = rets[i] - meanRet;
+  fftRadix2(re, im);
 
-    // Линеен тренд в частта (least squares): close[i] = a + b·i + residual[i]
-    let sx = 0, sy = 0, sxx = 0, sxy = 0;
-    for (let i = 0; i < m; i++) {
-      const v = seg[i].close;
-      sx += i; sy += v; sxx += i * i; sxy += i * v;
-    }
-    const b = (m * sxy - sx * sy) / (m * sxx - sx * sx || 1);
-    const a = (sy - b * sx) / m;
-
-    // FFT върху остатъка (zero-padding до степен на 2)
-    let size = 1;
-    while (size < m) size <<= 1;
-    const re = new Float64Array(size);
-    const im = new Float64Array(size);
-    for (let i = 0; i < m; i++) re[i] = seg[i].close - (a + b * i);
-    fftRadix2(re, im);
-
-    const components = [];
-    for (let k = 1; k <= size / 2; k++) {
-      const amp = Math.sqrt(re[k] * re[k] + im[k] * im[k]) / size * 2;
-      if (amp < 0.002) continue;
-      components.push({ freq: k / size, amplitude: amp, phase: Math.atan2(im[k], re[k]) });
-    }
-    components.sort((a, b) => b.amplitude - a.amplitude);
-    const dominant = components.slice(0, 12);
-    if (!dominant.length) continue;
-
-    parts.push({ start, end, m, a, b, dominant });
+  const components = [];
+  for (let k = 1; k <= size / 2; k++) {
+    const amp = Math.sqrt(re[k] * re[k] + im[k] * im[k]) / size * 2;
+    if (amp < 1e-7) continue;
+    components.push({ freq: k / size, amplitude: amp, phase: Math.atan2(im[k], re[k]) });
   }
+  components.sort((a, b) => b.amplitude - a.amplitude);
+  const dominant = components.slice(0, 20);
+  if (!dominant.length) return flatResult();
 
-  if (!parts.length) return flatResult();
-
-  // Синтез на една част: тренд + сума от синусоидите при глобален индекс i
-  const synthPart = (pt, i) => {
-    const t = i - pt.start; // локален индекс в частта
+  // Синтез на очаквания return в момент t (t=0 е първата доходност)
+  const synthRet = (t) => {
     let v = 0;
-    for (const d of pt.dominant) v += d.amplitude * Math.cos(2 * Math.PI * d.freq * t + d.phase);
-    return pt.a + pt.b * t + v;
+    for (const d of dominant) v += d.amplitude * Math.cos(2 * Math.PI * d.freq * t + d.phase);
+    return v;
   };
 
-  // ── 2. Синя линия: всяка част реконструира своя сегмент (следва свещите) ──
-  const recon = [];
-  for (let i = 0; i < n; i++) {
-    // намираме частта, която покрива i (или най-близката след нея за гладкост)
-    let pt = parts[parts.length - 1];
-    for (const p of parts) { if (i >= p.start && i <= p.end) { pt = p; break; } }
-    recon.push({ time: candles[i].time, value: synthPart(pt, i) });
-  }
-  const reconEnd = recon[n - 1].value;
+  // ── 3. Синя линия: реалните свещи (натрупаните реални движения) ──
+  const recon = candles.map(c => ({ time: c.time, value: c.close }));
+  const lastClose = candles[n - 1].close;
 
-  // ── 3. Продължение: всички части се екстраполират до края на периода ──
-  // Ансамблова стойност в бъдещ момент t (глобален индекс) = средна от 5-те
-  // екстраполации (всяка продължава със своите честоти/фази/амплитуди).
-  const ensembleAt = (t) => {
-    let sum = 0;
-    for (const pt of parts) sum += synthPart(pt, t);
-    return sum / parts.length;
-  };
-
+  // ── 4. Продължение: очакваните размери на бъдещите свещи, натрупани ──
+  // Всяка следваща цена = предишната × (1 + очакван return). Очакваният return
+  // = средната доходност + затихваща сума от синусоидите на движенията.
   const forecast = [];
+  let price = lastClose;
   for (let k = 0; k < n; k++) {
-    const t = n - 1 + k;
-    // Първата точка (k=0) закотвена към края на реконструкцията, за да е
-    // непрекъсната синята -> пунктираната линия. След това сигналът ЗАТИХВА
-    // към средната точка на диапазона (mid), за да не повтаря формата на
-    // синята линия — всички синусоиди се "сливат" в средата на графиката.
-    let val;
     if (k === 0) {
-      val = reconEnd;
-    } else {
-      const decay = Math.exp(-(k / n) * 2.0);
-      val = mid + (ensembleAt(t) - mid) * decay;
+      forecast.push({ time: candles[n - 1].time + (k + 1) * stepBase, value: lastClose });
+      continue;
     }
-    forecast.push({ time: candles[n - 1].time + (k + 1) * stepBase, value: val });
+    const decay = Math.exp(-(k / n) * 1.5);
+    const expectedRet = meanRet + synthRet(m - 1 + k) * decay;
+    price *= (1 + expectedRet);
+    forecast.push({ time: candles[n - 1].time + (k + 1) * stepBase, value: price });
   }
-
-  // ── 4. Спектър: обединяваме доминантните компоненти на всички части ──
-  const allComp = [];
-  for (const pt of parts) allComp.push(...pt.dominant);
-  allComp.sort((a, b) => b.amplitude - a.amplitude);
-  const dominant = allComp.slice(0, 40);
 
   // Вероятност: какво описва?
-  // Продължението = ансамбъл от 5-те части, затихващ към mid (mean-reversion).
-  // Ако втората половина на продължението е средно НАД последната цена, моделът
-  // очаква придвижване нагоре през следващия период -> Buy > 50. Под -> Sell.
-  // Отклонението е % от целия диапазон на видимия период и се мащабира.
+  // Продължението = натрупани очаквани размери на свещите (mean-reversion към
+  // средната доходност). Ако втората половина на продължението е средно НАД
+  // последната цена, моделът очаква придвижване нагоре -> Buy > 50.
   const halfIdx = Math.max(1, Math.floor(n / 2));
   let futSum = 0;
   for (let k = halfIdx; k < forecast.length; k++) futSum += forecast[k].value;
   const futAvg = futSum / (forecast.length - halfIdx);
-  const driftPct = ((futAvg - candles[n - 1].close) / range) * 100;
+  const driftPct = ((futAvg - lastClose) / range) * 100;
   const buyPct = Math.max(5, Math.min(95, 50 + driftPct * 0.6));
 
   return { spectrum: dominant, reconstruction: recon, forecast, buyPct, sellPct: 100 - buyPct, range, min, max };
@@ -368,47 +325,54 @@ function computeFourierProbSequence(candles) {
   return result;
 }
 
-// Лека FFT вероятност: същият алгоритъм, но с по-малко доминантни компоненти
-// (по-бърза за плъзгащата се поредица на probability canvas).
+// Лека FFT вероятност: същият returns-базиран алгоритъм, но с по-малко
+// доминантни компоненти (по-бърза за плъзгащата се поредица на probability canvas).
 function computeFourierAnalysisLight(candles) {
-  if (!candles || candles.length < 16) return null;
+  if (!candles || candles.length < 17) return null;
   const n = candles.length;
   let min = Infinity, max = -Infinity;
   for (const c of candles) { if (c.close < min) min = c.close; if (c.close > max) max = c.close; }
   const range = (max - min) || 1;
-  let sx = 0, sy = 0, sxx = 0, sxy = 0;
-  for (let i = 0; i < n; i++) {
-    const v = candles[i].close;
-    sx += i; sy += v; sxx += i * i; sxy += i * v;
-  }
-  const b = (n * sxy - sx * sy) / (n * sxx - sx * sx || 1);
-  const a = (sy - b * sx) / n;
-  const trendAt = (i) => a + b * i;
+
+  // Относителни движения (ниво-независими)
+  const rets = [];
+  for (let i = 1; i < n; i++) rets.push(candles[i].close / candles[i - 1].close - 1);
+  const m = rets.length;
+  const meanRet = rets.reduce((s, v) => s + v, 0) / m;
+
   let size = 1;
-  while (size < n) size <<= 1;
+  while (size < m) size <<= 1;
   const re = new Float64Array(size);
   const im = new Float64Array(size);
-  for (let i = 0; i < n; i++) re[i] = candles[i].close - trendAt(i);
+  for (let i = 0; i < m; i++) re[i] = rets[i] - meanRet;
   fftRadix2(re, im);
   const components = [];
   for (let k = 1; k <= size / 2; k++) {
     const amp = Math.sqrt(re[k] * re[k] + im[k] * im[k]) / size * 2;
-    if (amp < 0.002) continue;
+    if (amp < 1e-7) continue;
     components.push({ freq: k / size, amplitude: amp, phase: Math.atan2(im[k], re[k]) });
   }
   components.sort((a, b) => b.amplitude - a.amplitude);
   const dominant = components.slice(0, 12);
   if (!dominant.length) return { buyPct: 50, sellPct: 50 };
-  const synthCycle = (t) => {
+  const synthRet = (t) => {
     let v = 0;
     for (const d of dominant) v += d.amplitude * Math.cos(2 * Math.PI * d.freq * t + d.phase);
     return v;
   };
-  const halfIdx = Math.max(1, Math.floor(n / 2));
+  // Натрупваме очакваните размери на бъдещите свещи от последната цена
+  const lastClose = candles[n - 1].close;
+  let price = lastClose;
   let futSum = 0;
-  for (let k = halfIdx; k < n; k++) futSum += trendAt(n - 1 + k) + synthCycle(n - 1 + k);
-  const futAvg = futSum / (n - halfIdx);
-  const driftPct = ((futAvg - candles[n - 1].close) / range) * 100;
+  let cnt = 0;
+  const halfIdx = Math.max(1, Math.floor(n / 2));
+  for (let k = 1; k < n; k++) {
+    const decay = Math.exp(-(k / n) * 1.5);
+    price *= (1 + meanRet + synthRet(m - 1 + k) * decay);
+    if (k >= halfIdx) { futSum += price; cnt++; }
+  }
+  const futAvg = cnt > 0 ? futSum / cnt : lastClose;
+  const driftPct = ((futAvg - lastClose) / range) * 100;
   return { buyPct: Math.max(5, Math.min(95, 50 + driftPct * 0.6)), sellPct: Math.max(5, Math.min(95, 50 - driftPct * 0.6)) };
 }
 

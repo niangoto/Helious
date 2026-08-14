@@ -2098,7 +2098,7 @@
             binsEl.innerHTML = '<div class="iv-section-label" style="margin:6px 0 2px">Доминантни синусоиди</div>' +
                 top.map(s => {
                     const periodBars = rangeBars > 0 ? Math.max(1, Math.round(1 / (s.freq || 1e-6))) : '?';
-                    const ampPrice = s.amplitude.toFixed(2);
+                    const ampPrice = (s.amplitude * 100).toFixed(3) + '%';
                     return `<div class="iv-fft-bin"><span class="iv-fft-freq">${s.freq.toFixed(4)} c/бр</span><span>Период: ${periodBars} бр</span><span>Амплитуда: ${ampPrice}</span></div>`;
                 }).join('');
         }
