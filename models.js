@@ -195,22 +195,20 @@ function fftRadix2(re, im) {
 // Връща спектъра на серията: доминантни синусоиди {freq, amplitude, phase},
 // реконструкцията по тях (покрива видимия период) и екстраполация напред.
 //
-// ЗАЩО detrend (линеен тренд) ПРЕДИ FFT: преобразуванието на Фурие приема
-// периодичен сигнал. Ако приложим FFT направо върху цената, реконструкцията
-// се върти около средата на диапазона и продължението просто ПОВТАРЯ формата
-// на синята линия (понеже прозорецът ≈ 1 основен период). Затова:
-//   1) изчисляваме линеен тренд a + b·i (метод на най-малките квадрати),
-//   2) FFT се прилага върху остатъка (цена − тренд), който осцилира около 0,
-//   3) реконструкция = тренд + сума от синусоидите,
-//   4) продължение = продълженият линеен тренд + същите синусоиди (със
-//      същите честоти, фази, амплитуди) със затихване на амплитудата.
-// Така пунктираната линия НЕ е повторение на синята, а нейно смислено
-// продължение — трендът продължава, а циклите се въртят около него.
+// МЕТОД: анализираният период се разделя на 5 по-малки части (под-прозорци).
+// За всяка част се прилага дискретно преобразувание на Фурие върху
+// детрендирания остатък (линеен тренд a+b·i се отделя преди това) и се
+// намират нейните доминантни синусоиди (честота, амплитуда, фаза).
+// След това ВСИЧКИ части се екстраполират напред от своите последни моменти
+// до крайната точка на целия период (със същите синусоиди и техните фази) и
+// крайният резултат е СРЕДНАТА стойност на тези 5 екстраполации (ансамбъл).
+//
+// ЗАЩО detrend ПРЕДИ FFT: преобразуванието на Фурие приема периодичен
+// сигнал; трендът се отделя, за да не доминира и да не предизвиква повторение.
 //
 // ВАЖНО за нормализацията: при zero-padding сигналът се пресмята върху
-// size = степен на 2 >= n, затова обратното преобразувание използва
-// амплитуда 2|X[k]|/size (а НЕ /n). Амплитудите са в ценови единици
-// (остатъкът не се нормализира в [-1,1]).
+// size = степен на 2 >= m (дължина на частта), затова обратното преобразувание
+// използва амплитуда 2|X[k]|/size (а НЕ /m). Амплитудите са в ценови единици.
 function computeFourierAnalysis(candles) {
   if (!candles || candles.length < 16) return null;
   const n = candles.length;
@@ -220,36 +218,6 @@ function computeFourierAnalysis(candles) {
   for (const c of candles) { if (c.close < min) min = c.close; if (c.close > max) max = c.close; }
   const range = (max - min) || 1;
   const mid = (min + max) / 2;
-
-  // Линеен тренд (least squares): close[i] = a + b·i + residual[i]
-  let sx = 0, sy = 0, sxx = 0, sxy = 0;
-  for (let i = 0; i < n; i++) {
-    const v = candles[i].close;
-    sx += i; sy += v; sxx += i * i; sxy += i * v;
-  }
-  const b = (n * sxy - sx * sy) / (n * sxx - sx * sx || 1);
-  const a = (sy - b * sx) / n;
-  const trendAt = (i) => a + b * i;
-
-  // Най-близката степен на 2 >= n за FFT (zero-padding)
-  let size = 1;
-  while (size < n) size <<= 1;
-  const re = new Float64Array(size);
-  const im = new Float64Array(size);
-  for (let i = 0; i < n; i++) re[i] = candles[i].close - trendAt(i);
-  fftRadix2(re, im);
-
-  // Амплитуди за положителните честоти (0..size/2), нормализирани спрямо size.
-  // Амплитудата е в ценови единици (остатъкът е в ценови единици).
-  const components = [];
-  for (let k = 1; k <= size / 2; k++) {
-    const amp = Math.sqrt(re[k] * re[k] + im[k] * im[k]) / size * 2;
-    if (amp < 0.002) continue;
-    components.push({ freq: k / size, amplitude: amp, phase: Math.atan2(im[k], re[k]) });
-  }
-  components.sort((a, b) => b.amplitude - a.amplitude);
-  // Доминантните компоненти — колкото повече, толкова по-точно следва цената
-  const dominant = components.slice(0, 40);
 
   const stepBase = n > 1 ? (candles[n - 1].time - candles[0].time) / (n - 1) : 60;
 
@@ -261,38 +229,104 @@ function computeFourierAnalysis(candles) {
     }
     return { spectrum: [], reconstruction, forecast, buyPct: 50, sellPct: 50, range, min, max };
   };
-  if (!dominant.length) return flatResult();
 
-  // Сума на синусоидите в ценови единици (частта, която се върти около тренда).
-  // Обратно преобразувание: x[n] = Σ 2|X[k]|/size · cos(2πkn/size + φ_k)
-  const synthCycle = (t) => {
+  // Брой части: до 5, всяка с поне ~12 свещи, за да има смисъл FFT.
+  const partsCount = Math.max(1, Math.min(5, Math.floor(n / 12)));
+
+  // ── 1. За всяка част: детрендинг + FFT + доминантни синусоиди ──
+  const parts = [];
+  for (let p = 0; p < partsCount; p++) {
+    const start = Math.floor(p * n / partsCount);
+    const end = Math.floor((p + 1) * n / partsCount) - 1;
+    const m = end - start + 1;
+    if (m < 8) continue;
+    const seg = candles.slice(start, end + 1);
+
+    // Линеен тренд в частта (least squares): close[i] = a + b·i + residual[i]
+    let sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (let i = 0; i < m; i++) {
+      const v = seg[i].close;
+      sx += i; sy += v; sxx += i * i; sxy += i * v;
+    }
+    const b = (m * sxy - sx * sy) / (m * sxx - sx * sx || 1);
+    const a = (sy - b * sx) / m;
+
+    // FFT върху остатъка (zero-padding до степен на 2)
+    let size = 1;
+    while (size < m) size <<= 1;
+    const re = new Float64Array(size);
+    const im = new Float64Array(size);
+    for (let i = 0; i < m; i++) re[i] = seg[i].close - (a + b * i);
+    fftRadix2(re, im);
+
+    const components = [];
+    for (let k = 1; k <= size / 2; k++) {
+      const amp = Math.sqrt(re[k] * re[k] + im[k] * im[k]) / size * 2;
+      if (amp < 0.002) continue;
+      components.push({ freq: k / size, amplitude: amp, phase: Math.atan2(im[k], re[k]) });
+    }
+    components.sort((a, b) => b.amplitude - a.amplitude);
+    const dominant = components.slice(0, 12);
+    if (!dominant.length) continue;
+
+    parts.push({ start, end, m, a, b, dominant });
+  }
+
+  if (!parts.length) return flatResult();
+
+  // Синтез на една част: тренд + сума от синусоидите при глобален индекс i
+  const synthPart = (pt, i) => {
+    const t = i - pt.start; // локален индекс в частта
     let v = 0;
-    for (const d of dominant) v += d.amplitude * Math.cos(2 * Math.PI * d.freq * t + d.phase);
-    return v;
+    for (const d of pt.dominant) v += d.amplitude * Math.cos(2 * Math.PI * d.freq * t + d.phase);
+    return pt.a + pt.b * t + v;
   };
 
-  // Реконструкция = линеен тренд + сума от синусоидите
-  const recon = candles.map((c, i) => ({ time: c.time, value: trendAt(i) + synthCycle(i) }));
+  // ── 2. Синя линия: всяка част реконструира своя сегмент (следва свещите) ──
+  const recon = [];
+  for (let i = 0; i < n; i++) {
+    // намираме частта, която покрива i (или най-близката след нея за гладкост)
+    let pt = parts[parts.length - 1];
+    for (const p of parts) { if (i >= p.start && i <= p.end) { pt = p; break; } }
+    recon.push({ time: candles[i].time, value: synthPart(pt, i) });
+  }
   const reconEnd = recon[n - 1].value;
 
-  // Продължение със същия период напред (толкова барове, колкото видимия период).
-  // Всяка синусоида продължава от последния известен момент със своята честота,
-  // фаза и амплитуда (обратна трансформация на Фурие), но целият сигнал
-  // постепенно ЗАТИХВА към средната точка на видимия диапазон (mid). Така
-  // пунктираната линия не повтаря формата на синята — всички синусоиди се
-  // "сливат" в средата на графиката, докато амплитудите им изчезнат.
+  // ── 3. Продължение: всички части се екстраполират до края на периода ──
+  // Ансамблова стойност в бъдещ момент t (глобален индекс) = средна от 5-те
+  // екстраполации (всяка продължава със своите честоти/фази/амплитуди).
+  const ensembleAt = (t) => {
+    let sum = 0;
+    for (const pt of parts) sum += synthPart(pt, t);
+    return sum / parts.length;
+  };
+
   const forecast = [];
   for (let k = 0; k < n; k++) {
     const t = n - 1 + k;
-    const decay = k === 0 ? 1 : Math.exp(-(k / n) * 2.0);
-    const synthTotal = trendAt(t) + synthCycle(t);
-    forecast.push({ time: candles[n - 1].time + (k + 1) * stepBase, value: mid + (synthTotal - mid) * decay });
+    // Първата точка (k=0) закотвена към края на реконструкцията, за да е
+    // непрекъсната синята -> пунктираната линия. След това сигналът ЗАТИХВА
+    // към средната точка на диапазона (mid), за да не повтаря формата на
+    // синята линия — всички синусоиди се "сливат" в средата на графиката.
+    let val;
+    if (k === 0) {
+      val = reconEnd;
+    } else {
+      const decay = Math.exp(-(k / n) * 2.0);
+      val = mid + (ensembleAt(t) - mid) * decay;
+    }
+    forecast.push({ time: candles[n - 1].time + (k + 1) * stepBase, value: val });
   }
 
+  // ── 4. Спектър: обединяваме доминантните компоненти на всички части ──
+  const allComp = [];
+  for (const pt of parts) allComp.push(...pt.dominant);
+  allComp.sort((a, b) => b.amplitude - a.amplitude);
+  const dominant = allComp.slice(0, 40);
+
   // Вероятност: какво описва?
-  // Продължението = синусоидите продължават от последния момент, но затихват
-  // към средната точка на видимия диапазон (mean-reversion към mid). Ако
-  // втората половина на продължението е средно НАД последната цена, моделът
+  // Продължението = ансамбъл от 5-те части, затихващ към mid (mean-reversion).
+  // Ако втората половина на продължението е средно НАД последната цена, моделът
   // очаква придвижване нагоре през следващия период -> Buy > 50. Под -> Sell.
   // Отклонението е % от целия диапазон на видимия период и се мащабира.
   const halfIdx = Math.max(1, Math.floor(n / 2));
