@@ -225,6 +225,7 @@ function cycleIndicator() {
 }
 
 function toggleView() {
+    closeNews();
     const chartView = document.getElementById('chart-view');
     const ivView = document.getElementById('indicator-view');
     const btn = document.getElementById('viewToggle');

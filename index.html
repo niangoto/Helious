@@ -361,6 +361,32 @@
             border-color: var(--accent-cyan);
         }
 
+        #newsToggle {
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid var(--panel-border);
+            color: var(--text-dim);
+            padding: 6px 12px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 11px;
+            font-weight: 600;
+            font-family: 'Outfit', sans-serif;
+            transition: all 0.25s;
+            white-space: nowrap;
+        }
+
+        #newsToggle:hover {
+            border-color: var(--accent-cyan);
+            color: var(--accent-cyan);
+            background: rgba(0, 240, 255, 0.05);
+        }
+
+        #newsToggle.active {
+            background: var(--accent-cyan);
+            color: #06080f;
+            border-color: var(--accent-cyan);
+        }
+
         #chart-view {
             display: none;
             flex-direction: column;
@@ -712,6 +738,93 @@
         }
         .iv-fft-bin .iv-fft-freq { color: var(--accent-cyan); }
 
+        /* News View */
+        #news-view {
+            display: none;
+            flex-direction: column;
+            flex: 1;
+            min-height: 0;
+            padding: 10px 14px;
+            overflow: hidden;
+        }
+        .news-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            flex-shrink: 0;
+        }
+        .news-header-label {
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--text-color);
+        }
+        .news-list {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .news-card {
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid var(--panel-border);
+            border-left: 3px solid var(--text-dim);
+            border-radius: 8px;
+            padding: 8px 12px;
+            cursor: pointer;
+            transition: border-color 0.2s;
+        }
+        .news-card:hover { border-color: var(--accent-cyan); }
+        .news-card.bullish { border-left-color: #00ff66; }
+        .news-card.bearish { border-left-color: #ff0055; }
+        .news-card-top {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+        .news-arrow {
+            font-size: 16px;
+            font-weight: 800;
+            width: 20px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+        .news-arrow.bullish { color: #00ff66; }
+        .news-arrow.bearish { color: #ff0055; }
+        .news-arrow.neutral { color: var(--text-dim); }
+        .news-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-color);
+            line-height: 1.4;
+        }
+        .news-meta {
+            font-size: 10px;
+            color: var(--text-dim);
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .news-summary {
+            font-size: 11px;
+            color: var(--text-dim);
+            line-height: 1.5;
+            margin-bottom: 6px;
+            display: -webkit-box;
+            -webkit-line-clamp: 4;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .news-empty {
+            color: var(--text-dim);
+            font-size: 12px;
+            text-align: center;
+            padding: 20px;
+        }
+
         /* Responsive / App layout */
         @media (max-width: 768px) {
             #top-bar {
@@ -763,6 +876,7 @@
             .period-btn { font-size: 8px; padding: 2px 5px; }
             .reload-btn-sm { padding: 2px 5px; font-size: 8px; }
             #viewToggle { font-size: 9px; padding: 3px 6px; }
+            #newsToggle { font-size: 9px; padding: 3px 6px; }
             .stat-val { font-size: 11px; }
             .iv-card-value { font-size: 20px; }
             .iv-card { padding: 10px; }
@@ -904,6 +1018,7 @@
                 </div>
                 <button class="reload-btn-sm" onclick="forceReloadForecast()" title="Презареди прогнозата">↻</button>
                 <button id="viewToggle" onclick="toggleView()">📊 Табло</button>
+                <button id="newsToggle" onclick="toggleNews()">📰 Новини</button>
             </div>
         </div>
 
@@ -1149,6 +1264,17 @@
             </div>
         </div>
 
+        <!-- News View -->
+        <div id="news-view">
+            <div class="news-header">
+                <span class="news-header-label" id="newsHeaderLabel">📰 Движещи новини</span>
+                <button class="reload-btn-sm" onclick="loadNews()" title="Обнови новините">↻</button>
+            </div>
+            <div id="newsList" class="news-list">
+                <div class="news-empty">Зареждане на новините...</div>
+            </div>
+        </div>
+
     </div>
 
     <!-- Floating notifications box -->
@@ -1161,6 +1287,7 @@
     <script src="js/config.js"></script>
     <script src="js/state.js"></script>
     <script src="js/data.js"></script>
+    <script src="js/news.js"></script>
     <script src="models.js"></script>
     <script src="forecast.js"></script>
     <script src="js/tabs/tabs.js"></script>

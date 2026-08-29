@@ -1,4 +1,4 @@
-const CACHE = 'helious-v8';
+const CACHE = 'helious-v9';
 const URLS = [
     '/',
     '/manifest.json',
@@ -7,6 +7,7 @@ const URLS = [
     '/js/config.js',
     '/js/state.js',
     '/js/data.js',
+    '/js/news.js',
     '/js/indicators.js',
     '/js/app.js',
     '/js/install.js',

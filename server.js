@@ -240,6 +240,18 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  // News endpoint: RSS (Google News → Bing) + keyword sentiment (bullish/bearish)
+  if (url.pathname === '/news' && req.method === 'GET') {
+    const query = url.searchParams.get('query') || 'markets';
+    fetchNews(query).then(items => {
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      res.end(JSON.stringify({ ok: true, items }));
+    }).catch(e => {
+      sendJson(res, 500, { ok: false, error: e.message });
+    });
+    return;
+  }
+
   // Static Files
   const filePath = path.join(__dirname, url.pathname === '/' ? 'index.html' : url.pathname);
   fs.readFile(filePath, (err, data) => {
@@ -253,6 +265,209 @@ const server = http.createServer((req, res) => {
     res.end(data);
   });
 });
+
+// ─── News: RSS fetch + sentiment ────────────────────────────────────
+// Положителните думи дават зелена стрелка нагоре (bullish → ще расте),
+// отрицателните — червена надолу (bearish → ще пада).
+
+const BULL_KEYWORDS = [
+  'raises', 'raised', 'surge', 'soar', 'jump', 'gain', 'gains', 'rall', 'record', 'beat',
+  'growth', 'upgrade', 'upgrades', 'strong', 'bullish', 'bull', 'buy', 'buyback', 'boost',
+  'recovery', 'breakout', 'profit', 'positive', 'higher', 'expands', 'rises', 'rise', 'rally',
+  'ръст', 'растеж', 'расте', 'покачва', 'скок', 'рекорд', 'печалба', 'повишение', 'рали',
+  'покупател', 'възстановяване', 'силни', 'нагоре', 'печели', 'успех'
+];
+const BEAR_KEYWORDS = [
+  'drop', 'falls', 'fall', 'plunge', 'slide', 'slump', 'downgrade', 'downgrades', 'loss',
+  'losses', 'weak', 'bearish', 'bear', 'sell', 'selloff', 'cut', 'cuts', 'low', 'lower',
+  'negative', 'concern', 'fear', 'worry', 'recession', 'crash', 'pressure', 'below',
+  'спад', 'спада', 'пада', 'загуба', 'слаб', 'мечешки', 'продажба', 'срив', 'натиск',
+  'рецесия', 'понижение', 'страх', 'надолу', 'губи', 'криза', 'упадък'
+];
+
+function sentimentScore(text) {
+  const t = ' ' + String(text).toLowerCase() + ' ';
+  let score = 0;
+  for (const w of BULL_KEYWORDS) if (t.includes(w.toLowerCase())) score += 1;
+  for (const w of BEAR_KEYWORDS) if (t.includes(w.toLowerCase())) score -= 1;
+  return score;
+}
+
+function xmlEntitiesToText(s) {
+  return String(s)
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, '$1')
+    .replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&apos;/g, "'")
+    .replace(/&#(\d+);/g, (m, d) => { const c = String.fromCodePoint(parseInt(d, 10)); return /[^\x00-\x1F]/.test(c) ? c : ''; })
+    .replace(/&#x([0-9a-fA-F]+);/g, (m, h) => { const c = String.fromCodePoint(parseInt(h, 16)); return /[^\x00-\x1F]/.test(c) ? c : ''; })
+    .replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+// Взема RSS (Bing News с резюмета) за няколко заявки и извлича текста на всяка
+// статия (meta description / първите абзаци). Връща {title, link, source, date, summary, sentiment}.
+function fetchNews(query, tries) {
+  tries = tries || 0;
+  const queries = [query].concat(newsExtraQueries(query));
+  if (tries >= queries.length) return Promise.resolve([]);
+  const enc = encodeURIComponent(queries[tries]);
+  const url = `https://www.bing.com/news/search?q=${enc}&format=rss`;
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, { timeout: 10000, headers: { 'User-Agent': 'Mozilla/5.0' } }, (r) => {
+      let data = '';
+      r.on('data', (c) => { data += c; if (data.length > 2e6) { req.destroy(); } });
+      r.on('end', () => {
+        try {
+          const items = parseRssItems(data);
+          const enriched = items.map(it => {
+            // Декодираме XML entities (Bing apiclick има &amp; в link).
+            let link = xmlEntitiesToText(it.link || '').replace(/&amp;/g, '&');
+            const m = link.match(/[?&]url=([^&]+)/);
+            if (m) link = decodeURIComponent(m[1]);
+            const summary = xmlEntitiesToText(it.summary || '');
+            const title = xmlEntitiesToText(it.title || '');
+            const score = sentimentScore(title + ' ' + summary);
+            return {
+              title,
+              link,
+              source: xmlEntitiesToText(it.source || '') || 'Новини',
+              date: it.date || '',
+              summary,
+              sentiment: score > 0 ? 'bullish' : score < 0 ? 'bearish' : 'neutral',
+              score
+            };
+          });
+          enrichArticleContents(enriched, 12).then(full => {
+            // ако са малко, дотъгваме със следваща заявка
+            if (full.length < 10 && tries < queries.length - 1) {
+              fetchNews(query, tries + 1).then(more => resolve(mergeNews(full, more)));
+            } else {
+              resolve(full);
+            }
+          });
+        } catch (e) {
+          if (tries < queries.length - 1) resolve(fetchNews(query, tries + 1));
+          else reject(e);
+        }
+      });
+    });
+    req.on('timeout', () => { req.destroy(); if (tries < queries.length - 1) resolve(fetchNews(query, tries + 1)); else reject(new Error('news timeout')); });
+    req.on('error', (e) => { if (tries < queries.length - 1) resolve(fetchNews(query, tries + 1)); else reject(e); });
+  });
+}
+
+// Допълнителни заявки към основната, за повече статии (без дублиране).
+function newsExtraQueries(query) {
+  const parts = query.split(/[\s+]+/).filter(Boolean);
+  const variants = [];
+  if (parts[0]) variants.push(parts[0] + ' news');
+  if (parts[0]) variants.push(parts[0] + ' price');
+  if (parts[1]) variants.push(parts[1]);
+  return variants.slice(0, 2);
+}
+
+// Обединява списъци от статии без дублиране по заглавие.
+function mergeNews(a, b) {
+  const seen = new Set();
+  const out = [];
+  for (const it of a.concat(b)) {
+    const key = String(it.title || '').toLowerCase().trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(it);
+  }
+  return out;
+}
+
+// Кеш за извлеченото съдържание на статиите.
+const articleCache = {};
+const MAX_SUMMARY = 500;
+
+// Прави GET с http/https според протокола на URL-то.
+function httpGet(url, timeout) {
+  const mod = url.startsWith('https:') ? https : http;
+  return new Promise((resolve, reject) => {
+    const req = mod.get(url, { timeout: timeout || 8000, headers: { 'User-Agent': 'Mozilla/5.0' } }, (r) => {
+      let d = '';
+      r.on('data', (c) => { d += c; if (d.length > 800000) req.destroy(); });
+      r.on('end', () => resolve({ status: r.statusCode, location: r.headers.location, body: d }));
+      r.on('error', () => reject(new Error('read error')));
+    });
+    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    req.on('error', (e) => reject(e));
+  });
+}
+
+// За всяка статия отваря страницата и изважда резюмето (meta description/og + първите <p>).
+// Неуспешните заявки пазят RSS summary-то/заглавието. Ограничаваме до limit статии.
+function enrichArticleContents(items, limit) {
+  const todo = items.slice(0, limit);
+  return Promise.all(todo.map(it => {
+    if (!it.link || !/^https?:\/\//.test(it.link)) return it;
+    if (articleCache[it.link]) { it.summary = articleCache[it.link]; return it; }
+    return httpGet(it.link).then(res => {
+      // следваме redirect (напр. Bing apiclick → реалната статия)
+      if (res.status >= 300 && res.status < 400 && res.location) {
+        return httpGet(res.location).then(res2 => applyArticle(it, res2.body)).catch(() => it);
+      }
+      return applyArticle(it, res.body);
+    }).catch(() => it);
+  }));
+}
+
+// Извлича резюме от HTML на статията (meta description/og + първите <p> абзаци).
+// Ако извлеченият текст е боклук (кеш бъг, защитна страница), се пази RSS summary.
+function applyArticle(it, html) {
+  const og = html.match(/<meta[^>]+property="og:description"[^>]+content="([^"]+)"/i);
+  const md = html.match(/<meta[^>]+name="description"[^>]+content="([^"]+)"/i);
+  const ps = (html.match(/<p[^>]*>([\s\S]*?)<\/p>/gi) || []).map(p =>
+    xmlEntitiesToText(p)
+  ).filter(t => t.length > 40);
+  let text = '';
+  if (og) text = xmlEntitiesToText(og[1]);
+  if (!text && md) text = xmlEntitiesToText(md[1]);
+  if (!text && ps.length) text = ps.slice(0, 3).join(' ');
+  if (text.length > MAX_SUMMARY) text = text.slice(0, MAX_SUMMARY) + '…';
+  // Отхвърляме технически/защитни резюмета — те не са съдържание на новината.
+  const garbage = /(cache-|security service|protection|cloudflare|captcha|error|404|нужно е|защитава|грешка)/i;
+  if (text && text.length > 30 && !garbage.test(text)) {
+    it.summary = text;
+    articleCache[it.link] = text;
+  }
+  // обновяваме сентимента и спрямо извлеченото съдържание
+  const score = sentimentScore(it.title + ' ' + it.summary);
+  it.sentiment = score > 0 ? 'bullish' : score < 0 ? 'bearish' : 'neutral';
+  it.score = score;
+  return it;
+}
+
+// Лек RSS парсер: извлича <item> елементи с title/link/description/source/pubDate.
+function parseRssItems(xml) {
+  const items = [];
+  const itemRe = /<item>([\s\S]*?)<\/item>/g;
+  let m;
+  while ((m = itemRe.exec(xml)) !== null) {
+    const body = m[1];
+    const tag = (name) => {
+      const re = new RegExp('<' + name + '[^>]*>([\\s\\S]*?)</' + name + '>', 'i');
+      const mm = body.match(re);
+      return mm ? mm[1].trim() : '';
+    };
+    items.push({
+      title: tag('title'),
+      link: tag('link'),
+      summary: tag('description') || tag('summary') || tag('content'),
+      source: tag('source') || tag('provider'),
+      date: tag('pubDate') || tag('published') || tag('date')
+    });
+  }
+  // Най-новите първо (RFC2822 или ISO дати; непознат формат остава в края).
+  const parseDate = (s) => {
+    if (!s) return 0;
+    const t = Date.parse(s);
+    return isNaN(t) ? 0 : t;
+  };
+  return items.sort((a, b) => parseDate(b.date) - parseDate(a.date));
+}
 
 server.listen(PORT, () => {
   console.log(`Server running at http://localhost:${PORT}`);
