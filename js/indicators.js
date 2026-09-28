@@ -64,5 +64,6 @@ function updateIndicatorCharts(candles) {
         ];
     }
     updateFftOverlay(candles);
+    if (typeof updateCandleForecastOverlay === 'function') updateCandleForecastOverlay(candles);
     drawIndicatorCanvases();
 }

@@ -17,9 +17,9 @@ registerTab({
 
 // Recompute the FFT on the visible candles and refresh chart overlay + spectrum.
 function updateFftOverlay(candles) {
-    // On the RSI phase page (8) the chart must NOT show the forecast line —
-    // the RSI peaks/minima are drawn below instead.
-    const hiddenOnPhasePage = typeof currentPage === 'number' && currentPage === 8;
+    // На страниците с RSI фаза (8) и прогноза на свещи (9) графиката НЕ трябва да
+    // показва FFT прогнозната линия — вместо нея отдолу се рисуват пикове/свещи.
+    const hiddenOnPhasePage = typeof currentPage === 'number' && (currentPage === 8 || currentPage === 9);
     if (typeof computeFourierAnalysis !== 'function' || !candles || candles.length < 16) {
         latestFft = null;
         if (fftSeries) fftSeries.setData([]);

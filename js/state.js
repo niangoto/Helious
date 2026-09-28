@@ -1,6 +1,8 @@
-let chart, candleSeries, fftSeries, fftForecastSeries;
+let chart, candleSeries, fftSeries, fftForecastSeries, candleForecastSeries;
 let latestForecastData = null;
 let latestCandles = [];
+// Допълнителна история (още един период назад) за равна дълбочина на пресмятанията.
+let historyCandles = [];
 let indicatorData = { rsi: [], volume: [] };
 let presentCutoffTime = null;
 let presentLineLocked = false;
@@ -18,3 +20,6 @@ let indicatorCycle = 0;
 
 let isRealtimeLoading = false;
 let realtimeInterval = null;
+
+// Коефициент на затихване β за експоненциалните тежести на прогнозата на свещи.
+let candleForecastBeta = 1;

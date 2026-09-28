@@ -66,11 +66,22 @@ function init() {
         lineStyle: 2
     });
 
+    // Прогнозни свещи (за панела "Прогноза на свещи") — показват се на самата графика.
+    candleForecastSeries = chart.addCandlestickSeries({
+        upColor: 'rgba(0, 240, 255, 0.55)',
+        downColor: 'rgba(138, 43, 226, 0.55)',
+        borderVisible: false,
+        wickUpColor: 'rgba(0, 240, 255, 0.55)',
+        wickDownColor: 'rgba(138, 43, 226, 0.55)',
+        priceLineVisible: false,
+        lastValueVisible: false
+    });
+
     setupPresentLine();
     // Build page dots
     const dotContainer = document.getElementById('ivPageDots');
     if (dotContainer) {
-        for (let i = 0; i < 9; i++) {
+        for (let i = 0; i < 10; i++) {
             const dot = document.createElement('div');
             dot.className = 'iv-page-dot' + (i === 0 ? ' active' : '');
             dot.id = 'ivDot' + i;
@@ -86,6 +97,7 @@ function init() {
     document.getElementById('viewToggle').classList.add('active');
     document.getElementById('viewToggle').textContent = '📈 Графика';
     ivReload();
+    updatePageChrome(currentPage);
 
     window.addEventListener('resize', () => {
         chart.resize(container.clientWidth, container.clientHeight);
@@ -94,16 +106,24 @@ function init() {
     });
     chart.timeScale().subscribeVisibleTimeRangeChange(() => {
         drawIndicatorCanvases();
-        if (latestCandles.length) updateFftOverlay(latestCandles);
+        if (latestCandles.length) {
+            updateFftOverlay(latestCandles);
+        }
     });
 }
 
 function selectSymbol(sym) {
     currentSymbol = sym;
     latestForecastData = null;
+    // Нов символ → нов cutoff от "сега".
+    presentLineLocked = false;
+    presentCutoffTime = null;
     drawForecast();
     document.getElementById('displaySymbol').innerText = sym.replace('USDT', '') + ' / USDT';
-    loadData();
+    loadData().then(() => {
+        recomputePredictions();
+        if (typeof zoomCandleForecastChart === 'function') zoomCandleForecastChart();
+    });
     if (ivCurrentSymbol !== sym) {
         ivCurrentSymbol = sym;
         document.getElementById('ivSearch').value = symbolDetails[sym] ? symbolDetails[sym].name : sym.replace('USDT', '');
@@ -115,6 +135,9 @@ function selectSymbol(sym) {
 function changeAnalysisPeriod(period) {
     activePeriod = period;
     latestForecastData = null;
+    // Новата времева рамка се смята наново от "сега" (без стар cutoff от предишната).
+    presentLineLocked = false;
+    presentCutoffTime = null;
     drawForecast();
     const config = periodConfigs[period];
     currentInterval = config.interval;
@@ -127,7 +150,11 @@ function changeAnalysisPeriod(period) {
     document.querySelector(`.period-btn[onclick*="'${period}'"]`)?.classList.add('active');
 
     ivDataCache = null;
-    loadData();
+    // След зареждане преизчисляваме всички модели за новата рамка и приближаваме графиката.
+    loadData().then(() => {
+        recomputePredictions();
+        if (typeof zoomCandleForecastChart === 'function') zoomCandleForecastChart();
+    });
     ivReload();
 }
 
@@ -166,13 +193,15 @@ async function loadData() {
     showLoading(true);
     try {
         const config = periodConfigs[activePeriod];
-        const data = await fetchKlines(currentSymbol, config.interval, config.limit);
+        // Теглим ДВА пъти периода — втората половина служи като история назад, така
+        // че всяка видима свещ да има равен брой свещи назад.
+        const data = await fetchKlines(currentSymbol, config.interval, config.limit * 2);
 
         if (data.error || !Array.isArray(data)) {
             throw new Error(data.error || "Грешка при зареждането на пазарните данни.");
         }
 
-        const candles = data.map(d => ({
+        const allCandles = data.map(d => ({
             time: timeToLocal(d[0] / 1000),
             open: parseFloat(d[1]),
             high: parseFloat(d[2]),
@@ -181,6 +210,9 @@ async function loadData() {
             volume: parseFloat(d[5])
         }));
 
+        // История = всичко; видими = последният период.
+        historyCandles = allCandles;
+        const candles = allCandles.slice(-config.limit);
         candleSeries.setData(candles);
         latestCandles = candles;
 
@@ -197,7 +229,8 @@ async function loadData() {
             candles.filter(c => c.time <= presentCutoffTime) : candles;
         if (typeof runForecast === 'function') runForecast(forecastData);
 
-        updateIndicatorCharts(candles);
+        // Моделите се смятат само с данни до линията "СЕГА" (ако е заключена).
+        updateIndicatorCharts(forecastData);
         chart.timeScale().fitContent();
     } catch (e) {
         console.error("Data loading error:", e);
@@ -226,6 +259,8 @@ function cycleIndicator() {
 
 function toggleView() {
     closeNews();
+    closeCalculator();
+    updatePageChrome(currentPage);
     const chartView = document.getElementById('chart-view');
     const ivView = document.getElementById('indicator-view');
     const btn = document.getElementById('viewToggle');
@@ -240,6 +275,13 @@ function toggleView() {
         const c = document.getElementById('chart');
         chart.resize(c.clientWidth, c.clientHeight);
         chart.timeScale().fitContent();
+        // На панела "Прогноза на свещи" приближаваме, за да са едри свещите.
+        if (typeof zoomCandleForecastChart === 'function') zoomCandleForecastChart();
+        // Refresh overlays for the currently selected panel (e.g. candle forecast)
+        if (latestCandles && latestCandles.length) {
+            updateFftOverlay(latestCandles);
+            if (typeof updateCandleForecastOverlay === 'function') updateCandleForecastOverlay(latestCandles);
+        }
         // Retry drawing canvases until it works
         let tries = 0;
         function tryDraw() {
@@ -250,15 +292,31 @@ function toggleView() {
     }
 }
 
+function updatePageChrome(idx) {
+    // На панела "Прогноза на свещи" (9): показваме втората лента (Прогноза %) и β
+    // слайдера, скриваме FFT спектъра. На други страници — обратно.
+    const fftRow = document.getElementById('fftSpectrumRow');
+    const predRow = document.getElementById('candlePredictionRow');
+    const betaCtl = document.getElementById('betaControl');
+    const isCandlePage = (idx === 9);
+    if (fftRow) fftRow.style.display = isCandlePage ? 'none' : '';
+    if (predRow) predRow.style.display = isCandlePage ? '' : 'none';
+    if (betaCtl) betaCtl.style.display = isCandlePage ? 'flex' : 'none';
+}
+
 function onIvPageScroll() {
     const pages = document.getElementById('ivPages');
     if (!pages) return;
-    const count = 9;
+    const count = 10;
     const idx = Math.round(pages.scrollLeft / pages.clientWidth);
+    updatePageChrome(idx);
     if (currentPage !== idx) {
         currentPage = idx;
         // Refresh the chart overlay: the FFT forecast line is hidden on the RSI phase page
-        if (latestCandles && latestCandles.length) updateFftOverlay(latestCandles);
+        if (latestCandles && latestCandles.length) {
+            updateFftOverlay(latestCandles);
+            if (typeof updateCandleForecastOverlay === 'function') updateCandleForecastOverlay(latestCandles);
+        }
     }
     for (let i = 0; i < count; i++) {
         const dot = document.getElementById('ivDot' + i);
@@ -268,7 +326,7 @@ function onIvPageScroll() {
     const next = document.getElementById('ivArrowNext');
     if (prev) prev.style.display = 'flex';
     if (next) {
-        const labels = ['›', '›', '›', '›', '›', '›', '›', '›', 'A'];
+        const labels = ['›', '›', '›', '›', '›', '›', '›', '›', '›', 'A'];
         next.textContent = labels[idx] || '›';
     }
 }
@@ -280,7 +338,7 @@ function scrollIvPage(dir) {
     const idx = Math.round(pages.scrollLeft / w);
     const target = idx + dir;
     if (dir < 0 && target < 0) return;
-    const maxPage = 8;
+    const maxPage = 9;
     if (dir > 0 && target > maxPage) {
         showNotification('Модел A — активен модел', 'success');
         return;
@@ -360,8 +418,13 @@ function ivSelectSymbol(sym) {
     if (currentSymbol !== sym) {
         currentSymbol = sym;
         latestForecastData = null;
+        presentLineLocked = false;
+        presentCutoffTime = null;
         document.getElementById('displaySymbol').innerText = sym.replace('USDT', '') + ' / USDT';
-        loadData();
+        loadData().then(() => {
+            recomputePredictions();
+            if (typeof zoomCandleForecastChart === 'function') zoomCandleForecastChart();
+        });
     }
 }
 
@@ -395,7 +458,7 @@ async function ivReload() {
             volume: parseFloat(d[5])
         }));
         ivDataCache = candles;
-        updateIvPanel(candles);
+        updateIvPanel(presentLineLocked && presentCutoffTime ? candles.filter(c => c.time <= presentCutoffTime) : candles);
     } catch (e) {
         document.getElementById('ivRsiVal').textContent = '--';
         document.getElementById('ivVolVal').textContent = '--';
@@ -420,10 +483,38 @@ function openHermes(modelIndex) {
     }
 }
 
+// Връща свещите само до линията "СЕГА" (cutoff), ако е заключена; иначе всички.
+function candlesUpToCutoff(candles) {
+    const src = candles || latestCandles;
+    if (presentLineLocked && presentCutoffTime && src) {
+        return src.filter(c => c.time <= presentCutoffTime);
+    }
+    return src;
+}
+
+// Обединява два масива свещи по време (новите презаписват) и ги сортира.
+function mergeCandles(base, add) {
+    const map = new Map();
+    for (const c of (base || [])) map.set(c.time, c);
+    for (const c of (add || [])) map.set(c.time, c);
+    return [...map.values()].sort((a, b) => a.time - b.time);
+}
+
+// Преизчислява ВСИЧКИ модели с прогноза само с данни до линията "СЕГА"
+// (без свещите след избрания момент) — за графиката и за таблото.
+function recomputePredictions() {
+    if (!latestCandles || latestCandles.length < 20) return;
+    const used = candlesUpToCutoff(latestCandles);
+    if (used.length < 20) return;
+    if (typeof runForecast === 'function') runForecast(used);
+    updateIndicatorCharts(used);
+    if (typeof updateIvPanel === 'function') updateIvPanel(used);
+    if (typeof updateFftOverlay === 'function') updateFftOverlay(used);
+    if (typeof updateCandleForecastOverlay === 'function') updateCandleForecastOverlay(used);
+}
+
 function reRunForecast() {
-    if (!latestCandles || latestCandles.length < 10) return;
-    const used = presentCutoffTime ? latestCandles.filter(c => c.time <= presentCutoffTime) : latestCandles;
-    if (used.length >= 10 && typeof runForecast === 'function') runForecast(used);
+    recomputePredictions();
 }
 
 async function forceReloadForecast() {
@@ -459,7 +550,9 @@ async function loadRealtimeData() {
 
         candleSeries.setData(candles);
         latestCandles = candles;
-        updateIndicatorCharts(candles);
+        // Обновяваме историята с новите свещи (по време), без да я раздуваме.
+        historyCandles = mergeCandles(historyCandles, candles).slice(-config.limit * 2);
+        updateIndicatorCharts(candlesUpToCutoff(candles));
 
         const lastClose = candles[candles.length - 1].close;
         const formattedPrice = lastClose.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
@@ -490,9 +583,16 @@ function setupPresentLine() {
     function clientXToChartTime(clientX) {
         const container = document.getElementById('chart');
         const rect = container.getBoundingClientRect();
-        const x = clientX - rect.left;
+        const x = Math.max(0, Math.min(rect.width, clientX - rect.left));
         try {
-            const time = chart.timeScale().coordinateToTime(x);
+            let time = chart.timeScale().coordinateToTime(x);
+            if (time == null) return null;
+            // Ограничаваме в диапазона на свещите, за да не изчезне линията.
+            if (latestCandles && latestCandles.length) {
+                const first = latestCandles[0].time;
+                const last = latestCandles[latestCandles.length - 1].time;
+                time = Math.max(first, Math.min(last, time));
+            }
             return time;
         } catch (e) {
             return null;
@@ -506,7 +606,14 @@ function setupPresentLine() {
             line.style.display = 'none';
             return;
         }
-        const coord = chart.timeScale().timeToCoordinate(presentCutoffTime);
+        let coord = chart.timeScale().timeToCoordinate(presentCutoffTime);
+        // Ако линията е извън диапазона, я придържаме към ръба, вместо да я скриваме.
+        if ((coord == null || isNaN(coord)) && latestCandles && latestCandles.length) {
+            const first = latestCandles[0].time;
+            const last = latestCandles[latestCandles.length - 1].time;
+            const clamped = Math.max(first, Math.min(last, presentCutoffTime));
+            coord = chart.timeScale().timeToCoordinate(clamped);
+        }
         if (coord == null || isNaN(coord)) {
             line.style.display = 'none';
             return;
@@ -515,7 +622,10 @@ function setupPresentLine() {
         const left = Math.round(coord + rect.left - rect.left);
         line.style.left = `${left}px`;
         const d = new Date(presentCutoffTime * 1000);
-        label.innerText = presentLineLocked ? `Cutoff: ${d.toLocaleString()}` : `СЕГА`;
+        // Сумата на предвиденото движение (в %) до избрания момент (+ или -).
+        const pct = (typeof candleForecastTotalPct === 'function') ? candleForecastTotalPct() : null;
+        const pctStr = (pct == null) ? '' : ` · ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
+        label.innerText = (presentLineLocked ? `Cutoff: ${d.toLocaleString()}` : `СЕГА`) + pctStr;
     }
 
     function onPointerDown(e) {
@@ -538,10 +648,8 @@ function setupPresentLine() {
         dragging = false;
         document.body.style.userSelect = '';
         line.classList.remove('dragging');
-        if (latestCandles && latestCandles.length > 0) {
-            const used = latestCandles.filter(c => c.time <= presentCutoffTime);
-            if (used.length >= 10 && typeof runForecast === 'function') runForecast(used);
-        }
+        // Нова прогноза само с данни до избрания момент (без след него).
+        recomputePredictions();
     }
 
     line.addEventListener('pointerdown', onPointerDown);
@@ -554,7 +662,7 @@ function setupPresentLine() {
             presentCutoffTime = latestCandles[latestCandles.length - 1].time;
         }
         updatePresentLinePosition();
-        if (latestCandles && latestCandles.length > 0 && typeof runForecast === 'function') runForecast(latestCandles);
+        recomputePredictions();
         showNotification('Линията беше възстановена до сегашното време', 'success');
     });
 

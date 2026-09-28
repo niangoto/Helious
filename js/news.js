@@ -26,6 +26,7 @@ function newsQueryFor(symbol) {
 
 // Показва/скрива изгледа с новини.
 function toggleNews() {
+    closeCalculator();
     const chartView = document.getElementById('chart-view');
     const ivView = document.getElementById('indicator-view');
     const newsView = document.getElementById('news-view');
