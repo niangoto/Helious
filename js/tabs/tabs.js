@@ -5,19 +5,32 @@ function registerTab(tab) {
     TabRegistry[tab.index] = tab;
 }
 
-// Update all tab panels from current candles. Called by ivReload().
+// Update the ACTIVE tab panel only. Called by ivReload()/recomputePredictions().
+// Тежките сметки (computeAllModels) се правят само когато таблото е отворено, а
+// renderPanel — само за текущо видимата страница (останалите се рендират лениво
+// при превключване, за да няма фонова работа).
+let ivModelsCache = null;
+let ivPanelCandles = null;
+
 function updateIvPanel(candles) {
     if (!candles || candles.length < 25) return;
-    const models = computeAllModels(candles);
-    TabRegistry.forEach(tab => {
-        if (tab && typeof tab.renderPanel === 'function') {
-            try {
-                tab.renderPanel(candles, models);
-            } catch (e) {
-                console.error(`Tab[${tab.index}] renderPanel error:`, e);
-            }
+    if (typeof indicatorViewVisible === 'function' && !indicatorViewVisible()) return;
+    ivModelsCache = computeAllModels(candles);
+    ivPanelCandles = candles;
+    renderCurrentTabPanel();
+}
+
+function renderCurrentTabPanel() {
+    if (typeof indicatorViewVisible === 'function' && !indicatorViewVisible()) return;
+    if (!ivModelsCache || !ivPanelCandles) return;
+    const tab = TabRegistry[currentPage];
+    if (tab && typeof tab.renderPanel === 'function') {
+        try {
+            tab.renderPanel(ivPanelCandles, ivModelsCache);
+        } catch (e) {
+            console.error(`Tab[${tab.index}] renderPanel error:`, e);
         }
-    });
+    }
 }
 
 // Set up the shared canvas and delegate drawing to the active tab.

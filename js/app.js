@@ -91,6 +91,17 @@ function init() {
     loadData();
     startRealtimePolling();
 
+    // Без фонова работа: при скриване на таба спираме полинга, при връщане —
+    // възобновяваме и опресняваме текущия изглед.
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            stopRealtimePolling();
+        } else {
+            startRealtimePolling();
+            onMarketViewReshown();
+        }
+    });
+
     // Default to indicator view
     document.getElementById('chart-view').style.display = 'none';
     document.getElementById('indicator-view').style.display = 'flex';
@@ -189,6 +200,38 @@ function showNotification(msg, type = 'success') {
     }, 3500);
 }
 
+// ── Видимост на изгледите ──
+// Тежките сметки се правят САМО когато съответният изглед е реален и документът
+// е на фокус. Така няма фонова работа, докато потребителят не гледа табло/графика;
+// при отваряне сметките се пускат лениво (възможно е кратко изчакване).
+function chartViewVisible() {
+    if (typeof document !== 'undefined' && document.hidden) return false;
+    const cv = document.getElementById('chart-view');
+    return !!cv && cv.style.display !== 'none';
+}
+
+function indicatorViewVisible() {
+    if (typeof document !== 'undefined' && document.hidden) return false;
+    const iv = document.getElementById('indicator-view');
+    return !!iv && iv.style.display !== 'none';
+}
+
+function appVisible() {
+    return chartViewVisible() || indicatorViewVisible();
+}
+
+// Прекъсва фоновото теглене/смятане; на фокус се възобновява и опреснява.
+function stopRealtimePolling() {
+    if (realtimeInterval) { clearInterval(realtimeInterval); realtimeInterval = null; }
+}
+
+function onMarketViewReshown() {
+    if (!appVisible()) return;
+    // Графиката се оформя от опреснените свещи; таблото — от ivReload.
+    if (chartViewVisible()) loadRealtimeData();
+    if (indicatorViewVisible()) ivReload();
+}
+
 async function loadData() {
     showLoading(true);
     try {
@@ -270,17 +313,18 @@ function toggleView() {
     btn.classList.toggle('active', !showing);
     btn.textContent = showing ? '📊 Табло' : '📈 Графика';
     if (!showing) {
-        if (!ivDataCache) ivReload();
+        // Таблото се отваря сега → сметките/панелът се рендират лениво.
+        ivReload();
+        if (typeof renderCurrentTabPanel === 'function') renderCurrentTabPanel();
     } else {
         const c = document.getElementById('chart');
         chart.resize(c.clientWidth, c.clientHeight);
         chart.timeScale().fitContent();
         // На панела "Прогноза на свещи" приближаваме, за да са едри свещите.
         if (typeof zoomCandleForecastChart === 'function') zoomCandleForecastChart();
-        // Refresh overlays for the currently selected panel (e.g. candle forecast)
+        // Сметките за графиката (моделни вероятности + FFT) се пускат едва сега.
         if (latestCandles && latestCandles.length) {
-            updateFftOverlay(latestCandles);
-            if (typeof updateCandleForecastOverlay === 'function') updateCandleForecastOverlay(latestCandles);
+            updateIndicatorCharts(candlesUpToCutoff(latestCandles));
         }
         // Retry drawing canvases until it works
         let tries = 0;
@@ -312,8 +356,10 @@ function onIvPageScroll() {
     updatePageChrome(idx);
     if (currentPage !== idx) {
         currentPage = idx;
-        // Refresh the chart overlay: the FFT forecast line is hidden on the RSI phase page
-        if (latestCandles && latestCandles.length) {
+        // Рендираме панела на новоотворената страница (лениво).
+        if (typeof renderCurrentTabPanel === 'function') renderCurrentTabPanel();
+        // Опресняваме overlay-ите на графиката само ако тя е реално отворена.
+        if (chartViewVisible() && latestCandles && latestCandles.length) {
             updateFftOverlay(latestCandles);
             if (typeof updateCandleForecastOverlay === 'function') updateCandleForecastOverlay(latestCandles);
         }
@@ -434,6 +480,11 @@ document.addEventListener('click', (e) => {
 });
 
 async function ivReload() {
+    // Таблото не е отворено → не правим сметки; ще се презареди при отваряне.
+    if (!indicatorViewVisible()) {
+        ivDataCache = null;
+        return;
+    }
     const ivEl = document.getElementById('indicator-view');
     ivEl.style.opacity = '0.4';
     const sym = ivCurrentSymbol;
@@ -506,11 +557,14 @@ function recomputePredictions() {
     if (!latestCandles || latestCandles.length < 20) return;
     const used = candlesUpToCutoff(latestCandles);
     if (used.length < 20) return;
-    if (typeof runForecast === 'function') runForecast(used);
-    updateIndicatorCharts(used);
-    if (typeof updateIvPanel === 'function') updateIvPanel(used);
-    if (typeof updateFftOverlay === 'function') updateFftOverlay(used);
-    if (typeof updateCandleForecastOverlay === 'function') updateCandleForecastOverlay(used);
+    // Смятаме само това, което е нужно на реално отворения изглед.
+    if (chartViewVisible()) {
+        if (typeof runForecast === 'function') runForecast(used);
+        updateIndicatorCharts(used); // включва FFT overlay + прогноза на свещи
+    }
+    if (indicatorViewVisible() && typeof updateIvPanel === 'function') {
+        updateIvPanel(used);
+    }
 }
 
 function reRunForecast() {
@@ -530,6 +584,7 @@ async function forceReloadForecast() {
 
 async function loadRealtimeData() {
     if (isRealtimeLoading) return;
+    if (!appVisible()) return; // няма фонови сметки, докато табло/графика не са отворени
     isRealtimeLoading = true;
     try {
         const config = periodConfigs[activePeriod];
@@ -607,19 +662,29 @@ function setupPresentLine() {
             return;
         }
         let coord = chart.timeScale().timeToCoordinate(presentCutoffTime);
-        // Ако линията е извън диапазона, я придържаме към ръба, вместо да я скриваме.
+        // Ако линията е извън диапазона на данните — придържаме я към ръба на данните.
         if ((coord == null || isNaN(coord)) && latestCandles && latestCandles.length) {
             const first = latestCandles[0].time;
             const last = latestCandles[latestCandles.length - 1].time;
             const clamped = Math.max(first, Math.min(last, presentCutoffTime));
             coord = chart.timeScale().timeToCoordinate(clamped);
         }
+        // Ако все още е null (извън ВИДИМИЯ диапазон) — придържаме към ръба на екрана,
+        // вместо да я скриваме. Така линията никога не изчезва.
+        if (coord == null || isNaN(coord)) {
+            try {
+                const range = chart.timeScale().getVisibleRange();
+                if (range && range.from != null && range.to != null) {
+                    coord = (presentCutoffTime < range.from) ? 0 : (presentCutoffTime > range.to ? rect.width : null);
+                }
+            } catch (e) {}
+        }
         if (coord == null || isNaN(coord)) {
             line.style.display = 'none';
             return;
         }
         line.style.display = 'block';
-        const left = Math.round(coord + rect.left - rect.left);
+        const left = Math.round(Math.max(0, Math.min(rect.width, coord)));
         line.style.left = `${left}px`;
         const d = new Date(presentCutoffTime * 1000);
         // Сумата на предвиденото движение (в %) до избрания момент (+ или -).

@@ -520,6 +520,63 @@
             opacity: 0.6;
         }
 
+        .chart-section {
+            margin: 0 18px 12px;
+            border: 1px solid var(--panel-border);
+            border-radius: 9px;
+            background: rgba(255, 255, 255, 0.02);
+            flex-shrink: 0;
+            display: none;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .chart-head {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 8px 12px;
+            border-bottom: 1px solid var(--panel-border);
+            font-size: 10px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: var(--accent-cyan);
+        }
+
+        .chart-head .leg {
+            display: flex;
+            gap: 14px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .chart-head .leg span {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 10px;
+            color: var(--text-dim);
+            text-transform: none;
+            letter-spacing: 0;
+            font-family: 'Outfit', sans-serif;
+            font-weight: 600;
+        }
+
+        .legend-dot {
+            width: 9px;
+            height: 9px;
+            border-radius: 50%;
+            display: inline-block;
+            flex-shrink: 0;
+        }
+
+        #simChart {
+            width: 100%;
+            height: 300px;
+        }
+
         @media (max-width: 900px) {
             .orders-head,
             .order-row {
@@ -606,6 +663,18 @@
 
     <section class="current" id="currentPos" style="display:none"></section>
 
+    <section class="chart-section" id="chartSection">
+        <div class="chart-head">
+            <span>Графика на периода — позиции и затваряния</span>
+            <span class="leg">
+                <span><i class="legend-dot" style="background:var(--accent-green)"></i>BUY отваряне</span>
+                <span><i class="legend-dot" style="background:var(--accent-red)"></i>SELL отваряне</span>
+                <span><i class="legend-dot" style="background:var(--accent-cyan)"></i>● затваряне (печалба/загуба)</span>
+            </span>
+        </div>
+        <div id="simChart"></div>
+    </section>
+
     <div class="progress-wrap">
         <div class="progress-bar" id="progBar"></div>
         <div class="progress-text" id="progText">Готово</div>
@@ -634,6 +703,7 @@
         Историческа симулация: ботът знае само данните до текущата свещ. Бюджетът се третира в EUR. Риск (α): 0.1–0.5 консервативен · 1.0 умерен · &gt;1.0 агресивен. Не е финансов съвет.
     </div>
 
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
     <script src="models.js"></script>
     <script>
         const params = new URLSearchParams(location.search);
@@ -664,6 +734,65 @@
         let cancelFlag = false;
         let running = false;
         let datesTouched = false;
+
+        // Графика след симулацията: всички отваряния/затваряния се маркират на свещите.
+        let simChart = null;
+        let simCandleSeries = null;
+        let tradeMarkers = [];
+
+        function renderSimChart(candles, markers) {
+            const section = document.getElementById('chartSection');
+            const container = document.getElementById('simChart');
+            if (!section || !container || !candles || !candles.length || typeof LightweightCharts === 'undefined') return;
+            section.style.display = 'flex';
+
+            if (!simChart) {
+                simChart = LightweightCharts.createChart(container, {
+                    width: container.clientWidth,
+                    height: container.clientHeight,
+                    layout: {
+                        background: { color: '#0b0f18' },
+                        textColor: '#94a3b8',
+                        fontSize: 11,
+                        fontFamily: 'Outfit, sans-serif'
+                    },
+                    grid: {
+                        vertLines: { color: 'rgba(255, 255, 255, 0.03)' },
+                        horzLines: { color: 'rgba(255, 255, 255, 0.03)' }
+                    },
+                    timeScale: {
+                        borderColor: 'rgba(255, 255, 255, 0.08)',
+                        timeVisible: true,
+                        secondsVisible: false
+                    },
+                    rightPriceScale: { borderColor: 'rgba(255, 255, 255, 0.08)' },
+                    crosshair: { mode: LightweightCharts.CrosshairMode.Normal }
+                });
+                simCandleSeries = simChart.addCandlestickSeries({
+                    upColor: '#00ff66',
+                    downColor: '#ff0055',
+                    borderVisible: false,
+                    wickUpColor: '#00ff66',
+                    wickDownColor: '#ff0055'
+                });
+                const ro = new ResizeObserver(() => {
+                    if (!container.clientWidth) return;
+                    simChart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+                });
+                ro.observe(container);
+            }
+
+            simCandleSeries.setData(candles.map(c => ({
+                time: c.time, open: c.open, high: c.high, low: c.low, close: c.close
+            })));
+
+            const sorted = (markers || []).slice().sort((a, b) => a.time - b.time);
+            simCandleSeries.setMarkers(sorted);
+            simChart.timeScale().fitContent();
+            setTimeout(() => {
+                if (container.clientWidth) simChart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+            }, 0);
+        }
 
         function toggleDates() {
             const on = document.getElementById('inpUseDates').checked;
@@ -853,6 +982,7 @@
             let tradeCount = 0, winsCount = 0;
             let legs = [];
             const n = candles.length;
+            tradeMarkers = [];
 
             for (let i = 30; i < n; i++) {
                 if (cancelFlag) return;
@@ -883,6 +1013,13 @@
                             const dd = (peak - equity) / peak * 100;
                             if (dd > maxDD) maxDD = dd;
                             prependOrder(pos, exitPrice, reason, pnl, equity, tradeCount);
+                            tradeMarkers.push({
+                                time: c.time,
+                                position: pos.dir === 'BUY' ? 'aboveBar' : 'belowBar',
+                                color: pnl >= 0 ? '#00ff66' : '#ff0055',
+                                shape: 'circle',
+                                text: reason + (pnl >= 0 ? ' +' : ' ') + pnl.toFixed(2) + '€'
+                            });
                         } else {
                             stillOpen.push(pos);
                         }
@@ -950,6 +1087,13 @@
                                             alpha
                                         }];
                                         renderCurrentPos(legs, equity);
+                                        tradeMarkers.push({
+                                            time: t,
+                                            position: dir === 'BUY' ? 'belowBar' : 'aboveBar',
+                                            color: dir === 'BUY' ? '#00ff66' : '#ff0055',
+                                            shape: dir === 'BUY' ? 'arrowUp' : 'arrowDown',
+                                            text: dir
+                                        });
                                     }
                                 }
                             }
@@ -976,6 +1120,13 @@
                     tradeCount++;
                     if (pnl > 0) winsCount++;
                     prependOrder(pos, c.close, 'Край', pnl, equity, tradeCount);
+                    tradeMarkers.push({
+                        time: c.time,
+                        position: pos.dir === 'BUY' ? 'aboveBar' : 'belowBar',
+                        color: pnl >= 0 ? '#00ff66' : '#ff0055',
+                        shape: 'circle',
+                        text: 'Край' + (pnl >= 0 ? ' +' : ' ') + pnl.toFixed(2) + '€'
+                    });
                 }
                 legs = [];
                 document.getElementById('currentPos').style.display = 'none';
@@ -1001,6 +1152,7 @@
             document.getElementById('ordersList').innerHTML = '';
             document.getElementById('summary').innerHTML = '';
             document.getElementById('currentPos').style.display = 'none';
+            document.getElementById('chartSection').style.display = 'none';
             document.getElementById('btnStart').disabled = true;
             document.getElementById('btnStart').textContent = '⏳ Работи...';
             document.getElementById('progBar').classList.remove('err');
@@ -1042,6 +1194,7 @@
                 setProgress(15, 'Стартиране на търговската симулация...');
                 await sleep(30);
                 await simulate(simCandles, atrSeries, probs, P);
+                if (!cancelFlag) renderSimChart(simCandles, tradeMarkers);
             } catch (e) {
                 console.error(e);
                 setProgress(0, 'Грешка: ' + e.message);

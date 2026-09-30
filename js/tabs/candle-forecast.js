@@ -88,11 +88,12 @@ function candleForecastLookback() {
     return 100;
 }
 
-// Слайдер: промяна на коефициента на затихване β → преизчислява таблото и графиката.
+// Слайдер: промяна на коефициента на затихване β (0.01..1) → преизчислява таблото и графиката.
 function candleBetaChange(val) {
-    candleForecastBeta = Math.max(0.1, Math.min(10, parseFloat(val) || 1));
+    const v = parseFloat(val);
+    candleForecastBeta = Math.max(0.01, Math.min(1, isNaN(v) ? candleForecastBeta : v));
     const el = document.getElementById('candleBetaVal');
-    if (el) el.textContent = candleForecastBeta.toFixed(1);
+    if (el) el.textContent = candleForecastBeta.toFixed(2);
     const base = candleForecastBase(latestCandles);
     renderCandleForecastPanel(base);
     updateCandleForecastOverlay(base);
@@ -125,7 +126,7 @@ function renderCandleForecastPanel(candles) {
     const forecast = computeCandleForecast(base, CANDLE_FORECAST_STEPS, candleForecastBeta);
 
     const betaEl = document.getElementById('candleBetaVal');
-    if (betaEl) betaEl.textContent = candleForecastBeta.toFixed(1);
+    if (betaEl) betaEl.textContent = candleForecastBeta.toFixed(2);
 
     if (!forecast) {
         if (finalEl) { finalEl.textContent = '---'; finalEl.className = 'iv-card-value neutral'; }
@@ -141,7 +142,7 @@ function renderCandleForecastPanel(candles) {
         finalEl.textContent = final.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         finalEl.className = 'iv-card-value ' + (pct > 0 ? 'up' : pct < 0 ? 'down' : 'neutral');
     }
-    if (metaEl) metaEl.textContent = `Сума ${sumPct >= 0 ? '+' : ''}${sumPct.toFixed(2)}% · ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}% цена · β=${candleForecastBeta.toFixed(1)}`;
+    if (metaEl) metaEl.textContent = `Сума ${sumPct >= 0 ? '+' : ''}${sumPct.toFixed(2)}% · ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}% цена · β=${candleForecastBeta.toFixed(2)}`;
     if (rowsEl) {
         rowsEl.innerHTML = forecast.map((c, i) => {
             const pct = c.pct;
@@ -238,8 +239,9 @@ function rollingForecastPct(visible) {
     for (let i = 0; i < hist.length; i++) idx.set(hist[i].time, i);
     const pctOf = c => c.open ? ((c.close - c.open) / c.open) * 100 : 0;
     return visible.map(c => {
+        const body = pctOf(c);
         const hi = idx.get(c.time);
-        if (hi == null || hi < 2) return { time: c.time, pct: null };
+        if (hi == null || hi < 2) return { time: c.time, pct: null, body };
         const from = Math.max(0, hi - W);
         const n = hi - from;
         let num = 0, den = 0;
@@ -249,9 +251,13 @@ function rollingForecastPct(visible) {
             num += w * pctOf(hist[from + j]);
             den += w;
         }
-        return { time: c.time, pct: den > 0 ? num / den : null };
+        return { time: c.time, pct: den > 0 ? num / den : null, body };
     });
 }
+
+// Съхранени точки/геометрия на лентата за hover tooltip.
+let _predPoints = [];
+let _predGeom = { w: 0, h: 0 };
 
 // Втора лента: предвиден процент (в %) за всяка видима свещ, по времевата ос.
 function drawCandlePredictionStrip() {
@@ -274,6 +280,8 @@ function drawCandlePredictionStrip() {
 
     const visible = (typeof getVisibleCandles === 'function' ? getVisibleCandles(latestCandles) : latestCandles);
     const data = rollingForecastPct(visible).filter(d => d.pct != null);
+    _predPoints = [];
+    _predGeom = { w, h };
     if (data.length < 2) return;
 
     let chartW = w;
@@ -289,11 +297,28 @@ function drawCandlePredictionStrip() {
     const halfH = h / 2 - 4;
     const abs = data.map(d => Math.abs(d.pct)).sort((a, b) => a - b);
     const scale = Math.max(abs[Math.floor(abs.length * 0.9)] || abs[abs.length - 1] || 1, 1e-9);
+    const fmt = v => (v >= 0 ? '+' : '') + v.toFixed(2) + '%';
 
-    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    // нулева линия
+    ctx.strokeStyle = 'rgba(255,255,255,0.2)';
     ctx.lineWidth = 1;
     ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(w, midY); ctx.stroke();
 
+    // скала: пунктирани линии на +scale и -scale
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.setLineDash([3, 3]);
+    [scale, -scale].forEach(v => { const y = midY - (v / scale) * halfH; ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke(); });
+    ctx.setLineDash([]);
+    // етикети на скалата (в %)
+    ctx.font = '9px JetBrains Mono';
+    ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
+    ctx.fillStyle = 'rgba(255,255,255,0.55)';
+    ctx.fillText(fmt(scale), 4, midY - halfH + 7);
+    ctx.fillText('0%', 4, midY);
+    ctx.fillText(fmt(-scale), 4, midY + halfH - 7);
+
+    // барове
     for (const d of data) {
         const x = xOf(d.time);
         if (x == null || x < -barW || x > w + barW) continue;
@@ -302,7 +327,48 @@ function drawCandlePredictionStrip() {
         ctx.fillStyle = up ? 'rgba(0,179,255,0.85)' : 'rgba(255,136,0,0.85)';
         if (up) ctx.fillRect(x - barW / 2, midY - bh, barW, bh);
         else ctx.fillRect(x - barW / 2, midY, barW, bh);
+        _predPoints.push({ x, time: d.time, pct: d.pct, body: d.body });
     }
+
+    // маркиране на най-високото и най-ниското място
+    let maxP = data[0], minP = data[0];
+    for (const d of data) { if (d.pct > maxP.pct) maxP = d; if (d.pct < minP.pct) minP = d; }
+    const markPoint = (p, isMax) => {
+        const x = xOf(p.time);
+        if (x == null || x < 0 || x > w) return;
+        const y = Math.max(6, Math.min(h - 6, midY - (p.pct / scale) * halfH));
+        const col = isMax ? '#00ff66' : '#ff0055';
+        ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(x, y, 3, 0, Math.PI * 2); ctx.stroke();
+        ctx.font = '9px JetBrains Mono';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = isMax ? 'bottom' : 'top';
+        ctx.fillText((isMax ? '▲ ' : '▼ ') + (p.pct >= 0 ? '+' : '') + p.pct.toFixed(2) + '%', x, isMax ? y - 5 : y + 5);
+    };
+    markPoint(maxP, true);
+    markPoint(minP, false);
+}
+
+// Hover върху лентата → показва конкретните стойности за най-близката свещ.
+function onPredictionHover(e) {
+    const tip = document.getElementById('candlePredictionTip');
+    const cvs = document.getElementById('candlePredictionCanvas');
+    if (!tip || !cvs || !_predPoints.length) return;
+    const rect = cvs.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    let best = null, bd = Infinity;
+    for (const p of _predPoints) { const d = Math.abs(p.x - mx); if (d < bd) { bd = d; best = p; } }
+    if (!best || bd > 18) { tip.style.display = 'none'; return; }
+    tip.style.display = 'block';
+    tip.style.left = Math.max(2, Math.min(Math.max(2, _predGeom.w - 140), best.x - 60)) + 'px';
+    const d = new Date(best.time * 1000);
+    const tstr = d.toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    tip.innerHTML = `${tstr}<br>Прогноза: <b style="color:#00d0ff">${best.pct >= 0 ? '+' : ''}${best.pct.toFixed(3)}%</b><br>Тяло: ${best.body >= 0 ? '+' : ''}${best.body.toFixed(3)}%`;
+}
+
+function hidePredictionTip() {
+    const tip = document.getElementById('candlePredictionTip');
+    if (tip) tip.style.display = 'none';
 }
 
 // Приближава главната графика към края, за да са едри свещите + прогнозните 10.

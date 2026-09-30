@@ -25,6 +25,8 @@ function computeRSI(candles, period) {
 
 function updateIndicatorCharts(candles) {
     if (!candles || candles.length < 20) return;
+    // Няма фонови сметки: работим само когато табло/графика е отворено.
+    if (typeof appVisible === 'function' && !appVisible()) return;
     const period = 14;
     const rsiVals = computeRSI(candles, period);
     if (!rsiVals.length) return;
@@ -52,18 +54,33 @@ function updateIndicatorCharts(candles) {
         }
     }
     indicatorData = { rsi, vol, bias };
-    // Pre-compute model probability sequences for chart
-    if (typeof computeModelProbSequence === 'function') {
-        indicatorData.modelProbs = [
-            computeModelProbSequence(candles, 0),
-            computeModelProbSequence(candles, 1),
-            computeModelProbSequence(candles, 2),
-            computeModelProbSequence(candles, 3),
-            computeModelProbSequence(candles, 4),
-            computeFourierProbSequence(candles)
-        ];
-    }
+    // Моделните вероятностни редици + FFT overlay са нужни САМО на графиката.
+    if (typeof chartViewVisible === 'function' && !chartViewVisible()) return;
+    computeIndicatorModelProbs(candles);
     updateFftOverlay(candles);
     if (typeof updateCandleForecastOverlay === 'function') updateCandleForecastOverlay(candles);
     drawIndicatorCanvases();
+}
+
+// Изчислява само вероятностните редици, нужни на АКТИВНАТА страница (0-9), за да
+// не се смятат всичките модели, когато страницата не ги показва. Индексите в
+// indicatorData.modelProbs отговарят на drawChart на съответния таб.
+function computeIndicatorModelProbs(candles) {
+    if (typeof computeModelProbSequence !== 'function') return;
+    const neededByPage = {
+        1: [0, 1, 2, 3, 4, 5], // Средна вероятност (0-4 за линията, 5 за дължина)
+        2: [0], // Историческа
+        3: [1], // Логистична
+        4: [2], // Марковска
+        5: [3], // Очаквана стойност
+        6: [4], // Уейвлет
+        7: [5]  // Фурие
+    };
+    const needed = neededByPage[currentPage];
+    if (!needed) { indicatorData.modelProbs = null; return; }
+    const mp = [null, null, null, null, null, null];
+    for (const mi of needed) {
+        mp[mi] = (mi === 5) ? computeFourierProbSequence(candles) : computeModelProbSequence(candles, mi);
+    }
+    indicatorData.modelProbs = mp;
 }

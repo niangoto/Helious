@@ -492,8 +492,14 @@ function computeAllModels(candles) {
   return { models: { historical: hist, logistic: computeCombinationProbability(candles), markov: computeMarkovChain(candles), expectedValue: computeExpectedValue(candles), wavelet: computeWaveletProbability(prices), fourier: computeFourierProbability(candles) } };
 }
 
+// Кеш по хеш на свещите: ако данните не са се сменили, не преизчисляваме тежката
+// плъзгаща редица. Пази максимум 1 запис на модел (6 модела).
+const modelSeqCache = new Map();
 function computeModelProbSequence(candles, modelIndex) {
   if (!candles || candles.length < 30) return [];
+  const cacheHash = candlesHash(candles);
+  const cached = modelSeqCache.get(modelIndex);
+  if (cached && cached.hash === cacheHash) return cached.data;
   const result = []; const n = candles.length;
   const step = Math.max(1, Math.floor(n / 200));
   const prices = candles.map(c => c.close);
@@ -571,6 +577,7 @@ function computeModelProbSequence(candles, modelIndex) {
   const hPctLast = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
   result.push({ time: candles[lastIdx].time, value: Math.max(1, Math.min(99, sampleVal(lastIdx, hPctLast))) });
 
+  modelSeqCache.set(modelIndex, { hash: cacheHash, data: result });
   return result;
 }
 

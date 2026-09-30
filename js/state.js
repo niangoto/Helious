@@ -21,5 +21,5 @@ let indicatorCycle = 0;
 let isRealtimeLoading = false;
 let realtimeInterval = null;
 
-// Коефициент на затихване β за експоненциалните тежести на прогнозата на свещи.
-let candleForecastBeta = 1;
+// Коефициент на затихване β (0..1) за експоненциалните тежести на прогнозата на свещи.
+let candleForecastBeta = 0.5;
