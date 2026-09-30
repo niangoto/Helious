@@ -603,9 +603,11 @@ function resolveTrade(candles, j, atrVal, tpMult, slMult, maxBars) {
 // modelIndex: 0=historical, 1=logistic, 2=markov, 3=EV,
 //             4=wavelet, 5=average of 0..4
 // Returns an array aligned with `candles` (null for the warm-up window).
-function computeModelProbSeries(candles, modelIndex) {
+function computeModelProbSeries(candles, modelIndex, opts) {
   const n = candles.length;
   if (n < 30) return [];
+  const invert = (opts && Array.isArray(opts.invert)) ? opts.invert : [];
+  const inv = (v, m) => invert[m] ? (100 - v) : v;
   const result = new Array(n).fill(null);
   const prices = candles.map(c => c.close);
   const rsiV = typeof computeRSI === 'function' ? computeRSI(candles, 14) : prices.map(() => 50);
@@ -689,14 +691,15 @@ function computeModelProbSeries(candles, modelIndex) {
       val = w.buyPct;
     } else if (modelIndex === 5) {
       let sum = 0, cnt = 0;
-      const v0 = amplify(directionalProb(dirs)); sum += v0; cnt++;
+      const v0 = inv(amplify(directionalProb(dirs)), 0); sum += v0; cnt++;
       const mask = maskAt(i);
       let v1 = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
-      if (combos.has(mask)) { const cc = combos.get(mask); if (cc.total > 0) v1 = (cc.wins / cc.total) * 100; } sum += v1; cnt++;
-      const v2 = amplify(markovProb(dirs)); sum += v2; cnt++;
-      const v3 = evVal(); sum += v3; cnt++;
+      if (combos.has(mask)) { const cc = combos.get(mask); if (cc.total > 0) v1 = (cc.wins / cc.total) * 100; }
+      v1 = inv(v1, 1); sum += v1; cnt++;
+      const v2 = inv(amplify(markovProb(dirs)), 2); sum += v2; cnt++;
+      const v3 = inv(evVal(), 3); sum += v3; cnt++;
       const win = Math.max(0, i - 499);
-      const v4 = computeWaveletProbability(prices.slice(win, i + 1)).buyPct; sum += v4; cnt++;
+      const v4 = inv(computeWaveletProbability(prices.slice(win, i + 1)).buyPct, 4); sum += v4; cnt++;
       val = cnt > 0 ? sum / cnt : 50;
     }
     result[i] = { time: candles[i].time, buyPct: Math.max(1, Math.min(99, val)), sellPct: Math.max(1, Math.min(99, 100 - val)) };
