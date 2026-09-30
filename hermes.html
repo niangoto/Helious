@@ -641,6 +641,30 @@
             flex-shrink: 0;
         }
 
+        .live-stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px 16px;
+            padding: 7px 12px;
+            border-bottom: 1px solid var(--panel-border);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            color: var(--text-dim);
+        }
+
+        .live-stats b {
+            color: var(--text-main);
+            font-weight: 700;
+        }
+
+        .live-stats b.pos {
+            color: var(--accent-green);
+        }
+
+        .live-stats b.neg {
+            color: var(--accent-red);
+        }
+
         #simChart {
             width: 100%;
             height: 300px;
@@ -687,6 +711,16 @@
         </label>
         <label>Период
             <select id="inpPeriod" title="Колко назад и с каква свещ се тегли историята"></select>
+        </label>
+        <label>Скорост
+            <select id="inpSpeed" title="Скорост на възпроизвеждане (свещи в секунда)">
+                <option value="0">Мгновено</option>
+                <option value="250">Много бързо</option>
+                <option value="100">Бързо</option>
+                <option value="50" selected>Нормално</option>
+                <option value="25">Бавно</option>
+                <option value="10">Много бавно</option>
+            </select>
         </label>
         <label class="cal-label">Обърната посока
             <span class="cal-controls">
@@ -752,6 +786,7 @@
                 <span><i class="legend-dot" style="background:var(--accent-cyan)"></i>● затваряне (печалба/загуба)</span>
             </span>
         </div>
+        <div class="live-stats" id="liveStats"></div>
         <div id="simChart"></div>
     </section>
 
@@ -828,6 +863,11 @@
             document.getElementById('inpDateTo').value = dateStr(dTo);
         }
 
+        function intervalSecs(iv) {
+            const map = { '1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400 };
+            return map[iv] || 300;
+        }
+
         // Бързи дати: задават периода спрямо последната налична свещ и пускат симулация.
         // Пресетът се избира така, че свалените свещи да покриват целия период.
         function quickRange(kind) {
@@ -879,8 +919,14 @@
         let simChart = null;
         let simCandleSeries = null;
         let tradeMarkers = [];
+        let simChartCandles = [];
+        let markersDirty = false;
 
-        function renderSimChart(candles, markers) {
+        function sortedMarkers() {
+            return tradeMarkers.slice().sort((a, b) => a.time - b.time);
+        }
+
+        function renderSimChart(candles, markers, fit) {
             const section = document.getElementById('chartSection');
             const container = document.getElementById('simChart');
             if (!section || !container || !candles || !candles.length || typeof LightweightCharts === 'undefined') return;
@@ -926,12 +972,54 @@
                 time: c.time, open: c.open, high: c.high, low: c.low, close: c.close
             })));
 
-            const sorted = (markers || []).slice().sort((a, b) => a.time - b.time);
-            simCandleSeries.setMarkers(sorted);
-            simChart.timeScale().fitContent();
+            simCandleSeries.setMarkers(sortedMarkers());
+            if (fit !== false) simChart.timeScale().fitContent();
             setTimeout(() => {
                 if (container.clientWidth) simChart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
             }, 0);
+        }
+
+        // Подготвя графиката за възпроизвеждане на живо: показва я и позиционира
+        // изгледа в началото на периода, без да показва бъдещите свещи.
+        function prepareSimChart(candles) {
+            simChartCandles = candles || [];
+            tradeMarkers = [];
+            markersDirty = false;
+            renderSimChart(simChartCandles, [], false);
+            if (simChart && simChartCandles.length) {
+                const start = Math.min(60, simChartCandles.length - 1);
+                simChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, start - 80), to: start + 2 });
+            }
+        }
+
+        function getPlaybackCps() {
+            const el = document.getElementById('inpSpeed');
+            return el ? (parseInt(el.value, 10) || 0) : 0;
+        }
+
+        // Един кадър на живо: мести изгледа, рисува новите маркери и обновява статистиките.
+        function liveTick(i, equity, legs, tradeCount) {
+            const n = simChartCandles.length;
+            const c = simChartCandles[i];
+            let floatPnl = 0;
+            if (c) for (const p of (legs || [])) {
+                floatPnl += p.dir === 'BUY' ? (c.close - p.entry) * p.units : (p.entry - c.close) * p.units;
+            }
+            if (simChart) {
+                simChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, i - 140), to: i + 3 });
+                if (markersDirty) { simCandleSeries.setMarkers(sortedMarkers()); markersDirty = false; }
+            }
+            const el = document.getElementById('liveStats');
+            if (el) {
+                el.innerHTML =
+                    `<span>Баланс: <b>${equity.toFixed(2)} €</b></span>` +
+                    `<span>Плаващ: <b class="${floatPnl >= 0 ? 'pos' : 'neg'}">${(floatPnl >= 0 ? '+' : '') + floatPnl.toFixed(2)} €</b></span>` +
+                    `<span>Общо: <b>${(equity + floatPnl).toFixed(2)} €</b></span>` +
+                    `<span>Сделки: <b>${tradeCount}</b></span>` +
+                    `<span>Отворени: <b>${(legs || []).length}</b></span>` +
+                    (c ? `<span>${fmtTime(c.time)} · <b>${fmt(c.close)}</b></span>` : '');
+            }
+            setProgress(Math.round(((i - 30) / Math.max(1, n - 30)) * 100), `Свещ ${i}/${n} — ${tradeCount} сделки`);
         }
 
         function toggleDates() {
@@ -1123,6 +1211,8 @@
             let legs = [];
             const n = candles.length;
             tradeMarkers = [];
+            markersDirty = false;
+            simChartCandles = candles;
 
             for (let i = 30; i < n; i++) {
                 if (cancelFlag) return;
@@ -1160,6 +1250,7 @@
                                 shape: 'circle',
                                 text: reason + (pnl >= 0 ? ' +' : ' ') + pnl.toFixed(2) + '€'
                             });
+                            markersDirty = true;
                         } else {
                             stillOpen.push(pos);
                         }
@@ -1234,6 +1325,7 @@
                                             shape: dir === 'BUY' ? 'arrowUp' : 'arrowDown',
                                             text: dir
                                         });
+                                        markersDirty = true;
                                     }
                                 }
                             }
@@ -1243,9 +1335,18 @@
 
                 if (legs.length) updateFloatPos(legs, candles[i]);
 
-                if (i % 20 === 0) {
-                    const pct = Math.round(((i - 30) / (n - 30)) * 100);
-                    setProgress(pct, `Обработка на свещ ${i}/${n} — ${tradeCount} сделки`);
+                // Възпроизвеждане на живо: мести графиката, рисува маркерите и обновява баланса.
+                const cps = getPlaybackCps();
+                if (cps > 0) {
+                    const delay = 1000 / cps;
+                    const paintEvery = delay >= 16 ? 1 : Math.max(1, Math.ceil(16 / delay));
+                    if (((i - 30) % paintEvery) === 0 || i === n - 1) {
+                        liveTick(i, equity, legs, tradeCount);
+                        const wait = delay * paintEvery;
+                        if (wait > 0) await sleep(wait);
+                    }
+                } else if (i % 50 === 0) {
+                    setProgress(Math.round(((i - 30) / (n - 30)) * 100), `Обработка на свещ ${i}/${n} — ${tradeCount} сделки`);
                     await sleep(0);
                 }
             }
@@ -1267,6 +1368,7 @@
                         shape: 'circle',
                         text: 'Край' + (pnl >= 0 ? ' +' : ' ') + pnl.toFixed(2) + '€'
                     });
+                    markersDirty = true;
                 }
                 legs = [];
                 document.getElementById('currentPos').style.display = 'none';
@@ -1287,7 +1389,19 @@
             const P = readParams();
             const preset = periodConfigs[activePeriod];
             const interval = preset ? preset.interval : '5m';
-            const limit = preset ? preset.limit : 1000;
+            let limit = preset ? preset.limit : 1000;
+            // Ако е зададен точен период, теглим достатъчно свещи, за да го покрием на този интервал.
+            {
+                const useDates = document.getElementById('inpUseDates').checked;
+                const dvFrom = document.getElementById('inpDateFrom').value;
+                const dvTo = document.getElementById('inpDateTo').value;
+                if (useDates && dvFrom && dvTo) {
+                    const fromS = timeToLocal(new Date(dvFrom + 'T00:00:00').getTime() / 1000);
+                    const toS = timeToLocal(new Date(dvTo + 'T23:59:59').getTime() / 1000);
+                    const need = Math.ceil((toS - fromS) / intervalSecs(interval)) + 60;
+                    if (need > limit) limit = Math.min(10000, need);
+                }
+            }
 
             document.getElementById('ordersList').innerHTML = '';
             document.getElementById('summary').innerHTML = '';
@@ -1330,6 +1444,7 @@
                 const atrSeries = computeATR(simCandles, 14);
                 setProgress(15, 'Стартиране на търговската симулация...');
                 await sleep(30);
+                if (getPlaybackCps() > 0) prepareSimChart(simCandles);
                 await simulate(simCandles, atrSeries, probs, P);
                 if (!cancelFlag) renderSimChart(simCandles, tradeMarkers);
             } catch (e) {
