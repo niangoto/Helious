@@ -84,6 +84,79 @@
             color: var(--accent-cyan);
             border-color: rgba(0, 240, 255, 0.3);
             font-family: 'JetBrains Mono', monospace;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .badge.sym:hover {
+            background: rgba(0, 240, 255, 0.12);
+        }
+
+        .sym-picker {
+            position: relative;
+        }
+
+        .sym-search {
+            position: absolute;
+            top: calc(100% + 6px);
+            left: 0;
+            z-index: 100;
+            width: 280px;
+            background: #0b1018;
+            border: 1px solid var(--accent-cyan);
+            border-radius: 8px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+            overflow: hidden;
+        }
+
+        .sym-search input {
+            width: 100%;
+            box-sizing: border-box;
+            background: rgba(255, 255, 255, 0.04);
+            border: none;
+            border-bottom: 1px solid var(--panel-border);
+            color: var(--text-main);
+            padding: 9px 11px;
+            font-size: 13px;
+            font-family: 'JetBrains Mono', monospace;
+            outline: none;
+        }
+
+        .sym-results {
+            max-height: 240px;
+            overflow-y: auto;
+        }
+
+        .sym-item {
+            padding: 7px 11px;
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-main);
+            cursor: pointer;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+            display: flex;
+            justify-content: space-between;
+            gap: 8px;
+        }
+
+        .sym-item:hover {
+            background: rgba(0, 240, 255, 0.1);
+            color: var(--accent-cyan);
+        }
+
+        .sym-item span {
+            color: var(--text-dim);
+            font-size: 10px;
+        }
+
+        .sym-item.dim {
+            color: var(--text-dim);
+            cursor: default;
+        }
+
+        .sym-item.dim:hover {
+            background: none;
+            color: var(--text-dim);
         }
 
         .hdr-actions {
@@ -689,7 +762,15 @@
     <header>
         <div class="hm-logo">☿ ХЕРМЕС</div>
         <div class="hm-badges">
-            <span class="badge sym" id="hSymbol">---</span>
+            <div class="sym-picker">
+                <span class="badge sym" id="hSymbol" onclick="toggleSymbolSearch()" title="Смени актива">---</span>
+                <div class="sym-search" id="symSearch" style="display:none">
+                    <input type="text" id="symSearchInput" placeholder="Търси актив..." autocomplete="off"
+                        oninput="filterSymbols(this.value)"
+                        onkeydown="if(event.key==='Enter'){event.preventDefault();selectTypedSymbol();}">
+                    <div class="sym-results" id="symResults"></div>
+                </div>
+            </div>
             <span class="badge" id="hModelBadge">---</span>
         </div>
         <div class="hdr-actions">
@@ -918,6 +999,74 @@
             });
         }
 
+        // ── Смяна на актива чрез търсене (клик върху баджа с името горе) ──
+        const HERMES_DEFAULT_SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'XAUUSD', 'WTI', 'BRENT', 'DAX', 'NDX', 'SPX', 'DJI', 'CAC', 'UK100', 'NI225'];
+        let symSearchTimer = null;
+
+        function toggleSymbolSearch(force) {
+            const box = document.getElementById('symSearch');
+            const input = document.getElementById('symSearchInput');
+            if (!box || !input) return;
+            const show = (typeof force === 'boolean') ? force : box.style.display === 'none';
+            box.style.display = show ? 'block' : 'none';
+            if (show) {
+                input.value = '';
+                filterSymbols('');
+                input.focus();
+            }
+        }
+
+        function filterSymbols(q) {
+            const results = document.getElementById('symResults');
+            if (!results) return;
+            const query = (q || '').toUpperCase().trim();
+            if (symSearchTimer) clearTimeout(symSearchTimer);
+            symSearchTimer = setTimeout(async () => {
+                if (query.length < 1) {
+                    results.innerHTML = HERMES_DEFAULT_SYMBOLS.map(s => `<div class="sym-item" onclick="selectHermesSymbol('${s}')">${s}<span></span></div>`).join('');
+                    return;
+                }
+                const manual = `<div class="sym-item" onclick="selectHermesSymbol('${query.replace(/'/g, '')}')">Използвай „${query}“<span>ръчно</span></div>`;
+                try {
+                    const resp = await fetch(`/symbols?query=${encodeURIComponent(query)}`).then(r => r.json());
+                    const list = Array.isArray(resp) ? resp : [];
+                    results.innerHTML = list.length
+                        ? list.slice(0, 25).map(s => `<div class="sym-item" onclick="selectHermesSymbol('${String(s.canonical).replace(/'/g, '')}')">${s.canonical}<span>${s.alias && s.alias !== s.canonical ? s.alias : ''}</span></div>`).join('')
+                        : manual;
+                } catch (e) {
+                    results.innerHTML = manual;
+                }
+            }, 150);
+        }
+
+        function selectTypedSymbol() {
+            const input = document.getElementById('symSearchInput');
+            const v = ((input && input.value) || '').toUpperCase().trim();
+            if (v) selectHermesSymbol(v);
+        }
+
+        function selectHermesSymbol(sym) {
+            if (!sym) return;
+            currentSymbol = sym;
+            const badge = document.getElementById('hSymbol');
+            if (badge) badge.textContent = sym;
+            toggleSymbolSearch(false);
+            // Ако в момента тече симулация — спираме я и пускаме нова за новия актив.
+            if (running) {
+                cancelFlag = true;
+                const wait = setInterval(() => {
+                    if (!running) { clearInterval(wait); runSimulation(); }
+                }, 100);
+            } else {
+                runSimulation();
+            }
+        }
+
+        document.addEventListener('click', (e) => {
+            const picker = document.querySelector('.sym-picker');
+            if (picker && !e.target.closest('.sym-picker')) toggleSymbolSearch(false);
+        });
+
         // Графика след симулацията: всички отваряния/затваряния се маркират на свещите.
         let simChart = null;
         let simCandleSeries = null;
@@ -1027,7 +1176,7 @@
                     `<span>Общо: <b>${total.toFixed(2)} €</b></span>` +
                     `<span>Сделки: <b>${tradeCount}</b></span>` +
                     `<span>Отворени: <b>${(legs || []).length}</b></span>` +
-                    (hasOpen ? `<span>Обем: <b>${units.toFixed(4)}</b></span><span>Маржин: <b>${margin.toFixed(2)} €</b></span><span>Нотионал: <b>${notional.toFixed(2)} €</b></span>` : '') +
+                    (hasOpen ? `<span>Обем: <b>${units.toFixed(4)}</b></span><span>Маржин: <b>${margin.toFixed(2)} €</b></span><span>Нотионал: <b>${notional.toFixed(2)} €</b></span>` : `<span>Обем: <b>—</b></span><span>Маржин: <b>—</b></span><span>Нотионал: <b>—</b></span>`) +
                     (c ? `<span>${fmtTime(c.time)} · <b>${fmt(c.close)}</b></span>` : '');
             }
             setProgress(Math.round(((i - 30) / Math.max(1, n - 30)) * 100), `Свещ ${i}/${n} — ${tradeCount} сделки`);
@@ -1164,39 +1313,49 @@
             listEl.prepend(row);
         }
 
-        function renderCurrentPos(legs, equity) {
+        // Панел „Отворени позиции“: стои постоянно видим (не мига при отваряне/
+        // затваряне). Когато няма позиция, показва празни (—) числови стойности.
+        let posPanelKey = null;
+        function updatePositionsPanel(legs, c) {
             const el = document.getElementById('currentPos');
-            el.style.display = 'block';
-            const totalMargin = legs.reduce((s, p) => s + p.margin, 0);
-            const legRow = (pos) => `
-                <div class="cp-leg">
-                    <b class="${pos.dir === 'BUY' ? 'pos' : 'neg'}">${pos.dir === 'BUY' ? 'BUY' : 'SELL'}</b>
-                    <span>Обем ${pos.units.toFixed(4)}</span>
-                    <span>Вход ${fmt(pos.entry)}</span>
-                    <span>TP ${fmt(pos.tp)}</span>
-                    <span>SL ${fmt(pos.sl)}</span>
-                    <span>Вер. ${pos.prob.toFixed(1)}%</span>
-                </div>
-            `;
-            el.innerHTML = `
-                <div class="cp-head">Отворени позиции — зает маржин: ${totalMargin.toFixed(2)} €</div>
-                <div class="cp-grid">
-                    ${legs.map(legRow).join('')}
-                    <span>Риск (α): ${legs[0].alpha.toFixed(2)}</span>
-                    <span id="cpFloat">Плаващ P/L: ---</span>
-                </div>
-            `;
-        }
-
-        function updateFloatPos(legs, c) {
-            const el = document.getElementById('cpFloat');
             if (!el) return;
-            let floatPnl = 0;
-            for (const pos of legs) {
-                floatPnl += pos.dir === 'BUY' ? (c.close - pos.entry) * pos.units : (pos.entry - c.close) * pos.units;
+            if (el.style.display !== 'block') el.style.display = 'block';
+            const open = legs || [];
+            const hasOpen = open.length > 0;
+            const key = open.map(p => p.openIdx).join(',');
+            if (key !== posPanelKey) {
+                posPanelKey = key;
+                const totalMargin = open.reduce((s, p) => s + p.margin, 0);
+                const legRow = (pos) => `
+                    <div class="cp-leg">
+                        <b class="${pos.dir === 'BUY' ? 'pos' : 'neg'}">${pos.dir === 'BUY' ? 'BUY' : 'SELL'}</b>
+                        <span>Обем ${pos.units.toFixed(4)}</span>
+                        <span>Вход ${fmt(pos.entry)}</span>
+                        <span>TP ${fmt(pos.tp)}</span>
+                        <span>SL ${fmt(pos.sl)}</span>
+                        <span>Вер. ${pos.prob.toFixed(1)}%</span>
+                    </div>
+                `;
+                el.innerHTML = `
+                    <div class="cp-head">Отворени позиции — зает маржин: ${hasOpen ? totalMargin.toFixed(2) + ' €' : '—'}</div>
+                    <div class="cp-grid">
+                        ${hasOpen ? open.map(legRow).join('') : '<span>Обем —</span><span>Вход —</span><span>TP —</span><span>SL —</span><span>Вер. —</span>'}
+                        <span>Риск (α): ${hasOpen ? open[0].alpha.toFixed(2) : '—'}</span>
+                        <span id="cpFloat">Плаващ P/L: —</span>
+                    </div>
+                `;
             }
-            el.textContent = 'Плаващ P/L: ' + (floatPnl >= 0 ? '+' : '') + floatPnl.toFixed(2) + ' €';
-            el.style.color = floatPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+            const fEl = document.getElementById('cpFloat');
+            if (!fEl) return;
+            if (!hasOpen) {
+                fEl.textContent = 'Плаващ P/L: —';
+                fEl.style.color = '';
+                return;
+            }
+            let floatPnl = 0;
+            if (c) for (const pos of open) floatPnl += pos.dir === 'BUY' ? (c.close - pos.entry) * pos.units : (pos.entry - c.close) * pos.units;
+            fEl.textContent = 'Плаващ P/L: ' + (floatPnl >= 0 ? '+' : '') + floatPnl.toFixed(2) + ' €';
+            fEl.style.color = floatPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
         }
 
         function renderSummary(P, equity, trades, wins, maxDD) {
@@ -1268,7 +1427,6 @@
                         }
                     }
                     legs = stillOpen;
-                    if (!legs.length) document.getElementById('currentPos').style.display = 'none';
                 }
 
                 if (!legs.length && i < n - 1) {
@@ -1329,7 +1487,6 @@
                                             openTime: t,
                                             alpha
                                         }];
-                                        renderCurrentPos(legs, equity);
                                         tradeMarkers.push({
                                             time: t,
                                             position: dir === 'BUY' ? 'belowBar' : 'aboveBar',
@@ -1345,7 +1502,7 @@
                     }
                 }
 
-                if (legs.length) updateFloatPos(legs, candles[i]);
+                updatePositionsPanel(legs, candles[i]);
 
                 // Възпроизвеждане на живо: мести графиката, рисува маркерите и обновява баланса.
                 const cps = getPlaybackCps();
@@ -1383,7 +1540,7 @@
                     markersDirty = true;
                 }
                 legs = [];
-                document.getElementById('currentPos').style.display = 'none';
+                updatePositionsPanel([], c);
             }
 
             renderSummary(P, equity, tradeCount, winsCount, maxDD);
@@ -1417,7 +1574,8 @@
 
             document.getElementById('ordersList').innerHTML = '';
             document.getElementById('summary').innerHTML = '';
-            document.getElementById('currentPos').style.display = 'none';
+            posPanelKey = null;
+            updatePositionsPanel([], null);
             document.getElementById('chartSection').style.display = 'none';
             document.getElementById('btnStart').disabled = true;
             document.getElementById('btnStart').textContent = '⏳ Работи...';
