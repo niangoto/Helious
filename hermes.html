@@ -743,6 +743,30 @@
             height: 300px;
         }
 
+        .pnl-wrap {
+            position: relative;
+            height: 130px;
+            border-top: 1px solid var(--panel-border);
+        }
+
+        .pnl-wrap canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        .pnl-label {
+            position: absolute;
+            top: 4px;
+            left: 8px;
+            font-size: 9px;
+            font-weight: 700;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            pointer-events: none;
+        }
+
         @media (max-width: 900px) {
             .orders-head,
             .order-row {
@@ -872,6 +896,10 @@
         </div>
         <div class="live-stats" id="liveStats"></div>
         <div id="simChart"></div>
+        <div class="pnl-wrap" id="simPnlWrap">
+            <canvas id="simPnlCanvas"></canvas>
+            <span class="pnl-label" id="simPnlLabel">Печалба/Загуба %</span>
+        </div>
     </section>
 
     <div class="progress-wrap">
@@ -1072,6 +1100,7 @@
         let simChartCandles = [];
         let markersDirty = false;
         let simBudget = 1000;
+        let equityPct = [];
 
         function sortedMarkers() {
             return tradeMarkers.slice().sort((a, b) => a.time - b.time);
@@ -1115,8 +1144,10 @@
                 const ro = new ResizeObserver(() => {
                     if (!container.clientWidth) return;
                     simChart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
+                    drawPnlChart();
                 });
                 ro.observe(container);
+                try { simChart.timeScale().subscribeVisibleLogicalRangeChange(() => drawPnlChart()); } catch (e) {}
             }
 
             simCandleSeries.setData(candles.map(c => ({
@@ -1178,6 +1209,101 @@
                     (c ? `<span>${fmtTime(c.time)} · <b>${fmt(c.close)}</b></span>` : '');
             }
             setProgress(Math.round(((i - 30) / Math.max(1, n - 30)) * 100), `Свещ ${i}/${n} — ${tradeCount} сделки`);
+            drawPnlChart(i);
+        }
+
+        // Закръгляне нагоре към „хубаво“ число за оста (%): 0.5, 1, 2, 5, 10, 20, 50...
+        function niceScale(v) {
+            if (!(v > 0)) return 1;
+            const pow = Math.pow(10, Math.floor(Math.log10(v)));
+            const n = v / pow;
+            const step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
+            return step * pow;
+        }
+
+        // Паралелна графика под свещите: промяната на сметката в % спрямо началото,
+        // с център 0 и автоматично осъразмеряваща се рамка. Позиционира се по времевата
+        // ос на главната графика, така че се движи/мащабира заедно с нея.
+        function drawPnlChart(upto) {
+            const cvs = document.getElementById('simPnlCanvas');
+            if (!cvs || !simChart || !simChartCandles.length) return;
+            const w = cvs.clientWidth, h = cvs.clientHeight;
+            if (w <= 0 || h <= 0) return;
+            const dpr = window.devicePixelRatio || 1;
+            cvs.width = w * dpr;
+            cvs.height = h * dpr;
+            const ctx = cvs.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, w, h);
+
+            const end = (typeof upto === 'number') ? Math.min(upto, simChartCandles.length - 1) : simChartCandles.length - 1;
+            const pts = [];
+            let maxAbs = 0;
+            for (let i = 30; i <= end; i++) {
+                const v = equityPct[i];
+                if (v == null) continue;
+                const x = simChart.timeScale().timeToCoordinate(simChartCandles[i].time);
+                if (x == null) continue;
+                if (x < -20) continue;
+                if (x > w + 20) break;
+                pts.push({ x, v });
+                if (Math.abs(v) > maxAbs) maxAbs = Math.abs(v);
+            }
+            if (pts.length < 2) return;
+
+            const scale = niceScale(maxAbs || 1);
+            const midY = h / 2;
+            const halfH = h / 2 - 6;
+            const toY = (v) => midY - (v / scale) * halfH;
+
+            // зони: над 0 зелено, под 0 червено
+            ctx.fillStyle = 'rgba(0,255,102,0.05)';
+            ctx.fillRect(0, 0, w, midY);
+            ctx.fillStyle = 'rgba(255,0,85,0.05)';
+            ctx.fillRect(0, midY, w, h - midY);
+
+            // пунктирани линии на ±scale/2 и ±scale
+            ctx.strokeStyle = 'rgba(255,255,255,0.06)';
+            ctx.setLineDash([2, 3]);
+            [scale, scale / 2, -scale / 2, -scale].forEach(v => {
+                const y = toY(v);
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(w, y); ctx.stroke();
+            });
+            ctx.setLineDash([]);
+
+            // нулева линия (център)
+            ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+            ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(w, midY); ctx.stroke();
+
+            // линия на промяната, оцветена по знака спрямо 0
+            ctx.lineWidth = 1.6;
+            for (let i = 1; i < pts.length; i++) {
+                const a = pts[i - 1], b = pts[i];
+                ctx.beginPath();
+                ctx.moveTo(a.x, toY(a.v));
+                ctx.lineTo(b.x, toY(b.v));
+                ctx.strokeStyle = b.v >= 0 ? 'rgba(0,255,102,0.9)' : 'rgba(255,0,85,0.9)';
+                ctx.stroke();
+            }
+
+            // етикети на оста (%)
+            ctx.font = '9px JetBrains Mono';
+            ctx.textBaseline = 'middle';
+            const lab = (v) => (v >= 0 ? '+' : '') + v.toFixed(v < 1 ? 2 : 0) + '%';
+            ctx.fillStyle = 'rgba(255,255,255,0.6)';
+            ctx.textAlign = 'right';
+            ctx.fillText(lab(scale), w - 4, toY(scale));
+            ctx.fillText(lab(scale / 2), w - 4, toY(scale / 2));
+            ctx.fillStyle = 'rgba(255,255,255,0.85)';
+            ctx.fillText('0%', w - 4, midY);
+            ctx.fillStyle = 'rgba(255,255,255,0.6)';
+            ctx.fillText(lab(-scale / 2), w - 4, toY(-scale / 2));
+            ctx.fillText(lab(-scale), w - 4, toY(-scale));
+
+            // текуща стойност горе вляво
+            const lastV = pts[pts.length - 1].v;
+            const lbl = document.getElementById('simPnlLabel');
+            if (lbl) lbl.textContent = 'Печалба/Загуба %: ' + (lastV >= 0 ? '+' : '') + lastV.toFixed(2) + '%';
         }
 
         function toggleDates() {
@@ -1382,6 +1508,7 @@
             markersDirty = false;
             simChartCandles = candles;
             simBudget = P.budget;
+            equityPct = new Array(n).fill(null);
 
             for (let i = 30; i < n; i++) {
                 if (cancelFlag) return;
@@ -1502,6 +1629,14 @@
 
                 updatePositionsPanel(legs, candles[i]);
 
+                // Точка от кривата на сметката (% спрямо началото) за текущата свещ.
+                {
+                    let fl = 0;
+                    const cc = candles[i];
+                    if (cc) for (const p of legs) fl += p.dir === 'BUY' ? (cc.close - p.entry) * p.units : (p.entry - cc.close) * p.units;
+                    equityPct[i] = simBudget > 0 ? ((equity + fl) - simBudget) / simBudget * 100 : 0;
+                }
+
                 // Възпроизвеждане на живо: мести графиката, рисува маркерите и обновява баланса.
                 const cps = getPlaybackCps();
                 if (cps > 0) {
@@ -1612,7 +1747,10 @@
                 await sleep(30);
                 if (getPlaybackCps() > 0) prepareSimChart(simCandles);
                 await simulate(simCandles, atrSeries, probs, P);
-                if (!cancelFlag) renderSimChart(simCandles, tradeMarkers);
+                if (!cancelFlag) {
+                    renderSimChart(simCandles, tradeMarkers);
+                    drawPnlChart();
+                }
             } catch (e) {
                 console.error(e);
                 setProgress(0, 'Грешка: ' + e.message);
