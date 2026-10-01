@@ -717,9 +717,12 @@
                 <option value="0">Мгновено</option>
                 <option value="250">Много бързо</option>
                 <option value="100">Бързо</option>
-                <option value="50" selected>Нормално</option>
+                <option value="50">Нормално</option>
                 <option value="25">Бавно</option>
-                <option value="10">Много бавно</option>
+                <option value="10" selected>Много бавно</option>
+                <option value="5">Много бавно+</option>
+                <option value="2">2/сек</option>
+                <option value="1">1/сек</option>
             </select>
         </label>
         <label class="cal-label">Обърната посока
@@ -921,6 +924,7 @@
         let tradeMarkers = [];
         let simChartCandles = [];
         let markersDirty = false;
+        let simBudget = 1000;
 
         function sortedMarkers() {
             return tradeMarkers.slice().sort((a, b) => a.time - b.time);
@@ -1011,12 +1015,19 @@
             }
             const el = document.getElementById('liveStats');
             if (el) {
+                const hasOpen = !!(legs && legs.length);
+                const total = equity + floatPnl;
+                const change = total - simBudget;
+                const changePct = simBudget > 0 ? (change / simBudget) * 100 : 0;
+                let margin = 0, notional = 0, units = 0;
+                if (c) for (const p of legs) { margin += p.margin; units += p.units; notional += p.units * c.close; }
                 el.innerHTML =
+                    `<span>От начало: <b class="${change >= 0 ? 'pos' : 'neg'}">${(change >= 0 ? '+' : '') + change.toFixed(2)} € (${(changePct >= 0 ? '+' : '') + changePct.toFixed(2)}%)</b></span>` +
                     `<span>Баланс: <b>${equity.toFixed(2)} €</b></span>` +
-                    `<span>Плаващ: <b class="${floatPnl >= 0 ? 'pos' : 'neg'}">${(floatPnl >= 0 ? '+' : '') + floatPnl.toFixed(2)} €</b></span>` +
-                    `<span>Общо: <b>${(equity + floatPnl).toFixed(2)} €</b></span>` +
+                    `<span>Общо: <b>${total.toFixed(2)} €</b></span>` +
                     `<span>Сделки: <b>${tradeCount}</b></span>` +
                     `<span>Отворени: <b>${(legs || []).length}</b></span>` +
+                    (hasOpen ? `<span>Обем: <b>${units.toFixed(4)}</b></span><span>Маржин: <b>${margin.toFixed(2)} €</b></span><span>Нотионал: <b>${notional.toFixed(2)} €</b></span>` : '') +
                     (c ? `<span>${fmtTime(c.time)} · <b>${fmt(c.close)}</b></span>` : '');
             }
             setProgress(Math.round(((i - 30) / Math.max(1, n - 30)) * 100), `Свещ ${i}/${n} — ${tradeCount} сделки`);
@@ -1213,6 +1224,7 @@
             tradeMarkers = [];
             markersDirty = false;
             simChartCandles = candles;
+            simBudget = P.budget;
 
             for (let i = 30; i < n; i++) {
                 if (cancelFlag) return;
