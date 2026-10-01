@@ -790,8 +790,8 @@
         <label>Риск (α)
             <input type="number" id="inpAlpha" value="1.0" min="0.1" step="0.1" title="Рисков апетит: 0.1–0.5 консервативен · 1.0 умерен · >1.0 агресивен">
         </label>
-        <label>Период
-            <select id="inpPeriod" title="Колко назад и с каква свещ се тегли историята"></select>
+        <label>Интервал
+            <select id="inpInterval" title="Интервал на свещта (таймфрейм)"></select>
         </label>
         <label>Скорост
             <select id="inpSpeed" title="Скорост на възпроизвеждане (свещи в секунда)">
@@ -924,8 +924,6 @@
             '90d': { interval: '1d', limit: 500 }
         };
 
-        const periodLabels = { '5m': '5м', '15m': '15м', '30m': '30м', '1h': '1ч', '4h': '4ч', '12h': '12ч', '24h': '1Д', '7d': '7Д', '30d': '30Д', '90d': '90Д' };
-
         const intervalLabels = { '1m': '1м', '5m': '5м', '15m': '15м', '30m': '30м', '1h': '1ч', '4h': '4ч', '1d': '1Д' };
 
         const modelNames = ['Историческа', 'Логистична', 'Марковска', 'Очаквана стойност', 'Уейвлет', 'Средна вероятност'];
@@ -953,12 +951,12 @@
         }
 
         // Бързи дати: задават периода спрямо последната налична свещ и пускат симулация.
-        // Пресетът се избира така, че свалените свещи да покриват целия период.
+        // Избира се и подходящ интервал на свещта, за да има достатъчно свещи за периода.
         function quickRange(kind) {
-            const presetFor = { today: '24h', '3d': '24h', '7d': '7d', '30d': '30d', all: null }[kind];
-            if (presetFor) {
-                const pSel = document.getElementById('inpPeriod');
-                if (pSel) pSel.value = presetFor;
+            const intervalFor = { today: '5m', '3d': '15m', '7d': '1h', '30d': '4h', all: null }[kind];
+            if (intervalFor) {
+                const iSel = document.getElementById('inpInterval');
+                if (iSel) iSel.value = intervalFor;
             }
             document.getElementById('inpUseDates').checked = true;
             toggleDates();
@@ -1552,13 +1550,11 @@
             running = true;
             cancelFlag = false;
 
-            activePeriod = document.getElementById('inpPeriod').value;
             currentModel = parseInt(document.getElementById('inpModel').value, 10);
 
             const P = readParams();
-            const preset = periodConfigs[activePeriod];
-            const interval = preset ? preset.interval : '5m';
-            let limit = preset ? preset.limit : 1000;
+            const interval = document.getElementById('inpInterval').value || '5m';
+            let limit = 1000;
             // Ако е зададен точен период, теглим достатъчно свещи, за да го покрием на този интервал.
             {
                 const useDates = document.getElementById('inpUseDates').checked;
@@ -1636,21 +1632,16 @@
         function initUI() {
             document.getElementById('hSymbol').textContent = currentSymbol;
 
-            const pSel = document.getElementById('inpPeriod');
-            Object.keys(periodConfigs).forEach(k => {
+            // Интервал на свещта (таймфрейм). Началната стойност идва от периода в URL.
+            const iSel = document.getElementById('inpInterval');
+            Object.keys(intervalLabels).forEach(iv => {
                 const opt = document.createElement('option');
-                opt.value = k;
-                const iv = intervalLabels[periodConfigs[k].interval] || periodConfigs[k].interval;
-                opt.textContent = (periodLabels[k] || k) + ' · ' + iv;
-                pSel.appendChild(opt);
+                opt.value = iv;
+                opt.textContent = intervalLabels[iv];
+                iSel.appendChild(opt);
             });
-            pSel.value = periodConfigs[activePeriod] ? activePeriod : '24h';
-            // Смяна на пресета → периодът се преизчислява от новите данни (изчистваме ръчните дати).
-            pSel.addEventListener('change', () => {
-                datesTouched = false;
-                document.getElementById('inpDateFrom').value = '';
-                document.getElementById('inpDateTo').value = '';
-            });
+            const cfg = periodConfigs[activePeriod];
+            iSel.value = (cfg && intervalLabels[cfg.interval]) ? cfg.interval : '5m';
 
             const mSel = document.getElementById('inpModel');
             modelNames.forEach((name, idx) => {
