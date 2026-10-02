@@ -1200,17 +1200,13 @@
             }, 0);
         }
 
-        // Подготвя графиката за възпроизвеждане на живо: показва я и позиционира
-        // изгледа в началото на периода, без да показва бъдещите свещи.
+        // Подготвя графиката за възпроизвеждане на живо: показва целия календарен
+        // обхват наведнъж (fitContent), а напредъкът се вижда по новите маркери.
         function prepareSimChart(candles) {
             simChartCandles = candles || [];
             tradeMarkers = [];
             markersDirty = false;
-            renderSimChart(simChartCandles, [], false);
-            if (simChart && simChartCandles.length) {
-                const start = Math.min(60, simChartCandles.length - 1);
-                simChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, start - 80), to: start + 2 });
-            }
+            renderSimChart(simChartCandles, [], true);
         }
 
         function getPlaybackCps() {
@@ -1218,7 +1214,8 @@
             return el ? (parseInt(el.value, 10) || 0) : 0;
         }
 
-        // Един кадър на живо: мести изгледа, рисува новите маркери и обновява статистиките.
+        // Един кадър на живо: рисува новите маркери и обновява статистиките (изгледът
+        // остава върху целия период, така че графиката съвпада с календара).
         function liveTick(i, equity, legs, tradeCount) {
             const n = simChartCandles.length;
             const c = simChartCandles[i];
@@ -1227,7 +1224,6 @@
                 floatPnl += p.dir === 'BUY' ? (c.close - p.entry) * p.units : (p.entry - c.close) * p.units;
             }
             if (simChart) {
-                simChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, i - 140), to: i + 3 });
                 if (markersDirty) { simCandleSeries.setMarkers(sortedMarkers()); markersDirty = false; }
             }
             const el = document.getElementById('liveStats');
