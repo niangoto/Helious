@@ -1168,7 +1168,10 @@
                     timeScale: {
                         borderColor: 'rgba(255, 255, 255, 0.08)',
                         timeVisible: true,
-                        secondsVisible: false
+                        secondsVisible: false,
+                        // Позволява fitContent() да побере целия период и при хиляди свещи
+                        // (иначе default minBarSpacing 0.5px показва само последните ~1900).
+                        minBarSpacing: 0.001
                     },
                     rightPriceScale: { borderColor: 'rgba(255, 255, 255, 0.08)' },
                     crosshair: { mode: LightweightCharts.CrosshairMode.Normal }
@@ -1200,13 +1203,17 @@
             }, 0);
         }
 
-        // Подготвя графиката за възпроизвеждане на живо: показва целия календарен
-        // обхват наведнъж (fitContent), а напредъкът се вижда по новите маркери.
+        // Подготвя графиката за възпроизвеждане на живо: показва я и позиционира
+        // изгледа в началото на периода, без да показва бъдещите свещи.
         function prepareSimChart(candles) {
             simChartCandles = candles || [];
             tradeMarkers = [];
             markersDirty = false;
-            renderSimChart(simChartCandles, [], true);
+            renderSimChart(simChartCandles, [], false);
+            if (simChart && simChartCandles.length) {
+                const start = Math.min(60, simChartCandles.length - 1);
+                simChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, start - 80), to: start + 2 });
+            }
         }
 
         function getPlaybackCps() {
@@ -1214,8 +1221,7 @@
             return el ? (parseInt(el.value, 10) || 0) : 0;
         }
 
-        // Един кадър на живо: рисува новите маркери и обновява статистиките (изгледът
-        // остава върху целия период, така че графиката съвпада с календара).
+        // Един кадър на живо: мести изгледа, рисува новите маркери и обновява статистиките.
         function liveTick(i, equity, legs, tradeCount) {
             const n = simChartCandles.length;
             const c = simChartCandles[i];
@@ -1224,6 +1230,7 @@
                 floatPnl += p.dir === 'BUY' ? (c.close - p.entry) * p.units : (p.entry - c.close) * p.units;
             }
             if (simChart) {
+                simChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, i - 140), to: i + 3 });
                 if (markersDirty) { simCandleSeries.setMarkers(sortedMarkers()); markersDirty = false; }
             }
             const el = document.getElementById('liveStats');
