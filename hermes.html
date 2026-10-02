@@ -974,6 +974,9 @@
         };
 
         const intervalLabels = { '1m': '1м', '5m': '5м', '15m': '15м', '30m': '30м', '1h': '1ч', '4h': '4ч', '1d': '1Д' };
+        // Горна граница на теглените свещи (доставчикът ги пейджира). Достатъчна за
+        // напр. 1м за ~34 дни; над това периодът се скъсява (вижда се в #periodInfo).
+        const MAX_FETCH = 50000;
 
         const modelNames = ['Историческа', 'Логистична', 'Марковска', 'Очаквана стойност', 'Уейвлет', 'Средна вероятност'];
 
@@ -1034,11 +1037,27 @@
             const first = simCandles[0].time, last = simCandles[simCandles.length - 1].time;
             const days = ((last - first) / 86400).toFixed(1);
             const mismatch = realLabel !== reqLabel;
+
+            // Дали реално изтегленото покрива заявения период (иначе е скъсен).
+            let shortened = false;
+            const useDatesEl = document.getElementById('inpUseDates');
+            if (useDatesEl && useDatesEl.checked) {
+                const fv = document.getElementById('inpDateFrom').value;
+                const tv = document.getElementById('inpDateTo').value;
+                if (fv && tv) {
+                    const reqFrom = timeToLocal(new Date(fv + 'T00:00:00').getTime() / 1000);
+                    const reqTo = timeToLocal(new Date(tv + 'T23:59:59').getTime() / 1000);
+                    const tol = Math.max(86400, (realSec || 60) * 2);
+                    if (first > reqFrom + tol || last < reqTo - tol) shortened = true;
+                }
+            }
+
             el.innerHTML =
                 'Заявен интервал: <b>' + reqLabel + '</b> · ' +
                 'реален: <b class="' + (mismatch ? 'warn' : '') + '">' + realLabel + '</b> · ' +
                 'обхват: <b>' + dateStr(new Date(first * 1000)) + ' → ' + dateStr(new Date(last * 1000)) + '</b> ' +
-                '(' + days + ' дни · ' + simCandles.length + ' свещи)';
+                '(' + days + ' дни · ' + simCandles.length + ' свещи)' +
+                (shortened ? ' · <b class="warn">периодът е скъсен</b>' : '');
         }
 
         // Бързи дати: задават периода спрямо последната налична свещ и пускат симулация.
@@ -1765,7 +1784,7 @@
                     const fromS = timeToLocal(new Date(dvFrom + 'T00:00:00').getTime() / 1000);
                     const toS = timeToLocal(new Date(dvTo + 'T23:59:59').getTime() / 1000);
                     const need = Math.ceil((toS - fromS) / intervalSecs(interval)) + 60;
-                    if (need > limit) limit = Math.min(10000, need);
+                    if (need > limit) limit = Math.min(MAX_FETCH, need);
                 }
             }
 
