@@ -166,31 +166,6 @@
             flex-shrink: 0;
         }
 
-        .hermes-notice {
-            position: fixed;
-            top: 64px;
-            left: 50%;
-            transform: translateX(-50%) translateY(-12px);
-            z-index: 200;
-            max-width: 80vw;
-            padding: 9px 14px;
-            border-radius: 8px;
-            border: 1px solid rgba(255, 170, 0, 0.5);
-            background: rgba(40, 28, 8, 0.96);
-            color: #ffd27a;
-            font-size: 12px;
-            font-weight: 600;
-            text-align: center;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.25s, transform 0.25s;
-        }
-
-        .hermes-notice.show {
-            opacity: 1;
-            transform: translateX(-50%) translateY(0);
-        }
-
         .btn {
             padding: 8px 14px;
             border-radius: 7px;
@@ -575,6 +550,25 @@
             text-shadow: 0 0 6px rgba(0, 0, 0, 0.9);
         }
 
+        .period-info {
+            margin: 6px 18px 0;
+            min-height: 15px;
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+            color: var(--text-dim);
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .period-info b {
+            color: var(--accent-cyan);
+            font-weight: 600;
+        }
+
+        .period-info .warn {
+            color: #ffd27a;
+        }
+
         .orders {
             flex: 1;
             display: flex;
@@ -829,8 +823,6 @@
         </div>
     </header>
 
-    <div class="hermes-notice" id="hermesNotice"></div>
-
     <section class="controls">
         <label>Начален бюджет (€)
             <input type="number" id="inpBudget" value="1000" min="10" step="100">
@@ -934,6 +926,8 @@
         <div class="progress-text" id="progText">Готово</div>
     </div>
 
+    <div class="period-info" id="periodInfo"></div>
+
     <section class="orders">
         <div class="orders-head">
             <span>#</span>
@@ -980,7 +974,6 @@
         };
 
         const intervalLabels = { '1m': '1м', '5m': '5м', '15m': '15м', '30m': '30м', '1h': '1ч', '4h': '4ч', '1d': '1Д' };
-        const MAX_FETCH = 10000;
 
         const modelNames = ['Историческа', 'Логистична', 'Марковска', 'Очаквана стойност', 'Уейвлет', 'Средна вероятност'];
 
@@ -1006,15 +999,46 @@
             return map[iv] || 300;
         }
 
-        // Кратко съобщение (toast) при корекция на периода/интервала.
-        let hermesNoticeTimer = null;
-        function hermesNotice(msg, ms) {
-            const el = document.getElementById('hermesNotice');
-            if (!el) return;
-            el.textContent = msg;
-            el.classList.add('show');
-            clearTimeout(hermesNoticeTimer);
-            hermesNoticeTimer = setTimeout(() => el.classList.remove('show'), ms || 7000);
+        // Реалният интервал на свещите (медиана на разликите) — доставчикът може да
+        // върне друг таймфрейм от заявения (напр. fallback 15м → 1ч).
+        function detectCandleInterval(candles) {
+            if (!candles || candles.length < 2) return null;
+            const diffs = [];
+            const lim = Math.min(candles.length, 300);
+            for (let i = 1; i < lim; i++) {
+                const d = candles[i].time - candles[i - 1].time;
+                if (d > 0) diffs.push(d);
+            }
+            if (!diffs.length) return null;
+            diffs.sort((a, b) => a - b);
+            return diffs[Math.floor(diffs.length / 2)];
+        }
+
+        function intervalLabelFromSecs(sec) {
+            if (!sec || sec <= 0) return null;
+            const map = { 60: '1м', 300: '5м', 900: '15м', 1800: '30м', 3600: '1ч', 14400: '4ч', 86400: '1Д' };
+            if (map[sec]) return map[sec];
+            if (sec % 86400 === 0) return (sec / 86400) + 'Д';
+            if (sec % 3600 === 0) return (sec / 3600) + 'ч';
+            if (sec % 60 === 0) return (sec / 60) + 'м';
+            return sec + 'с';
+        }
+
+        // Показва заявения vs реалния интервал и реалния обхват на използваните свещи.
+        function showRealInterval(simCandles, requestedInterval) {
+            const el = document.getElementById('periodInfo');
+            if (!el || !simCandles || !simCandles.length) return;
+            const reqLabel = intervalLabels[requestedInterval] || requestedInterval;
+            const realSec = detectCandleInterval(simCandles);
+            const realLabel = intervalLabelFromSecs(realSec) || '—';
+            const first = simCandles[0].time, last = simCandles[simCandles.length - 1].time;
+            const days = ((last - first) / 86400).toFixed(1);
+            const mismatch = realLabel !== reqLabel;
+            el.innerHTML =
+                'Заявен интервал: <b>' + reqLabel + '</b> · ' +
+                'реален: <b class="' + (mismatch ? 'warn' : '') + '">' + realLabel + '</b> · ' +
+                'обхват: <b>' + dateStr(new Date(first * 1000)) + ' → ' + dateStr(new Date(last * 1000)) + '</b> ' +
+                '(' + days + ' дни · ' + simCandles.length + ' свещи)';
         }
 
         // Бързи дати: задават периода спрямо последната налична свещ и пускат симулация.
@@ -1730,36 +1754,25 @@
             currentModel = parseInt(document.getElementById('inpModel').value, 10);
 
             const P = readParams();
-            const useDates = document.getElementById('inpUseDates').checked;
-            let interval = document.getElementById('inpInterval').value || '5m';
+            const interval = document.getElementById('inpInterval').value || '5m';
             let limit = 1000;
-            let fromSec = null, toSec = null;
-            if (useDates) {
+            // Ако е зададен точен период, теглим достатъчно свещи, за да го покрием на този интервал.
+            {
+                const useDates = document.getElementById('inpUseDates').checked;
                 const dvFrom = document.getElementById('inpDateFrom').value;
                 const dvTo = document.getElementById('inpDateTo').value;
-                if (dvFrom && dvTo) {
-                    fromSec = timeToLocal(new Date(dvFrom + 'T00:00:00').getTime() / 1000);
-                    toSec = timeToLocal(new Date(dvTo + 'T23:59:59').getTime() / 1000);
-                    const spanSec = Math.max(0, toSec - fromSec);
-                    let need = Math.ceil(spanSec / intervalSecs(interval)) + 60;
-                    // Ако периодът е твърде дълъг за този интервал (> MAX_FETCH свещи),
-                    // автоматично избираме най-дребния интервал, който се побира.
-                    if (need > MAX_FETCH) {
-                        const candidates = ['1m', '5m', '15m', '30m', '1h', '4h', '1d'];
-                        const fit = candidates.find(iv => Math.ceil(spanSec / intervalSecs(iv)) + 60 <= MAX_FETCH);
-                        if (fit && fit !== interval) {
-                            interval = fit;
-                            document.getElementById('inpInterval').value = fit;
-                            hermesNotice('Периодът е дълъг за избрания интервал — сменен на ' + intervalLabels[fit] + '.');
-                        }
-                        need = Math.ceil(spanSec / intervalSecs(interval)) + 60;
-                    }
-                    limit = Math.min(MAX_FETCH, Math.max(1000, need));
+                if (useDates && dvFrom && dvTo) {
+                    const fromS = timeToLocal(new Date(dvFrom + 'T00:00:00').getTime() / 1000);
+                    const toS = timeToLocal(new Date(dvTo + 'T23:59:59').getTime() / 1000);
+                    const need = Math.ceil((toS - fromS) / intervalSecs(interval)) + 60;
+                    if (need > limit) limit = Math.min(10000, need);
                 }
             }
 
             document.getElementById('ordersList').innerHTML = '';
             document.getElementById('summary').innerHTML = '';
+            const periodInfoEl = document.getElementById('periodInfo');
+            if (periodInfoEl) periodInfoEl.innerHTML = 'Заявен интервал: <b>' + (intervalLabels[interval] || interval) + '</b> · зареждане на данни...';
             posPanelKey = null;
             updatePositionsPanel([], null);
             document.getElementById('chartSection').style.display = 'none';
@@ -1775,32 +1788,24 @@
 
                 // Попълване на календара с реалния обхват на данните (само ако не е пипан от потребителя)
                 if (!datesTouched && candles.length) {
-                    const aFrom = candles[0].time, aTo = candles[candles.length - 1].time;
-                    setDateInputs(new Date(aFrom * 1000), new Date(aTo * 1000));
-                    fromSec = aFrom; toSec = aTo;
-                } else if (fromSec != null && toSec != null && candles.length) {
-                    // Доставчикът може да има ограничена история → придърпваме датите към
-                    // реално наличните данни и уведомяваме, за да отговаря графиката на календара.
-                    const availFrom = candles[0].time, availTo = candles[candles.length - 1].time;
-                    if (fromSec < availFrom) {
-                        fromSec = availFrom;
-                        document.getElementById('inpDateFrom').value = dateStr(new Date(availFrom * 1000));
-                        hermesNotice('За ' + intervalLabels[interval] + ' няма по-стари данни от ' + dateStr(new Date(availFrom * 1000)) + ' — периодът е скъсен.');
-                    }
-                    if (toSec > availTo) {
-                        toSec = availTo;
-                        document.getElementById('inpDateTo').value = dateStr(new Date(availTo * 1000));
-                    }
+                    setDateInputs(new Date(candles[0].time * 1000), new Date(candles[candles.length - 1].time * 1000));
                 }
 
                 let simCandles = candles;
-                if (useDates && fromSec != null && toSec != null) {
-                    simCandles = candles.filter(c => c.time >= fromSec && c.time <= toSec);
-                    if (simCandles.length < 30) {
-                        throw new Error(`Избраният период покрива само ${simCandles.length} свещи при интервал ${intervalLabels[interval]} (нужни са минимум 30). Изберете по-дълъг период или по-дребен интервал.`);
+                if (document.getElementById('inpUseDates').checked) {
+                    const fromVal = document.getElementById('inpDateFrom').value;
+                    const toVal = document.getElementById('inpDateTo').value;
+                    if (fromVal && toVal) {
+                        const fromSec = timeToLocal(new Date(fromVal + 'T00:00:00').getTime() / 1000);
+                        const toSec = timeToLocal(new Date(toVal + 'T23:59:59').getTime() / 1000);
+                        simCandles = candles.filter(c => c.time >= fromSec && c.time <= toSec);
+                        if (simCandles.length < 30) {
+                            throw new Error(`Избраният период (${fromVal} → ${toVal}) покрива само ${simCandles.length} свещи (нужни са минимум 30). Удължете периода или изберете по-дребен времеви мащаб.`);
+                        }
                     }
                 }
 
+                showRealInterval(simCandles, interval);
                 setProgress(10, `Изчисляване на вероятностите по модела (${simCandles.length} свещи)...`);
                 await sleep(30);
                 const probs = computeModelProbSeries(simCandles, currentModel, { invert: contraFlags() });
