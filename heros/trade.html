@@ -251,7 +251,10 @@
             <div class="stats" id="stats"></div>
 
             <div class="chart-wrap">
-                <div class="tabs" id="symTabs" style="margin-bottom:8px"></div>
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">
+                    <div class="tabs" id="symTabs"></div>
+                    <span class="note" id="symSource" style="color:var(--text-dim)"></span>
+                </div>
                 <div id="chart"></div>
                 <canvas id="pnlCanvas"></canvas>
             </div>
@@ -380,12 +383,17 @@
             lastState = state;
             setStatus(state.status);
             const s = state.stats || {};
+            const open = state.openPositions || [];
+            const usedMargin = open.reduce((a, p) => a + (p.margin || 0), 0);
+            const notional = open.reduce((a, p) => a + (p.notional || 0), 0);
             const cards = [
                 ['Плаваща P/L', euro(s.floating), cls(s.floating)],
                 ['Обща P/L', euro(s.totalPnl) + ' (' + (s.totalPct >= 0 ? '+' : '') + fmt(s.totalPct) + '%)', cls(s.totalPnl)],
                 ['Баланс', fmt(s.balance) + ' €', ''],
                 ['Капитал', fmt(s.equity) + ' €', ''],
                 ['Отворени сега', String(s.openCount), ''],
+                ['Зает маржин', fmt(usedMargin) + ' €', ''],
+                ['Нотионал', fmt(notional) + ' €', ''],
                 ['Сделки от начало', String(s.trades), ''],
                 ['Win rate', fmt(s.winRate, 1) + '%', ''],
                 ['За деня', euro(s.dayPnl), cls(s.dayPnl)],
@@ -432,6 +440,11 @@
             initChart();
             const sd = state.symbols[activeSymbol];
             if (!sd) return;
+            const srcEl = document.getElementById('symSource');
+            if (srcEl) {
+                const last = (sd.candles || []).slice(-1)[0];
+                srcEl.textContent = 'Цена: ' + (last ? fmt(last.close, 5) : '—') + ' · източник: ' + (sd.source || '—');
+            }
             candleSeries.setData(sd.candles || []);
             candleSeries.setMarkers((sd.markers || []).slice().sort((a, b) => a.time - b.time));
             chart.timeScale().fitContent();
@@ -440,8 +453,8 @@
         function renderOpenPositions(list) {
             const el = document.getElementById('openPos');
             if (!list.length) { el.innerHTML = '<div class="empty">Няма отворени позиции</div>'; return; }
-            el.innerHTML = `<table><thead><tr><th>Символ</th><th>Вид</th><th>Вход</th><th>Обем</th><th>TP</th><th>SL</th><th>Плаваща</th></tr></thead><tbody>` +
-                list.map(p => `<tr><td>${p.symbol}</td><td class="${p.dir === 'BUY' ? 'pos' : 'neg'}">${p.dir}</td><td>${fmt(p.entry, 4)}</td><td>${fmt(p.units, 4)}</td><td>${fmt(p.tp, 4)}</td><td>${fmt(p.sl, 4)}</td><td class="${cls(p.floating)}">${euro(p.floating)}</td></tr>`).join('') +
+            el.innerHTML = `<table><thead><tr><th>Символ</th><th>Вид</th><th>Вход (реална цена)</th><th>Обем (лот)</th><th>Нотионал</th><th>Маржин</th><th>TP</th><th>SL</th><th>Плаваща</th></tr></thead><tbody>` +
+                list.map(p => `<tr><td>${p.symbol}</td><td class="${p.dir === 'BUY' ? 'pos' : 'neg'}">${p.dir}</td><td>${fmt(p.entry, 5)}</td><td>${fmt(p.lots, 3)}</td><td>${fmt(p.notional, 2)} €</td><td>${fmt(p.margin, 2)} €</td><td>${fmt(p.tp, 5)}</td><td>${fmt(p.sl, 5)}</td><td class="${cls(p.floating)}">${euro(p.floating)}</td></tr>`).join('') +
                 `</tbody></table>`;
         }
 
@@ -449,8 +462,8 @@
             const el = document.getElementById('tradesList');
             if (!list.length) { el.innerHTML = '<div class="empty">Още няма сделки</div>'; return; }
             const rows = list.slice().reverse().slice(0, 50).map(t =>
-                `<tr><td>${new Date(t.openedAt * 1000).toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td><td>${t.symbol}</td><td class="${t.dir === 'BUY' ? 'pos' : 'neg'}">${t.dir}</td><td>${fmt(t.entry, 4)}</td><td>${fmt(t.exit, 4)}</td><td>${t.reason}</td><td class="${cls(t.pnl)}">${euro(t.pnl)}</td></tr>`).join('');
-            el.innerHTML = `<table><thead><tr><th>Отваряне</th><th>Символ</th><th>Вид</th><th>Вход</th><th>Изход</th><th>Причина</th><th>P/L</th></tr></thead><tbody>${rows}</tbody></table>`;
+                `<tr><td>${new Date(t.openedAt * 1000).toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td><td>${t.symbol}</td><td class="${t.dir === 'BUY' ? 'pos' : 'neg'}">${t.dir}</td><td>${fmt(t.lots, 3)}</td><td>${fmt(t.entry, 5)}</td><td>${fmt(t.exit, 5)}</td><td>${t.reason}</td><td class="${cls(t.pnl)}">${euro(t.pnl)}</td></tr>`).join('');
+            el.innerHTML = `<table><thead><tr><th>Отваряне</th><th>Символ</th><th>Вид</th><th>Обем (лот)</th><th>Вход</th><th>Изход</th><th>Причина</th><th>P/L</th></tr></thead><tbody>${rows}</tbody></table>`;
         }
 
         // Паралелна графика: промяната на капитала в % спрямо началото.

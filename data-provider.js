@@ -193,7 +193,8 @@ const yahooCache = {};
 async function fetchYahoo(symbol, interval) {
   const cacheKey = symbol + '_' + interval;
   const cached = yahooCache[cacheKey];
-  if (cached && Date.now() - cached.time < 300000) return cached.data;
+  // Кратък кеш, за да не изостава paper двигателят с до 5 мин (той проверява на 5с).
+  if (cached && Date.now() - cached.time < 60000) return cached.data;
 
   const fallbacks = { '5m': '1h', '15m': '1h', '30m': '1h', '1h': '1d' };
   const tried = [];

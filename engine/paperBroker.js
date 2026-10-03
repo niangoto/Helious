@@ -34,8 +34,9 @@ class PaperAccount {
       position: pos.dir === 'BUY' ? 'belowBar' : 'aboveBar',
       color: pos.dir === 'BUY' ? '#00ff66' : '#ff0055',
       shape: pos.dir === 'BUY' ? 'arrowUp' : 'arrowDown',
-      text: pos.dir
+      text: pos.dir + ' ' + (pos.lots != null ? pos.lots : '') + 'л'
     });
+    this._trimMarkers();
     return pos;
   }
 
@@ -53,6 +54,8 @@ class PaperAccount {
       id: this.trades.length + 1,
       symbol,
       dir: pos.dir,
+      lots: pos.lots,
+      contract: pos.contract,
       units: pos.units,
       entry: pos.entry,
       exit: exitPrice,
@@ -74,7 +77,14 @@ class PaperAccount {
       shape: 'circle',
       text: reason + (pnl >= 0 ? ' +' : ' ') + pnl.toFixed(2) + '€'
     });
+    this._trimMarkers();
     return trade;
+  }
+
+  // Пази паметта ограничена при дълга (24/7) работа.
+  _trimMarkers() {
+    const MAX = 5000;
+    if (this.markers.length > MAX) this.markers.splice(0, this.markers.length - MAX);
   }
 
   // Затваря всички позиции по дадена цена (напр. при Стоп).

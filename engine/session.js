@@ -122,7 +122,7 @@ class PaperSession {
       if (this.equitySeries.length > 6000) this.equitySeries.splice(0, this.equitySeries.length - 6000);
       this.updatedAt = Date.now();
       // Периодично записване на състоянието (за възстановяване след рестарт)
-      if (Date.now() - (this._lastPersist || 0) > 10000) { saveAll(); this._lastPersist = Date.now(); }
+      if (Date.now() - (this._lastPersist || 0) > 30000) { saveAll(); this._lastPersist = Date.now(); }
       this.emit();
     } finally {
       this._ticking = false;
@@ -152,12 +152,14 @@ class PaperSession {
     if (!prob) return;
     const atrArr = models.computeATR(win, 14);
     const atr = atrArr[atrArr.length - 1];
-    const dec = entryDecision(prob, atr, bar.close, this.account.balance, this.P);
+    const dec = entryDecision(prob, atr, bar.close, this.account.balance, this.P, symbol);
     if (!dec) return;
     this.account.open({
       symbol,
       dir: dec.dir,
       entry: dec.entry,
+      lots: dec.lots,
+      contract: dec.contract,
       units: dec.units,
       notional: dec.notional,
       margin: dec.margin,
@@ -214,7 +216,11 @@ class PaperSession {
       symbol: pos.symbol,
       dir: pos.dir,
       entry: pos.entry,
+      lots: pos.lots,
+      contract: pos.contract,
       units: pos.units,
+      notional: pos.notional,
+      margin: pos.margin,
       tp: pos.tp,
       sl: pos.sl,
       openTime: pos.openTime,

@@ -1,6 +1,8 @@
 // Чиста стратегия (вход/изход/размер) — огледало на логиката в hermes.html.
 // Ползва се от paper двигателя. Без DOM/мрежа — само математика.
 
+const { specFor, floorLots } = require('./symbolSpec');
+
 // Нормализира параметрите като readParams() в hermes.html.
 function normalizeParams(p) {
   p = p || {};
@@ -22,8 +24,9 @@ function normalizeParams(p) {
 }
 
 // Решение за вход при дадена вероятност и ATR. Връща позиция или null.
-// { buyPct, sellPct } = prob; atr/entry = текущи; equity = текущ капитал.
-function entryDecision(prob, atr, entry, equity, P) {
+// { buyPct, sellPct } = prob; atr/entry = текущи; equity = текущ капитал;
+// symbol се ползва за реалния обем в лотове (contract size, step, min).
+function entryDecision(prob, atr, entry, equity, P, symbol) {
   if (!prob || !(atr > 0) || !(entry > 0) || !(equity > 0)) return null;
   const buyPct = prob.buyPct, sellPct = prob.sellPct;
   const alpha = P.alpha;
@@ -54,20 +57,32 @@ function entryDecision(prob, atr, entry, equity, P) {
   const f = Math.min(fStar * P.kellyF * alpha, P.maxKelly);
   if (!(f > 0)) return null;
 
+  // Размер по риска (Kelly) + таван по маржин.
   const riskAmount = f * equity;
   let units = riskAmount / loss;
   const maxUnits = (equity * P.leverage) / entry;
   units = Math.min(units, maxUnits);
-  const notional = units * entry;
+  if (!(units > 0)) return null;
+
+  // Преобразуване в реален обем (лотове) според спецификацията на инструмента.
+  const spec = specFor(symbol);
+  let lots = floorLots(units / spec.contract, spec);
+  lots = Math.min(lots, spec.max);
+  if (lots < spec.min) lots = spec.min; // брокерите изискват минимум 1 лот
+  const finalUnits = lots * spec.contract;
+  const notional = finalUnits * entry;
   const margin = notional / P.leverage;
-  if (!(units > 0 && margin > 0 && margin <= equity && notional >= 1)) return null;
+  if (!(lots >= spec.min && margin > 0 && margin <= equity && notional >= 1)) return null;
 
   if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
   const tp = dir === 'BUY' ? entry + tpDist : entry - tpDist;
   const sl = dir === 'BUY' ? entry - slDist : entry + slDist;
   const probPct = (dir === 'BUY' ? pRise : pFall) * 100;
 
-  return { dir, entry, units, notional, margin, tp, sl, atr, tpDist, slDist, prob: probPct };
+  return {
+    dir, entry, lots, contract: spec.contract, units: finalUnits,
+    notional, margin, tp, sl, atr, tpDist, slDist, prob: probPct
+  };
 }
 
 // Решение за изход за текущата свещ (TP/SL/време), или null.
