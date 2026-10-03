@@ -1,0 +1,56 @@
+version: "3.7"
+
+services:
+  app:
+    build:
+      context: .
+      args:
+        GIT_REPO: ${GIT_REPO}
+        GIT_REF: ${GIT_REF}
+    container_name: helious-app
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      NODE_ENV: production
+      PORT: 48081
+      TZ: ${TZ}
+      # При всяко стартиране на контейнера: fetch от GitHub + миграции
+      AUTO_UPDATE: ${AUTO_UPDATE}
+      GIT_REF: ${GIT_REF}
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+    # 48081 е портът на контейнера, към който домейнът (80/443) се пренасочва.
+    # Ако reverse proxy-ят е на същия хост: "127.0.0.1:48081:48081"
+    ports:
+      - "48081:48081"
+    volumes:
+      # Персистънт данни на приложението (логове, кеш, файлове)
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:48081/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  db:
+    image: postgres:16-alpine
+    container_name: helious-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      TZ: ${TZ}
+    volumes:
+      # Персистънт volume за базата данни
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

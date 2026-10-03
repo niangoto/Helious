@@ -16,8 +16,44 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
-const server = http.createServer((req, res) => {
+// MIME типове за статичните файлове (по-важно под reverse proxy в реална среда).
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.ico': 'image/x-icon',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.txt': 'text/plain; charset=utf-8'
+};
+function mimeType(file) {
+  return MIME[path.extname(file).toLowerCase()] || 'application/octet-stream';
+}
+
+const db = require('./db');
+
+const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
+
+  // Health check (за Docker healthcheck и мониторинг)
+  if (url.pathname === '/health') {
+    const dbHealth = await db.health().catch((e) => ({ enabled: true, ok: false, error: e.message }));
+    const ok = dbHealth.ok !== false || !dbHealth.enabled;
+    sendJson(res, ok ? 200 : 503, {
+      ok,
+      uptime: Math.round(process.uptime()),
+      db: dbHealth,
+      time: new Date().toISOString()
+    });
+    return;
+  }
 
   // Binance Proxy Endpoint
   if (url.pathname === '/binance' && req.method === 'GET') {
@@ -259,14 +295,19 @@ const server = http.createServer((req, res) => {
   if (urlPath === '/' || urlPath === '/heros' || urlPath === '/heros/') urlPath = '/heros/index.html';
   else if (urlPath === '/helious' || urlPath === '/helious/') urlPath = '/index.html';
   const filePath = path.join(__dirname, urlPath);
+  // Предпазване от излизане извън проекта (../)
+  if (!path.resolve(filePath).startsWith(path.resolve(__dirname))) {
+    res.writeHead(403);
+    res.end('Forbidden');
+    return;
+  }
   fs.readFile(filePath, (err, data) => {
     if (err) {
       res.writeHead(404);
       res.end('Not found');
       return;
     }
-    const contentType = filePath.endsWith('.html') ? 'text/html' : 'text/plain';
-    res.writeHead(200, { 'Content-Type': contentType });
+    res.writeHead(200, { 'Content-Type': mimeType(filePath) });
     res.end(data);
   });
 });
@@ -474,8 +515,18 @@ function parseRssItems(xml) {
   return items.sort((a, b) => parseDate(b.date) - parseDate(a.date));
 }
 
-server.listen(PORT, () => {
+server.listen(PORT, async () => {
   console.log(`Server running at http://localhost:${PORT}`);
+  // Инициализация на базата + миграции (ако е конфигурирана)
+  try {
+    const ok = await db.init();
+    if (ok) {
+      const migrate = require('./migrate');
+      await migrate.run();
+    }
+  } catch (e) {
+    console.error('[db] init/migrate fail:', e.message);
+  }
   // Check MT5 availability in background
   const dp = require('./data-provider');
   dp.checkMT5().catch(() => {});

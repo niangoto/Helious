@@ -20,9 +20,13 @@
 Defined in `data-provider.js` `SYMBOL_ALIASES` table. Canonical names: DAX, NDX, SPX, DJI, CAC, UK100, NI225, EURUSD, GBPUSD, XAUUSD, WTI, BRENT, BTCUSDT, ETHUSDT... Any alias resolves to canonical. Search via `/symbols?query=...`.
 
 ## Commands
-- **Start**: `node server.js` (listens on `PORT` env var or `3001`).
-- **MT5**: Install `MetaTrader5` Python package → `pip install MetaTrader5`. Run `python3 mt5-bridge.py --check` to verify.
+- **Start (dev)**: `node server.js` (listens on `PORT` env var or `3001`). DB е изключена, ако няма `pg`/`DATABASE_URL`.
+- **Deploy (Docker)**: `cp .env.example .env` → попълни → `./deploy.sh` (build без кеш + стартиране). `./deploy.sh restart|logs|down`.
+- **DB migrations**: SQL файлове в `migrations/` (напр. `001_init.sql`), прилагат се автоматично при старт на `server.js` чрез `migrate.js`; приложените версии са в таблица `schema_migrations`.
+- **Docker**: `docker-compose.yml` — `app` (Node, порт **48081**, volume `./data:/app/data`) + `db` (PostgreSQL 16, volume `pgdata`). `Dockerfile` тегли кода от GitHub (build args `GIT_REPO`/`GIT_REF`); `entrypoint.sh` при всяко стартиране прави `git fetch/reset` (ако `AUTO_UPDATE=1`), чисти npm кеша, преинсталира при промяна и пуска `node server.js` (→ миграции).
+- **MT5**: Install `MetaTrader5` Python package → `pip install MetaTrader5`. Run `python3 mt5-bridge.py --check` to verify. (**Windows-only**; не работи в Linux контейнера.)
 - **Tests**: Start server first, then `node scratch/test_endpoints.js` or `node scratch/test_commodities.js`.
+- **Health**: `GET /health` (използва се от Docker healthcheck; показва и статуса на DB).
 
 ## Key Behaviors & Quirks
 - **Realtime**: Frontend polls every 5s via `/data`. Forecast NOT re-run on poll — only on explicit triggers (selection change, period change, force reload, present-line drag).

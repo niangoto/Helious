@@ -405,10 +405,16 @@ async function fetchMT5(symbol, interval) {
 }
 
 // ─── Logging ────────────────────────────────────────────────────
+// Логът се пише в ./data (persist-ва се през Docker volume).
+const LOG_DIR = path.join(__dirname, 'data');
+const LOG_FILE = path.join(LOG_DIR, 'data-provider.log');
 function log(level, msg, data) {
   const line = `[${new Date().toISOString()}] [${level}] ${msg}${data ? ' ' + JSON.stringify(data) : ''}`;
   console.log(line);
-  try { require('fs').appendFileSync(path.join(__dirname, 'data-provider.log'), line + '\n'); } catch (e) {}
+  try {
+    if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+    fs.appendFileSync(LOG_FILE, line + '\n');
+  } catch (e) {}
 }
 
 // ─── Express-style handler for server.js ────────────────────────
