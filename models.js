@@ -1,4 +1,28 @@
 // Technical Indicators
+// RSI (Wilder). Дефиниран тук, за да е наличен и когато models.js се ползва в Node.
+// В браузъра js/indicators.js / hermes.html предефинират същата функция — без проблем.
+function computeRSI(candles, period) {
+  period = period || 14;
+  if (!candles || candles.length < period + 1) return [];
+  const changes = [];
+  for (let i = 1; i < candles.length; i++) changes.push(candles[i].close - candles[i - 1].close);
+  let avgG = 0, avgL = 0;
+  for (let i = 0; i < period; i++) {
+    if (changes[i] > 0) avgG += changes[i];
+    else avgL += Math.abs(changes[i]);
+  }
+  avgG /= period; avgL /= period;
+  const rsi = [avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL)];
+  for (let i = period; i < changes.length; i++) {
+    const g = changes[i] > 0 ? changes[i] : 0;
+    const l = changes[i] < 0 ? Math.abs(changes[i]) : 0;
+    avgG = (avgG * (period - 1) + g) / period;
+    avgL = (avgL * (period - 1) + l) / period;
+    rsi.push(avgL === 0 ? 100 : 100 - 100 / (1 + avgG / avgL));
+  }
+  return rsi;
+}
+
 function computeEMA(prices, period) {
   const k = 2 / (period + 1);
   const ema = [prices[0]];
@@ -905,5 +929,27 @@ function getWaveletForecastData(prices, forecastSteps) {
     cycleAmp: cycleAmp * 3, // scale for forecast oscillation
     cyclePhase: phaseMean,
     dominantLevel
+  };
+}
+
+// ─── Node.js export (за търговския двигател) ───────────────────────
+// В браузъра `module` липсва, така че това не се изпълнява.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = {
+    computeRSI,
+    computeEMA,
+    computeMACD,
+    computeATR,
+    computeADX,
+    signalMask,
+    resolveTrade,
+    computeModelProbSeries,
+    computeModelProbSequence,
+    computeWaveletProbability,
+    computeFourierProbSequence,
+    computeAllModels,
+    computeHistoricalProbability,
+    computeMarkovChain,
+    computeExpectedValue
   };
 }

@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="bg">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ХЕРОС — Търговия (демо)</title>
+    <meta name="theme-color" content="#06080f">
+    <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #06080f;
+            --panel-bg: rgba(13, 18, 30, 0.75);
+            --panel-border: rgba(255, 255, 255, 0.08);
+            --accent-cyan: #00f0ff;
+            --accent-purple: #8a2be2;
+            --accent-green: #00ff66;
+            --accent-red: #ff0055;
+            --text-main: #f1f5f9;
+            --text-dim: #94a3b8;
+        }
+
+        * { box-sizing: border-box; scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.1) transparent; }
+
+        body {
+            margin: 0;
+            background: var(--bg-dark);
+            background-image:
+                radial-gradient(at 0% 0%, rgba(138, 43, 226, 0.12) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(0, 240, 255, 0.08) 0px, transparent 50%);
+            color: var(--text-main);
+            font-family: 'Outfit', sans-serif;
+            height: 100vh;
+            height: 100dvh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        header {
+            padding: 10px 18px;
+            background: var(--panel-bg);
+            border-bottom: 1px solid var(--panel-border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            backdrop-filter: blur(12px);
+            flex-shrink: 0;
+        }
+
+        .brand { display: flex; align-items: baseline; gap: 10px; }
+        .brand .logo {
+            font-size: 18px; font-weight: 900; letter-spacing: 3px;
+            background: linear-gradient(135deg, #fff 0%, var(--accent-cyan) 60%, var(--accent-purple) 100%);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .brand .sub { color: var(--text-dim); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; }
+
+        .status-badge {
+            font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 700;
+            padding: 4px 10px; border-radius: 20px; border: 1px solid var(--panel-border);
+            color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px;
+        }
+        .status-badge.running { color: var(--accent-green); border-color: rgba(0, 255, 102, 0.4); }
+        .status-badge.paused { color: #ffd27a; border-color: rgba(255, 210, 122, 0.4); }
+        .status-badge.stopped { color: var(--accent-red); border-color: rgba(255, 0, 85, 0.4); }
+
+        .hdr-actions { display: flex; gap: 8px; align-items: center; }
+        .btn {
+            padding: 8px 14px; border-radius: 8px; border: 1px solid var(--panel-border);
+            background: rgba(255, 255, 255, 0.04); color: var(--text-main); cursor: pointer;
+            font-family: 'Outfit', sans-serif; font-size: 12px; font-weight: 600; transition: all 0.15s;
+        }
+        .btn:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+        .btn.primary { background: linear-gradient(135deg, var(--accent-cyan), #00b7c9); color: #04222a; border: none; }
+        .btn.warn:hover { border-color: #ffd27a; color: #ffd27a; }
+        .btn.danger:hover { border-color: var(--accent-red); color: var(--accent-red); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        a.btn { text-decoration: none; }
+
+        .layout { flex: 1; display: flex; min-height: 0; }
+
+        /* Controls */
+        aside {
+            width: 340px; flex-shrink: 0; border-right: 1px solid var(--panel-border);
+            overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 14px;
+            background: rgba(8, 11, 18, 0.6);
+        }
+        .group { display: flex; flex-direction: column; gap: 8px; }
+        .group > .gtitle {
+            font-size: 10px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+            color: var(--accent-cyan); border-bottom: 1px solid var(--panel-border); padding-bottom: 5px;
+        }
+        label.f { display: flex; flex-direction: column; gap: 4px; font-size: 11px; color: var(--text-dim); }
+        input, select, textarea {
+            background: rgba(255, 255, 255, 0.04); border: 1px solid var(--panel-border);
+            border-radius: 7px; padding: 7px 9px; color: var(--text-main); font-family: 'JetBrains Mono', monospace;
+            font-size: 12px; outline: none; width: 100%;
+        }
+        input:focus, select:focus { border-color: var(--accent-cyan); }
+        input:disabled, select:disabled { opacity: 0.45; }
+        .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+        .chip {
+            font-size: 10px; font-family: 'JetBrains Mono', monospace; padding: 3px 8px; border-radius: 14px;
+            border: 1px solid var(--panel-border); cursor: pointer; color: var(--text-dim);
+        }
+        .chip:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+        .note { font-size: 10.5px; color: #ffd27a; line-height: 1.4; }
+        .row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); }
+        .row input[type=checkbox] { width: auto; }
+
+        .contra { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; font-size: 11px; }
+        .contra label { display: flex; gap: 6px; align-items: center; color: var(--text-dim); }
+        .contra input { width: auto; }
+
+        /* Main */
+        main { flex: 1; display: flex; flex-direction: column; min-width: 0; padding: 12px 14px; gap: 10px; overflow-y: auto; }
+
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+        .card-stat {
+            background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 11px; padding: 10px 12px;
+        }
+        .card-stat .k { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); }
+        .card-stat .v { font-family: 'JetBrains Mono', monospace; font-size: 17px; font-weight: 600; margin-top: 3px; }
+        .pos { color: var(--accent-green); } .neg { color: var(--accent-red); }
+
+        .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+        .tab {
+            font-family: 'JetBrains Mono', monospace; font-size: 11px; padding: 5px 12px; border-radius: 8px;
+            border: 1px solid var(--panel-border); cursor: pointer; color: var(--text-dim); background: rgba(255,255,255,0.03);
+        }
+        .tab.active { color: var(--accent-cyan); border-color: var(--accent-cyan); }
+
+        .chart-wrap { background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 12px; padding: 8px; }
+        #chart { width: 100%; height: 380px; }
+        #pnlCanvas { width: 100%; height: 90px; display: block; margin-top: 4px; }
+
+        table { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+        th { text-align: left; color: var(--text-dim); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--panel-border); font-family: 'Outfit'; text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.5px; }
+        td { padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,0.04); }
+        .empty { color: var(--text-dim); font-family: 'Outfit'; padding: 14px; text-align: center; }
+        .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+        .panel { background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 12px; padding: 10px 12px; }
+        .panel h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); }
+    </style>
+</head>
+
+<body>
+    <header>
+        <div class="brand">
+            <span class="logo">ХЕРОС</span>
+            <span class="sub">Търговия · демо (paper)</span>
+            <span class="status-badge" id="statusBadge">не е стартирано</span>
+        </div>
+        <div class="hdr-actions">
+            <a class="btn" href="/">← Портал</a>
+            <button class="btn warn" id="btnPause" onclick="doAction('pause')" disabled>⏸ Пауза</button>
+            <button class="btn danger" id="btnStop" onclick="doAction('stop')" disabled>■ Стоп</button>
+        </div>
+    </header>
+
+    <div class="layout">
+        <aside>
+            <div class="group">
+                <div class="gtitle">Режим</div>
+                <label class="f">Сметка
+                    <select id="inpMode" disabled>
+                        <option value="paper" selected>Демо (paper) — виртуална сметка</option>
+                        <option value="mt5">MT5 (демо/реал) — очаква мост</option>
+                    </select>
+                </label>
+                <div class="note" id="modeNote">Paper режимът търгува с живи цени и виртуален бюджет. Реална MT5 връзка идва във Фаза 4.</div>
+            </div>
+
+            <div class="group" id="accountGroup" style="opacity:0.55">
+                <div class="gtitle">MT5 сметка (по-късно)</div>
+                <div class="grid2">
+                    <label class="f">Логин<input id="inpLogin" placeholder="напр. 12345678" disabled></label>
+                    <label class="f">Сървър<input id="inpServer" placeholder="Broker-Demo" disabled></label>
+                </div>
+                <label class="f">Парола<input id="inpPass" type="password" placeholder="••••••••" disabled></label>
+            </div>
+
+            <div class="group">
+                <div class="gtitle">Инструменти</div>
+                <label class="f">Символи (разделени със запетая)
+                    <input id="inpSymbols" value="BTCUSDT" placeholder="BTCUSDT, XAUUSD, DAX">
+                </label>
+                <div class="chips" id="symChips"></div>
+                <div class="grid2">
+                    <label class="f">Интервал на свещта
+                        <select id="inpInterval">
+                            <option value="1m">1м</option>
+                            <option value="5m">5м</option>
+                            <option value="15m">15м</option>
+                            <option value="30m">30м</option>
+                            <option value="1h" selected>1ч</option>
+                            <option value="4h">4ч</option>
+                            <option value="1d">1Д</option>
+                        </select>
+                    </label>
+                    <label class="f">Модел
+                        <select id="inpModel">
+                            <option value="0">Историческа</option>
+                            <option value="1">Логистична</option>
+                            <option value="2">Марковска</option>
+                            <option value="3">Очаквана стойност</option>
+                            <option value="4">Уейвлет</option>
+                            <option value="5" selected>Средна вероятност</option>
+                        </select>
+                    </label>
+                </div>
+                <div class="contra" id="contraBox">
+                    <label><input type="checkbox" id="c0"> Историческа</label>
+                    <label><input type="checkbox" id="c1"> Логистична</label>
+                    <label><input type="checkbox" id="c2"> Марковска</label>
+                    <label><input type="checkbox" id="c3"> Очаквана стойност</label>
+                    <label><input type="checkbox" id="c4"> Уейвлет</label>
+                </div>
+            </div>
+
+            <div class="group">
+                <div class="gtitle">Параметри (както в HERMES)</div>
+                <div class="grid2">
+                    <label class="f">Бюджет (€)<input id="inpBudget" type="number" value="1000" min="10" step="100"></label>
+                    <label class="f">Леверидж<input id="inpLev" type="number" value="30" min="1" step="1"></label>
+                    <label class="f">Риск (α)<input id="inpAlpha" type="number" value="1.0" min="0.1" step="0.1"></label>
+                    <label class="f">Buy праг (%)<input id="inpBuyTh" type="number" value="65" min="1" max="99"></label>
+                    <label class="f">Sell праг (%)<input id="inpSellTh" type="number" value="65" min="1" max="99"></label>
+                    <label class="f">Мин. EV<input id="inpMinEv" type="number" value="0" step="any"></label>
+                    <label class="f">TP = ×ATR<input id="inpTp" type="number" value="1.5" min="0.1" step="0.1"></label>
+                    <label class="f">SL = ×ATR<input id="inpSl" type="number" value="1.0" min="0.1" step="0.1"></label>
+                    <label class="f">Затв. (барове)<input id="inpHold" type="number" value="50" min="1"></label>
+                    <label class="f">Кели (част)<input id="inpKelly" type="number" value="0.25" min="0.01" step="0.05"></label>
+                    <label class="f">Кели макс.<input id="inpMaxKelly" type="number" value="0.05" min="0.01" max="1" step="0.05"></label>
+                </div>
+                <div class="row"><input type="checkbox" id="inpReverse"> Обърната посока (контра със същия обем)</div>
+                <button class="btn primary" id="btnStart" onclick="startSession()" style="margin-top:4px">▶ Започни търговия</button>
+            </div>
+        </aside>
+
+        <main>
+            <div class="stats" id="stats"></div>
+
+            <div class="chart-wrap">
+                <div class="tabs" id="symTabs" style="margin-bottom:8px"></div>
+                <div id="chart"></div>
+                <canvas id="pnlCanvas"></canvas>
+            </div>
+
+            <div class="two-col">
+                <div class="panel">
+                    <h3>Отворени позиции</h3>
+                    <div id="openPos"><div class="empty">Няма отворени позиции</div></div>
+                </div>
+                <div class="panel">
+                    <h3>Сделки от началото</h3>
+                    <div id="tradesList"><div class="empty">Още няма сделки</div></div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'XAUUSD', 'WTI', 'BRENT', 'DAX', 'NDX', 'SPX', 'EURUSD', 'GBPUSD'];
+        let sessionId = null, es = null, chart = null, candleSeries = null, activeSymbol = null, lastState = null;
+
+        // ── Инициализация на контролите ──
+        (function initControls() {
+            const chips = document.getElementById('symChips');
+            SYMBOLS.forEach(s => {
+                const c = document.createElement('span');
+                c.className = 'chip'; c.textContent = s;
+                c.onclick = () => {
+                    const el = document.getElementById('inpSymbols');
+                    const cur = el.value.split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
+                    if (!cur.includes(s)) { cur.push(s); el.value = cur.join(', '); }
+                };
+                chips.appendChild(c);
+            });
+            const mSel = document.getElementById('inpModel');
+            const updateContra = () => { document.getElementById('contraBox').style.display = parseInt(mSel.value, 10) === 5 ? 'grid' : 'none'; };
+            mSel.addEventListener('change', updateContra); updateContra();
+        })();
+
+        function readConfig() {
+            const symbols = document.getElementById('inpSymbols').value.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+            const contra = [0, 1, 2, 3, 4].map(i => document.getElementById('c' + i).checked);
+            const v = id => document.getElementById(id).value;
+            return {
+                symbols,
+                interval: v('inpInterval'),
+                model: parseInt(v('inpModel'), 10),
+                contra,
+                params: {
+                    budget: parseFloat(v('inpBudget')),
+                    leverage: parseFloat(v('inpLev')),
+                    alpha: parseFloat(v('inpAlpha')),
+                    buyTh: parseFloat(v('inpBuyTh')),
+                    sellTh: parseFloat(v('inpSellTh')),
+                    minEv: parseFloat(v('inpMinEv')),
+                    tpMult: parseFloat(v('inpTp')),
+                    slMult: parseFloat(v('inpSl')),
+                    holdBars: parseInt(v('inpHold'), 10),
+                    kellyF: parseFloat(v('inpKelly')),
+                    maxKelly: parseFloat(v('inpMaxKelly')),
+                    reverse: document.getElementById('inpReverse').checked
+                }
+            };
+        }
+
+        async function startSession() {
+            const cfg = readConfig();
+            if (!cfg.symbols.length) { alert('Въведи поне един символ.'); return; }
+            document.getElementById('btnStart').disabled = true;
+            document.getElementById('btnStart').textContent = '⏳ Стартира...';
+            try {
+                const r = await fetch('/api/paper/sessions', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg)
+                }).then(x => x.json());
+                if (!r.ok) throw new Error(r.error || 'грешка');
+                sessionId = r.id;
+                setStatus('running');
+                if (es) es.close();
+                es = new EventSource('/api/paper/sessions/' + sessionId + '/stream');
+                es.onmessage = ev => { try { render(JSON.parse(ev.data)); } catch (e) {} };
+                es.onerror = () => { /* EventSource ще опита пак */ };
+                document.getElementById('btnPause').disabled = false;
+                document.getElementById('btnStop').disabled = false;
+                document.getElementById('btnPause').textContent = '⏸ Пауза';
+            } catch (e) {
+                alert('Грешка: ' + e.message);
+                document.getElementById('btnStart').disabled = false;
+            }
+            document.getElementById('btnStart').textContent = '▶ Започни търговия';
+        }
+
+        async function doAction(action) {
+            if (!sessionId) return;
+            try {
+                const r = await fetch('/api/paper/sessions/' + sessionId + '/' + action, { method: 'POST' }).then(x => x.json());
+                if (r.status) setStatus(r.status);
+                if (action === 'pause') document.getElementById('btnPause').textContent = '⏵ Продължи';
+            } catch (e) {}
+        }
+
+        function setStatus(s) {
+            const el = document.getElementById('statusBadge');
+            const map = { running: 'работи', paused: 'на пауза', stopped: 'спряно' };
+            el.className = 'status-badge ' + s;
+            el.textContent = map[s] || s;
+        }
+
+        function fmt(v, d) { if (v == null || isNaN(v)) return '—'; return Number(v).toFixed(d == null ? 2 : d); }
+        function euro(v) { const n = fmt(v, 2); return (v > 0 ? '+' : '') + n + ' €'; }
+        function cls(v) { return v > 0 ? 'pos' : (v < 0 ? 'neg' : ''); }
+
+        function render(state) {
+            lastState = state;
+            setStatus(state.status);
+            const s = state.stats || {};
+            const cards = [
+                ['Плаваща P/L', euro(s.floating), cls(s.floating)],
+                ['Обща P/L', euro(s.totalPnl) + ' (' + (s.totalPct >= 0 ? '+' : '') + fmt(s.totalPct) + '%)', cls(s.totalPnl)],
+                ['Баланс', fmt(s.balance) + ' €', ''],
+                ['Капитал', fmt(s.equity) + ' €', ''],
+                ['Отворени сега', String(s.openCount), ''],
+                ['Сделки от начало', String(s.trades), ''],
+                ['Win rate', fmt(s.winRate, 1) + '%', ''],
+                ['За деня', euro(s.dayPnl), cls(s.dayPnl)],
+                ['За седмицата', euro(s.weekPnl), cls(s.weekPnl)],
+                ['За месеца', euro(s.monthPnl), cls(s.monthPnl)],
+                ['Макс. теглене', fmt(s.maxDD, 2) + '%', s.maxDD > 0 ? 'neg' : '']
+            ];
+            document.getElementById('stats').innerHTML = cards.map(c =>
+                `<div class="card-stat"><div class="k">${c[0]}</div><div class="v ${c[2]}">${c[1]}</div></div>`).join('');
+
+            const keys = Object.keys(state.symbols || {});
+            if (!activeSymbol || !keys.includes(activeSymbol)) activeSymbol = keys[0];
+            renderTabs(keys);
+            renderChart(state);
+            renderOpenPositions(state.openPositions || []);
+            renderTrades(state.trades || []);
+            drawPnl();
+        }
+
+        function renderTabs(keys) {
+            document.getElementById('symTabs').innerHTML = keys.map(k =>
+                `<div class="tab ${k === activeSymbol ? 'active' : ''}" onclick="selectSymbol('${k}')">${k}</div>`).join('');
+        }
+        function selectSymbol(k) { activeSymbol = k; if (lastState) render(lastState); }
+
+        function initChart() {
+            if (chart) return;
+            const el = document.getElementById('chart');
+            chart = LightweightCharts.createChart(el, {
+                width: el.clientWidth, height: el.clientHeight,
+                layout: { background: { color: '#0b0f18' }, textColor: '#94a3b8', fontSize: 11, fontFamily: 'Outfit, sans-serif' },
+                grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } },
+                timeScale: { borderColor: 'rgba(255,255,255,0.08)', timeVisible: true, secondsVisible: false, minBarSpacing: 0.001 },
+                rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)' },
+                crosshair: { mode: LightweightCharts.CrosshairMode.Normal }
+            });
+            candleSeries = chart.addCandlestickSeries({ upColor: '#00ff66', downColor: '#ff0055', borderVisible: false, wickUpColor: '#00ff66', wickDownColor: '#ff0055' });
+            const ro = new ResizeObserver(() => { if (el.clientWidth) { chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }); drawPnl(); } });
+            ro.observe(el);
+            try { chart.timeScale().subscribeVisibleLogicalRangeChange(() => drawPnl()); } catch (e) {}
+        }
+
+        function renderChart(state) {
+            initChart();
+            const sd = state.symbols[activeSymbol];
+            if (!sd) return;
+            candleSeries.setData(sd.candles || []);
+            candleSeries.setMarkers((sd.markers || []).slice().sort((a, b) => a.time - b.time));
+            chart.timeScale().fitContent();
+        }
+
+        function renderOpenPositions(list) {
+            const el = document.getElementById('openPos');
+            if (!list.length) { el.innerHTML = '<div class="empty">Няма отворени позиции</div>'; return; }
+            el.innerHTML = `<table><thead><tr><th>Символ</th><th>Вид</th><th>Вход</th><th>Обем</th><th>TP</th><th>SL</th><th>Плаваща</th></tr></thead><tbody>` +
+                list.map(p => `<tr><td>${p.symbol}</td><td class="${p.dir === 'BUY' ? 'pos' : 'neg'}">${p.dir}</td><td>${fmt(p.entry, 4)}</td><td>${fmt(p.units, 4)}</td><td>${fmt(p.tp, 4)}</td><td>${fmt(p.sl, 4)}</td><td class="${cls(p.floating)}">${euro(p.floating)}</td></tr>`).join('') +
+                `</tbody></table>`;
+        }
+
+        function renderTrades(list) {
+            const el = document.getElementById('tradesList');
+            if (!list.length) { el.innerHTML = '<div class="empty">Още няма сделки</div>'; return; }
+            const rows = list.slice().reverse().slice(0, 50).map(t =>
+                `<tr><td>${new Date(t.openedAt * 1000).toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td><td>${t.symbol}</td><td class="${t.dir === 'BUY' ? 'pos' : 'neg'}">${t.dir}</td><td>${fmt(t.entry, 4)}</td><td>${fmt(t.exit, 4)}</td><td>${t.reason}</td><td class="${cls(t.pnl)}">${euro(t.pnl)}</td></tr>`).join('');
+            el.innerHTML = `<table><thead><tr><th>Отваряне</th><th>Символ</th><th>Вид</th><th>Вход</th><th>Изход</th><th>Причина</th><th>P/L</th></tr></thead><tbody>${rows}</tbody></table>`;
+        }
+
+        // Паралелна графика: промяната на капитала в % спрямо началото.
+        function drawPnl() {
+            const cvs = document.getElementById('pnlCanvas');
+            if (!cvs || !chart || !lastState) return;
+            const w = cvs.clientWidth, h = cvs.clientHeight;
+            if (w <= 0 || h <= 0) return;
+            const dpr = window.devicePixelRatio || 1;
+            cvs.width = w * dpr; cvs.height = h * dpr;
+            const ctx = cvs.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, w, h);
+            const series = lastState.equitySeries || [];
+            const initial = (lastState.stats && lastState.stats.initial) || 1;
+            if (series.length < 2) return;
+            let maxAbs = 0;
+            const pts = [];
+            for (const pt of series) {
+                const pct = (pt.equity - initial) / initial * 100;
+                const x = chart.timeScale().timeToCoordinate(pt.t);
+                if (x == null) continue;
+                if (x < -20) continue;
+                if (x > w + 20) break;
+                pts.push({ x, v: pct });
+                if (Math.abs(pct) > maxAbs) maxAbs = Math.abs(pct);
+            }
+            if (pts.length < 2) return;
+            const pow = Math.pow(10, Math.floor(Math.log10(Math.max(maxAbs, 0.5))));
+            const n = maxAbs / pow; const step = n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10;
+            const scale = step * pow;
+            const midY = h / 2, halfH = h / 2 - 6;
+            const toY = v => midY - (v / scale) * halfH;
+            ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+            ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(w, midY); ctx.stroke();
+            ctx.lineWidth = 1.6;
+            for (let i = 1; i < pts.length; i++) {
+                ctx.beginPath();
+                ctx.moveTo(pts[i - 1].x, toY(pts[i - 1].v));
+                ctx.lineTo(pts[i].x, toY(pts[i].v));
+                ctx.strokeStyle = pts[i].v >= 0 ? 'rgba(0,255,102,0.9)' : 'rgba(255,0,85,0.9)';
+                ctx.stroke();
+            }
+            ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.font = '9px JetBrains Mono'; ctx.textAlign = 'right';
+            ctx.fillText((scale >= 0 ? '+' : '') + scale.toFixed(2) + '%', w - 4, toY(scale));
+            ctx.fillText('0%', w - 4, midY);
+            ctx.fillText('-' + scale.toFixed(2) + '%', w - 4, toY(-scale));
+        }
+    </script>
+</body>
+
+</html>

@@ -6,7 +6,8 @@
 - **UI**: `index.html` (inline CSS, scripts split under `js/`). **Forecast engine**: `forecast.js`.
 - **Frontend modules**: `js/config.js` (constants/symbols), `js/state.js` (shared state), `js/data.js` (fetchKlines), `js/news.js` (news view), `js/indicators.js` (RSI + indicator data), `js/app.js` (main app: chart, present line, realtime). Tab algorithms live in `js/tabs/`: `tabs.js` (registry + shared helpers), `indicators.js`, `average.js`, `historical.js`, `logistic.js`, `markov.js`, `expected-value.js`, `wavelet.js`, `fourier.js`, `rsi-phase.js`, `candle-forecast.js` — each registers a `renderPanel`/`drawChart` pair into `TabRegistry`.
 - **Models**: `models.js` (statistical probability models: historical, logistic regression, Markov chain, expected value, wavelet, FFT). **Data provider**: `data-provider.js` (symbol normalization, multi-source data fetching, MT5 bridge).
-- **Only CDN dep**: Lightweight Charts 4.1.1 (`unpkg.com`). No `package.json` — never run `npm install/test/start`.
+- **Paper trading engine** (`engine/`): `strategy.js` (чиста логика вход/изход/размер — огледало на HERMES `simulate()`), `paperBroker.js` (виртуална сметка, позиции, P/L, маркери), `session.js` (live loop на всеки затворен бар: тегли барове → `computeModelProbSeries` → вход/изход; пауза/резюме/стоп; SSE). API под `/api/paper/sessions...`. UI: `heros/trade.html`. `models.js` вече се импортира и в Node (CommonJS export в края + `computeRSI`).
+- **CDN dep**: Lightweight Charts 4.1.1 (`unpkg.com`). `package.json` съдържа само `pg` (за Docker/PostgreSQL); за локален dev без БД не е нужен `npm install`.
 - **UI language**: Bulgarian (`lang="bg"`). All labels, tooltips, and notifications are in Bulgarian.
 - **Server** (`server.js`): Static file serving + `/data` endpoint (unified data via `data-provider.js`), `/news` endpoint (RSS Google News→Bing + keyword sentiment), plus legacy `/binance`, `/yahoo`, `/ticker` endpoints.
 

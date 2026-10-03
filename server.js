@@ -39,8 +39,61 @@ function mimeType(file) {
 
 const db = require('./db');
 
+// Чете JSON тяло на заявка (за POST API).
+function readJson(req) {
+  return new Promise((resolve) => {
+    let data = '';
+    req.on('data', (c) => { data += c; if (data.length > 1e6) req.destroy(); });
+    req.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch (e) { resolve({}); } });
+    req.on('error', () => resolve({}));
+  });
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
+
+  // ─── Paper търговия API ──────────────────────────────────────────
+  if (url.pathname.startsWith('/api/paper/')) {
+    const engine = require('./engine/session');
+    const parts = url.pathname.split('/').filter(Boolean); // api/paper/sessions/:id/:action
+    const method = req.method;
+    try {
+      if (parts.length === 3 && parts[2] === 'sessions') {
+        if (method === 'GET') return sendJson(res, 200, { ok: true, sessions: engine.listSessions() });
+        if (method === 'POST') {
+          const body = await readJson(req);
+          const s = await engine.createSession(body || {});
+          return sendJson(res, 201, { ok: true, id: s.id, state: s.getState() });
+        }
+      }
+      if (parts.length >= 4 && parts[2] === 'sessions') {
+        const s = engine.getSession(parts[3]);
+        if (!s) return sendJson(res, 404, { ok: false, error: 'Няма такава сесия' });
+        const action = parts[4];
+        if (!action && method === 'GET') return sendJson(res, 200, { ok: true, state: s.getState() });
+        if (action === 'stream' && method === 'GET') {
+          res.writeHead(200, {
+            'Content-Type': 'text/event-stream; charset=utf-8',
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'Access-Control-Allow-Origin': '*'
+          });
+          res.write('retry: 3000\n\n');
+          res.write('data: ' + JSON.stringify(s.getState()) + '\n\n');
+          const off = s.on((st) => { try { res.write('data: ' + JSON.stringify(st) + '\n\n'); } catch (e) {} });
+          const hb = setInterval(() => { try { res.write(': ping\n\n'); } catch (e) {} }, 15000);
+          req.on('close', () => { clearInterval(hb); off(); });
+          return;
+        }
+        if (action === 'pause' && method === 'POST') { s.pause(); return sendJson(res, 200, { ok: true, status: s.status }); }
+        if (action === 'resume' && method === 'POST') { s.resume(); return sendJson(res, 200, { ok: true, status: s.status }); }
+        if (action === 'stop' && method === 'POST') { s.stop(); return sendJson(res, 200, { ok: true, status: s.status }); }
+      }
+      return sendJson(res, 404, { ok: false, error: 'Неизвестен API път' });
+    } catch (e) {
+      return sendJson(res, 400, { ok: false, error: e.message });
+    }
+  }
 
   // Health check (за Docker healthcheck и мониторинг)
   if (url.pathname === '/health') {
