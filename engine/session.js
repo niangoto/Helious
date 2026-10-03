@@ -2,6 +2,8 @@
 // влиза/излиза на виртуална сметка и подава живо състояние към UI (SSE).
 
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const dp = require('../data-provider');
 const models = require('../models');
 const db = require('../db');
@@ -12,6 +14,8 @@ const IV_SEC = { '1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h':
 const WINDOW = 1000;      // свещи за модела/ATR
 const POLL_MS = 5000;     // период на проверка
 const MAX_NEW_BARS = 20;  // колко изпуснати бара да навакса наведнъж
+const DATA_DIR = path.join(__dirname, '..', 'data');
+const STORE_FILE = path.join(DATA_DIR, 'paper-sessions.json');
 
 const nowSec = () => Math.floor(Date.now() / 1000);
 const startOfDay = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
@@ -68,8 +72,9 @@ class PaperSession {
     }
   }
 
-  start() {
-    this.startedAt = nowSec();
+  start(preserveStartedAt) {
+    if (!preserveStartedAt || !this.startedAt) this.startedAt = nowSec();
+    if (this.timer) clearInterval(this.timer);
     this.timer = setInterval(() => { this.tick().catch(e => console.error('[paper] tick:', e.message)); }, POLL_MS);
     this.emit();
   }
@@ -116,6 +121,8 @@ class PaperSession {
       this.equitySeries.push({ t: nowSec(), equity: eq, balance: this.account.balance, floating: this.account.floating(p) });
       if (this.equitySeries.length > 6000) this.equitySeries.splice(0, this.equitySeries.length - 6000);
       this.updatedAt = Date.now();
+      // Периодично записване на състоянието (за възстановяване след рестарт)
+      if (Date.now() - (this._lastPersist || 0) > 10000) { saveAll(); this._lastPersist = Date.now(); }
       this.emit();
     } finally {
       this._ticking = false;
@@ -162,8 +169,8 @@ class PaperSession {
     });
   }
 
-  pause() { if (this.status === 'running') { this.status = 'paused'; this.persistStatus(); this.emit(); } }
-  resume() { if (this.status === 'paused') { this.status = 'running'; this.persistStatus(); this.emit(); } }
+  pause() { if (this.status === 'running') { this.status = 'paused'; this.persistStatus(); saveAll(); this.emit(); } }
+  resume() { if (this.status === 'paused') { this.status = 'running'; this.persistStatus(); saveAll(); this.emit(); } }
 
   stop() {
     if (this.status === 'stopped') return;
@@ -172,6 +179,7 @@ class PaperSession {
     this.account.closeAll(p, nowSec(), 'Край').forEach(tr => this.persistTrade(tr));
     this.status = 'stopped';
     this.persistStatus();
+    saveAll();
     this.emit();
   }
 
@@ -234,6 +242,32 @@ class PaperSession {
     };
   }
 
+  serialize() {
+    return {
+      id: this.id,
+      symbols: this.symbols,
+      interval: this.interval,
+      model: this.model,
+      contra: this.contra,
+      P: this.P,
+      status: this.status,
+      createdAt: this.createdAt,
+      startedAt: this.startedAt,
+      updatedAt: this.updatedAt,
+      account: {
+        initial: this.account.initial,
+        balance: this.account.balance,
+        peak: this.account.peak,
+        maxDD: this.account.maxDD,
+        trades: this.account.trades,
+        positions: [...this.account.positions.values()],
+        markers: this.account.markers
+      },
+      equitySeries: this.equitySeries,
+      bars: Object.fromEntries(this.symbols.map(s => [s, this.state[s].lastBarTime || 0]))
+    };
+  }
+
   async persistStatus() {
     if (!db.isEnabled()) return;
     try {
@@ -259,12 +293,63 @@ class PaperSession {
 // ─── Мениджър на сесиите ───────────────────────────────────────────
 const sessions = new Map();
 
+// Записва всички сесии на диск (./data/paper-sessions.json — в Docker volume),
+// за да оцелеят рестарт и да продължат да търгуват самостоятелно.
+function saveAll() {
+  try {
+    if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+    const data = { savedAt: Date.now(), sessions: [...sessions.values()].map(s => s.serialize()) };
+    fs.writeFileSync(STORE_FILE, JSON.stringify(data));
+  } catch (e) { /* ignore */ }
+}
+
+function restoreSession(obj) {
+  const s = new PaperSession(obj.id, {
+    symbols: obj.symbols, interval: obj.interval, model: obj.model, contra: obj.contra, params: obj.P
+  });
+  s.status = obj.status || 'running';
+  s.createdAt = obj.createdAt || Date.now();
+  s.startedAt = obj.startedAt || nowSec();
+  s.updatedAt = obj.updatedAt || Date.now();
+  const a = obj.account || {};
+  s.account.initial = a.initial != null ? a.initial : s.P.budget;
+  s.account.balance = a.balance != null ? a.balance : s.account.initial;
+  s.account.peak = a.peak != null ? a.peak : s.account.balance;
+  s.account.maxDD = a.maxDD || 0;
+  s.account.trades = Array.isArray(a.trades) ? a.trades : [];
+  s.account.markers = Array.isArray(a.markers) ? a.markers : [];
+  s.account.positions = new Map((a.positions || []).map(p => [p.symbol, p]));
+  s.equitySeries = Array.isArray(obj.equitySeries) ? obj.equitySeries : [];
+  for (const sym of s.symbols) if (obj.bars && obj.bars[sym]) s.state[sym].lastBarTime = obj.bars[sym];
+  return s;
+}
+
+// Зарежда запазените сесии при старт и подновява работата им.
+async function init() {
+  let data;
+  try { data = JSON.parse(fs.readFileSync(STORE_FILE, 'utf8')); } catch (e) { return 0; }
+  if (!data || !Array.isArray(data.sessions)) return 0;
+  let n = 0;
+  for (const obj of data.sessions) {
+    try {
+      if (obj.status === 'stopped') continue;
+      const s = restoreSession(obj);
+      sessions.set(s.id, s);
+      if (s.status === 'running' || s.status === 'paused') s.start(true);
+      n++;
+    } catch (e) { console.error('[paper] restore fail:', e.message); }
+  }
+  if (n) console.log(`[paper] възстановени ${n} сесии от диска.`);
+  return n;
+}
+
 async function createSession(config) {
   const id = crypto.randomBytes(6).toString('hex');
   const s = new PaperSession(id, config);
   await s.warmup();
   sessions.set(id, s);
   s.start();
+  saveAll();
   if (db.isEnabled()) {
     try {
       await db.query(
@@ -288,7 +373,18 @@ function listSessions() {
 }
 function removeSession(id) {
   const s = sessions.get(id);
-  if (s) { s.destroy(); sessions.delete(id); }
+  if (s) { s.destroy(); sessions.delete(id); saveAll(); }
 }
 
-module.exports = { PaperSession, createSession, getSession, listSessions, removeSession, IV_SEC };
+// При спиране на процеса — записваме, за да продължат след рестарт.
+let _sigHooked = false;
+function hookSignals() {
+  if (_sigHooked) return;
+  _sigHooked = true;
+  const bye = () => { try { saveAll(); } catch (e) {} process.exit(0); };
+  process.on('SIGTERM', bye);
+  process.on('SIGINT', bye);
+}
+hookSignals();
+
+module.exports = { PaperSession, createSession, getSession, listSessions, removeSession, init, saveAll, IV_SEC };

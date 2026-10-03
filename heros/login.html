@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="bg">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>HEROS — Вход</title>
+    <meta name="theme-color" content="#06080f">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap"
+        rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #06080f;
+            --panel-bg: rgba(13, 18, 30, 0.8);
+            --panel-border: rgba(255, 255, 255, 0.08);
+            --accent-cyan: #00f0ff;
+            --accent-purple: #8a2be2;
+            --text-main: #f1f5f9;
+            --text-dim: #94a3b8;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0; min-height: 100vh; min-height: 100dvh;
+            background: var(--bg-dark);
+            background-image:
+                radial-gradient(at 0% 0%, rgba(138, 43, 226, 0.18) 0px, transparent 50%),
+                radial-gradient(at 100% 100%, rgba(0, 240, 255, 0.12) 0px, transparent 50%);
+            color: var(--text-main); font-family: 'Outfit', sans-serif;
+            display: flex; align-items: center; justify-content: center; padding: 20px;
+        }
+
+        .card {
+            width: 100%; max-width: 380px; background: var(--panel-bg);
+            border: 1px solid var(--panel-border); border-radius: 16px; padding: 26px;
+            backdrop-filter: blur(14px); box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+        }
+
+        .brand {
+            text-align: center; font-size: 26px; font-weight: 900; letter-spacing: 4px;
+            background: linear-gradient(135deg, #fff 0%, var(--accent-cyan) 60%, var(--accent-purple) 100%);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+        }
+        .sub { text-align: center; color: var(--text-dim); font-size: 12px; margin: 4px 0 22px; letter-spacing: 1px; }
+
+        .tabs { display: flex; gap: 6px; margin-bottom: 16px; }
+        .tab {
+            flex: 1; text-align: center; padding: 8px; border-radius: 8px; cursor: pointer;
+            border: 1px solid var(--panel-border); color: var(--text-dim); font-size: 12px; font-weight: 600;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .tab.active { color: var(--accent-cyan); border-color: var(--accent-cyan); }
+
+        label.f { display: flex; flex-direction: column; gap: 5px; font-size: 11px; color: var(--text-dim); margin-bottom: 12px; }
+        input {
+            background: rgba(255, 255, 255, 0.04); border: 1px solid var(--panel-border); border-radius: 8px;
+            padding: 10px 12px; color: var(--text-main); font-family: 'JetBrains Mono', monospace; font-size: 13px; outline: none; width: 100%;
+        }
+        input:focus { border-color: var(--accent-cyan); }
+
+        button {
+            width: 100%; padding: 11px; border-radius: 9px; border: none; cursor: pointer; margin-top: 4px;
+            background: linear-gradient(135deg, var(--accent-cyan), #00b7c9); color: #04222a;
+            font-family: 'Outfit', sans-serif; font-size: 14px; font-weight: 700;
+        }
+        button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .err { color: #ff7a9c; font-size: 12px; min-height: 16px; margin-top: 10px; text-align: center; }
+        .back { text-align: center; margin-top: 16px; }
+        .back a { color: var(--text-dim); font-size: 12px; text-decoration: none; }
+        .back a:hover { color: var(--accent-cyan); }
+    </style>
+</head>
+
+<body>
+    <div class="card">
+        <div class="brand">HEROS</div>
+        <div class="sub">Търговия · вход в профил</div>
+
+        <div class="tabs">
+            <div class="tab active" id="tabLogin" onclick="setMode('login')">Вход</div>
+            <div class="tab" id="tabRegister" onclick="setMode('register')">Регистрация</div>
+        </div>
+
+        <form id="form" onsubmit="submitForm(event)">
+            <label class="f">Имейл
+                <input type="email" id="email" autocomplete="username" required>
+            </label>
+            <label class="f">Парола
+                <input type="password" id="password" autocomplete="current-password" required minlength="6">
+            </label>
+            <button type="submit" id="btn">Влез</button>
+        </form>
+        <div class="err" id="err"></div>
+        <div class="back"><a href="/">← Обратно към портала</a></div>
+    </div>
+
+    <script>
+        const params = new URLSearchParams(location.search);
+        const next = params.get('next') || '/heros/trade.html';
+        let mode = 'login';
+
+        function setMode(m) {
+            mode = m;
+            document.getElementById('tabLogin').classList.toggle('active', m === 'login');
+            document.getElementById('tabRegister').classList.toggle('active', m === 'register');
+            document.getElementById('btn').textContent = m === 'login' ? 'Влез' : 'Създай профил';
+            document.getElementById('password').autocomplete = m === 'login' ? 'current-password' : 'new-password';
+            document.getElementById('err').textContent = '';
+        }
+
+        async function submitForm(e) {
+            e.preventDefault();
+            const btn = document.getElementById('btn');
+            btn.disabled = true;
+            document.getElementById('err').textContent = '';
+            try {
+                const r = await fetch('/api/auth/' + mode, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email: document.getElementById('email').value, password: document.getElementById('password').value })
+                }).then(x => x.json());
+                if (!r.ok) throw new Error(r.error || 'Грешка');
+                location.href = next;
+            } catch (err) {
+                document.getElementById('err').textContent = err.message;
+                btn.disabled = false;
+            }
+        }
+
+        // Ако вече е влязъл — направо към търговията.
+        fetch('/api/auth/me').then(r => { if (r.ok) location.href = next; }).catch(() => {});
+    </script>
+</body>
+
+</html>

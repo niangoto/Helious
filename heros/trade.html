@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ХЕРОС — Търговия (демо)</title>
+    <title>HEROS — Търговия (демо)</title>
     <meta name="theme-color" content="#06080f">
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
     <link
@@ -154,14 +154,16 @@
 <body>
     <header>
         <div class="brand">
-            <span class="logo">ХЕРОС</span>
+            <span class="logo">HEROS</span>
             <span class="sub">Търговия · демо (paper)</span>
             <span class="status-badge" id="statusBadge">не е стартирано</span>
         </div>
         <div class="hdr-actions">
+            <span class="sub" id="userEmail"></span>
             <a class="btn" href="/">← Портал</a>
             <button class="btn warn" id="btnPause" onclick="doAction('pause')" disabled>⏸ Пауза</button>
             <button class="btn danger" id="btnStop" onclick="doAction('stop')" disabled>■ Стоп</button>
+            <button class="btn" onclick="logout()">Изход</button>
         </div>
     </header>
 
@@ -271,6 +273,17 @@
         const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'XAUUSD', 'WTI', 'BRENT', 'DAX', 'NDX', 'SPX', 'EURUSD', 'GBPUSD'];
         let sessionId = null, es = null, chart = null, candleSeries = null, activeSymbol = null, lastState = null;
 
+        // ── Профил ──
+        function toLogin() { location.href = '/heros/login.html?next=' + encodeURIComponent('/heros/trade.html'); }
+        fetch('/api/auth/me').then(r => r.json()).then(j => {
+            if (!j.ok) return toLogin();
+            document.getElementById('userEmail').textContent = j.user.email;
+        }).catch(() => {});
+        async function logout() {
+            try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
+            toLogin();
+        }
+
         // ── Инициализация на контролите ──
         (function initControls() {
             const chips = document.getElementById('symChips');
@@ -321,9 +334,11 @@
             document.getElementById('btnStart').disabled = true;
             document.getElementById('btnStart').textContent = '⏳ Стартира...';
             try {
-                const r = await fetch('/api/paper/sessions', {
+                const resp = await fetch('/api/paper/sessions', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg)
-                }).then(x => x.json());
+                });
+                if (resp.status === 401) return toLogin();
+                const r = await resp.json();
                 if (!r.ok) throw new Error(r.error || 'грешка');
                 sessionId = r.id;
                 setStatus('running');

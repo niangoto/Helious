@@ -38,6 +38,7 @@ function mimeType(file) {
 }
 
 const db = require('./db');
+const auth = require('./auth');
 
 // Чете JSON тяло на заявка (за POST API).
 function readJson(req) {
@@ -49,11 +50,69 @@ function readJson(req) {
   });
 }
 
+// ─── Auth helper-и (cookie-based) ────────────────────────────────
+const AUTH_COOKIE = 'heros_auth';
+function parseCookies(req) {
+  const out = {};
+  (req.headers.cookie || '').split(';').forEach(p => {
+    const i = p.indexOf('=');
+    if (i > -1) out[p.slice(0, i).trim()] = decodeURIComponent(p.slice(i + 1).trim());
+  });
+  return out;
+}
+function authUser(req) { return auth.verifyToken(parseCookies(req)[AUTH_COOKIE]); }
+function isSecureReq(req) {
+  return req.socket && req.socket.encrypted || String(req.headers['x-forwarded-proto'] || '').includes('https');
+}
+function setAuthCookie(res, token, req) {
+  const sec = isSecureReq(req) ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${60 * 60 * 24 * 30}${sec}`);
+}
+function clearAuthCookie(res, req) {
+  const sec = isSecureReq(req) ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${sec}`);
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
 
-  // ─── Paper търговия API ──────────────────────────────────────────
+  // ─── Auth API (профил/вход) ──────────────────────────────────────
+  if (url.pathname.startsWith('/api/auth/')) {
+    const action = url.pathname.slice('/api/auth/'.length).replace(/\/+$/, '');
+    try {
+      if (action === 'register' && req.method === 'POST') {
+        const b = await readJson(req);
+        const u = auth.createUser(b.email, b.password);
+        const t = auth.createToken(u.id);
+        setAuthCookie(res, t, req);
+        return sendJson(res, 201, { ok: true, user: u });
+      }
+      if (action === 'login' && req.method === 'POST') {
+        const b = await readJson(req);
+        const u = auth.verifyUser(b.email, b.password);
+        if (!u) return sendJson(res, 401, { ok: false, error: 'Грешен имейл или парола' });
+        const t = auth.createToken(u.id);
+        setAuthCookie(res, t, req);
+        return sendJson(res, 200, { ok: true, user: u });
+      }
+      if (action === 'logout' && req.method === 'POST') {
+        auth.deleteToken(parseCookies(req)[AUTH_COOKIE]);
+        clearAuthCookie(res, req);
+        return sendJson(res, 200, { ok: true });
+      }
+      if (action === 'me' && req.method === 'GET') {
+        const u = authUser(req);
+        return u ? sendJson(res, 200, { ok: true, user: u }) : sendJson(res, 401, { ok: false, error: 'Не сте влезли' });
+      }
+      return sendJson(res, 404, { ok: false, error: 'Неизвестен auth път' });
+    } catch (e) {
+      return sendJson(res, 400, { ok: false, error: e.message });
+    }
+  }
+
+  // ─── Paper търговия API (изисква вход) ───────────────────────────
   if (url.pathname.startsWith('/api/paper/')) {
+    if (!authUser(req)) return sendJson(res, 401, { ok: false, error: 'Изисква вход' });
     const engine = require('./engine/session');
     const parts = url.pathname.split('/').filter(Boolean); // api/paper/sessions/:id/:action
     const method = req.method;
@@ -354,6 +413,12 @@ const server = http.createServer(async (req, res) => {
     res.end('Forbidden');
     return;
   }
+  // Търговията изисква вход в профил
+  if (urlPath === '/heros/trade.html' && !authUser(req)) {
+    res.writeHead(302, { Location: '/heros/login.html?next=' + encodeURIComponent('/heros/trade.html') });
+    res.end();
+    return;
+  }
   fs.readFile(filePath, (err, data) => {
     if (err) {
       res.writeHead(404);
@@ -580,6 +645,9 @@ server.listen(PORT, async () => {
   } catch (e) {
     console.error('[db] init/migrate fail:', e.message);
   }
+  // Възстановяване на paper сесиите (продължават да търгуват след рестарт)
+  try { await require('./engine/session').init(); }
+  catch (e) { console.error('[paper] init fail:', e.message); }
   // Check MT5 availability in background
   const dp = require('./data-provider');
   dp.checkMT5().catch(() => {});
