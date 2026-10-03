@@ -1,7 +1,7 @@
 // Чиста стратегия (вход/изход/размер) — огледало на логиката в hermes.html.
 // Ползва се от paper двигателя. Без DOM/мрежа — само математика.
 
-const { specFor, floorLots } = require('./symbolSpec');
+const { specFor } = require('./symbolSpec');
 
 // Нормализира параметрите като readParams() в hermes.html.
 function normalizeParams(p) {
@@ -19,6 +19,7 @@ function normalizeParams(p) {
     holdBars: Math.max(1, parseInt(p.holdBars, 10) || 50),
     kellyF: Math.min(1, Math.max(0.01, num(p.kellyF, 0.25))),
     maxKelly: Math.min(1, Math.max(0.01, num(p.maxKelly, 0.05))),
+    minLot: Math.max(0.01, num(p.minLot, 0.01)),
     reverse: !!p.reverse
   };
 }
@@ -68,14 +69,18 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol) {
   if (!(units > 0)) return null;
 
   // Преобразуване в реален обем (лотове) според спецификацията на инструмента.
+  // Минималният/стъпковият обем се задава (по подразбиране 0.01 лот).
   const spec = specFor(symbol);
-  let lots = Math.min(floorLots(units / spec.contract, spec), spec.max);
-  if (lots < spec.min) lots = spec.min; // брокерите изискват минимум 0.01 лот
+  const minLot = P.minLot || spec.min;
+  let lots = Math.floor((units / spec.contract) / minLot + 1e-9) * minLot;
+  lots = Math.min(lots, spec.max);
+  if (lots < minLot) lots = minLot;
+  lots = Math.round(lots * 1e8) / 1e8;
   const finalUnits = lots * spec.contract;
   const notional = finalUnits * entry;
   const margin = notional / P.leverage;
   // Никога не отваряме по-голяма позиция от свободните пари.
-  if (!(lots >= spec.min && margin > 0 && margin <= freeMargin && notional >= 1)) return null;
+  if (!(lots >= minLot && margin > 0 && margin <= freeMargin && notional >= 1)) return null;
 
   if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
   const tp = dir === 'BUY' ? entry + tpDist : entry - tpDist;
