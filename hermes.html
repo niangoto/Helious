@@ -974,6 +974,39 @@
         };
 
         const intervalLabels = { '1m': '1м', '5m': '5м', '15m': '15м', '30m': '30м', '1h': '1ч', '4h': '4ч', '1d': '1Д' };
+
+        // Спецификации на инструментите (contract size; стъпка/мин. лот 0.01)
+        const SYMBOL_SPECS = {
+            EURUSD: { contract: 100000, step: 0.01, min: 0.01, max: 100 },
+            GBPUSD: { contract: 100000, step: 0.01, min: 0.01, max: 100 },
+            USDJPY: { contract: 100000, step: 0.01, min: 0.01, max: 100 },
+            USDCHF: { contract: 100000, step: 0.01, min: 0.01, max: 100 },
+            EURJPY: { contract: 100000, step: 0.01, min: 0.01, max: 100 },
+            GBPJPY: { contract: 100000, step: 0.01, min: 0.01, max: 100 },
+            AUDUSD: { contract: 100000, step: 0.01, min: 0.01, max: 100 },
+            NZDUSD: { contract: 100000, step: 0.01, min: 0.01, max: 100 },
+            USDCAD: { contract: 100000, step: 0.01, min: 0.01, max: 100 },
+            EURGBP: { contract: 100000, step: 0.01, min: 0.01, max: 100 },
+            EURAUD: { contract: 100000, step: 0.01, min: 0.01, max: 100 },
+            GBPCHF: { contract: 100000, step: 0.01, min: 0.01, max: 100 },
+            XAUUSD: { contract: 100, step: 0.01, min: 0.01, max: 50 },
+            XAGUSD: { contract: 5000, step: 0.01, min: 0.01, max: 50 },
+            WTI: { contract: 1000, step: 0.01, min: 0.01, max: 50 },
+            BRENT: { contract: 1000, step: 0.01, min: 0.01, max: 50 },
+            DAX: { contract: 1, step: 0.01, min: 0.01, max: 1000 },
+            NDX: { contract: 1, step: 0.01, min: 0.01, max: 1000 },
+            SPX: { contract: 1, step: 0.01, min: 0.01, max: 1000 },
+            DJI: { contract: 1, step: 0.01, min: 0.01, max: 1000 },
+            CAC: { contract: 1, step: 0.01, min: 0.01, max: 1000 },
+            UK100: { contract: 1, step: 0.01, min: 0.01, max: 1000 },
+            NI225: { contract: 1, step: 0.01, min: 0.01, max: 1000 },
+            BTCUSDT: { contract: 1, step: 0.01, min: 0.01, max: 100 },
+            ETHUSDT: { contract: 1, step: 0.01, min: 0.01, max: 1000 },
+            SOLUSDT: { contract: 1, step: 0.01, min: 0.01, max: 5000 }
+        };
+        const DEFAULT_SPEC = { contract: 1, step: 0.01, min: 0.01, max: 1000 };
+        function specFor(sym) { return SYMBOL_SPECS[String(sym || '').toUpperCase().trim()] || DEFAULT_SPEC; }
+        function floorLots(lots, spec) { const v = Math.floor(lots / spec.step + 1e-9) * spec.step; return Math.round(v * 1e8) / 1e8; }
         // Горна граница на теглените свещи (доставчикът ги пейджира). Достатъчна за
         // напр. 1м за ~34 дни; над това периодът се скъсява (вижда се в #periodInfo).
         const MAX_FETCH = 50000;
@@ -1282,15 +1315,15 @@
                 const total = equity + floatPnl;
                 const change = total - simBudget;
                 const changePct = simBudget > 0 ? (change / simBudget) * 100 : 0;
-                let margin = 0, notional = 0, units = 0;
-                if (c) for (const p of legs) { margin += p.margin; units += p.units; notional += p.units * c.close; }
+                let margin = 0, notional = 0, lots = 0;
+                if (c) for (const p of legs) { margin += p.margin; lots += (p.lots != null ? p.lots : 0); notional += p.units * c.close; }
                 el.innerHTML =
                     `<span>От начало: <b class="${change >= 0 ? 'pos' : 'neg'}">${(change >= 0 ? '+' : '') + change.toFixed(2)} € (${(changePct >= 0 ? '+' : '') + changePct.toFixed(2)}%)</b></span>` +
                     `<span>Баланс: <b>${equity.toFixed(2)} €</b></span>` +
                     `<span>Общо: <b>${total.toFixed(2)} €</b></span>` +
                     `<span>Сделки: <b>${tradeCount}</b></span>` +
                     `<span>Отворени: <b>${(legs || []).length}</b></span>` +
-                    (hasOpen ? `<span>Обем: <b>${units.toFixed(4)}</b></span><span>Маржин: <b>${margin.toFixed(2)} €</b></span><span>Нотионал: <b>${notional.toFixed(2)} €</b></span>` : `<span>Обем: <b>—</b></span><span>Маржин: <b>—</b></span><span>Нотионал: <b>—</b></span>`) +
+                    (hasOpen ? `<span>Обем: <b>${lots.toFixed(2)} лот</b></span><span>Маржин: <b>${margin.toFixed(2)} €</b></span><span>Нотионал: <b>${notional.toFixed(2)} €</b></span>` : `<span>Обем: <b>—</b></span><span>Маржин: <b>—</b></span><span>Нотионал: <b>—</b></span>`) +
                     (c ? `<span>${fmtTime(c.time)} · <b>${fmt(c.close)}</b></span>` : '');
             }
             setProgress(Math.round(((i - 30) / Math.max(1, n - 30)) * 100), `Свещ ${i}/${n} — ${tradeCount} сделки`);
@@ -1512,7 +1545,7 @@
                 <span class="c-num">#${seq}</span>
                 <span class="c-time">${fmtTime(pos.openTime)}</span>
                 <span class="c-dir ${pos.dir === 'BUY' ? 'buy' : 'sell'}">${pos.dir === 'BUY' ? 'BUY' : 'SELL'}</span>
-                <span class="c-vol">${pos.units.toFixed(4)}</span>
+                <span class="c-vol">${(pos.lots != null ? pos.lots : pos.units).toFixed(2)} лот</span>
                 <span class="c-entry">${fmt(pos.entry)}</span>
                 <span class="c-tpsl">${fmt(pos.tp)} / ${fmt(pos.sl)}</span>
                 <span class="c-exit">${fmt(exitPrice)} <small>${reason}</small></span>
@@ -1538,7 +1571,7 @@
                 const legRow = (pos) => `
                     <div class="cp-leg">
                         <b class="${pos.dir === 'BUY' ? 'pos' : 'neg'}">${pos.dir === 'BUY' ? 'BUY' : 'SELL'}</b>
-                        <span>Обем ${pos.units.toFixed(4)}</span>
+                        <span>Обем ${(pos.lots != null ? pos.lots : pos.units).toFixed(2)} лот</span>
                         <span>Вход ${fmt(pos.entry)}</span>
                         <span>TP ${fmt(pos.tp)}</span>
                         <span>SL ${fmt(pos.sl)}</span>
@@ -1676,18 +1709,29 @@
                                 if (f > 0) {
                                     const riskAmount = f * equity;
                                     let units = riskAmount / loss;
-                                    const maxUnits = (equity * P.leverage) / entry;
+                                    // Свободен маржин = капитал − заетия маржин на позициите
+                                    let usedMargin = 0;
+                                    for (const pp of legs) usedMargin += pp.margin || 0;
+                                    const freeMargin = Math.max(0, equity - usedMargin);
+                                    const spec = specFor(currentSymbol);
+                                    const maxUnits = (freeMargin * P.leverage) / entry;
                                     units = Math.min(units, maxUnits);
-                                    const notional = units * entry;
+                                    let lots = Math.min(floorLots(units / spec.contract, spec), spec.max);
+                                    if (lots < spec.min) lots = spec.min; // минимум 0.01 лот
+                                    const finalUnits = lots * spec.contract;
+                                    const notional = finalUnits * entry;
                                     const margin = notional / P.leverage;
-                                    if (units > 0 && margin > 0 && margin <= equity && notional >= 1) {
+                                    // Никога не отваряме повече от свободните пари.
+                                    if (lots >= spec.min && margin > 0 && margin <= freeMargin && notional >= 1) {
                                         // Отваря се само обратната поръчка вместо определената, със същия обем
                                         if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
                                         const t = candles[i].time;
                                         legs = [{
                                             dir,
                                             entry,
-                                            units,
+                                            lots,
+                                            contract: spec.contract,
+                                            units: finalUnits,
                                             tp: dir === 'BUY' ? entry + tpDist : entry - tpDist,
                                             sl: dir === 'BUY' ? entry - slDist : entry + slDist,
                                             atr,
@@ -1702,7 +1746,7 @@
                                             position: dir === 'BUY' ? 'belowBar' : 'aboveBar',
                                             color: dir === 'BUY' ? '#00ff66' : '#ff0055',
                                             shape: dir === 'BUY' ? 'arrowUp' : 'arrowDown',
-                                            text: dir
+                                            text: dir + ' ' + lots + 'л'
                                         });
                                         markersDirty = true;
                                     }

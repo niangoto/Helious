@@ -152,7 +152,13 @@ class PaperSession {
     if (!prob) return;
     const atrArr = models.computeATR(win, 14);
     const atr = atrArr[atrArr.length - 1];
-    const dec = entryDecision(prob, atr, bar.close, this.account.balance, this.P, symbol);
+    // Свободен маржин: капитал (баланс + плаваща) минус заетия маржин.
+    const prices = this.prices();
+    const equity = this.account.equity(prices);
+    let usedMargin = 0;
+    for (const p of this.account.positions.values()) usedMargin += p.margin || 0;
+    const freeMargin = Math.max(0, equity - usedMargin);
+    const dec = entryDecision(prob, atr, bar.close, equity, freeMargin, this.P, symbol);
     if (!dec) return;
     this.account.open({
       symbol,

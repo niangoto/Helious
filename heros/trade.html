@@ -386,6 +386,7 @@
             const open = state.openPositions || [];
             const usedMargin = open.reduce((a, p) => a + (p.margin || 0), 0);
             const notional = open.reduce((a, p) => a + (p.notional || 0), 0);
+            const freeMargin = Math.max(0, (s.equity || 0) - usedMargin);
             const cards = [
                 ['Плаваща P/L', euro(s.floating), cls(s.floating)],
                 ['Обща P/L', euro(s.totalPnl) + ' (' + (s.totalPct >= 0 ? '+' : '') + fmt(s.totalPct) + '%)', cls(s.totalPnl)],
@@ -393,6 +394,7 @@
                 ['Капитал', fmt(s.equity) + ' €', ''],
                 ['Отворени сега', String(s.openCount), ''],
                 ['Зает маржин', fmt(usedMargin) + ' €', ''],
+                ['Свободен маржин', fmt(freeMargin) + ' €', ''],
                 ['Нотионал', fmt(notional) + ' €', ''],
                 ['Сделки от начало', String(s.trades), ''],
                 ['Win rate', fmt(s.winRate, 1) + '%', ''],

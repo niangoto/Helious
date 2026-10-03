@@ -24,10 +24,13 @@ function normalizeParams(p) {
 }
 
 // Решение за вход при дадена вероятност и ATR. Връща позиция или null.
-// { buyPct, sellPct } = prob; atr/entry = текущи; equity = текущ капитал;
-// symbol се ползва за реалния обем в лотове (contract size, step, min).
-function entryDecision(prob, atr, entry, equity, P, symbol) {
+// { buyPct, sellPct } = prob; atr/entry = текущи;
+// equity = общ капитал (за рисковото правило); freeMargin = свободен маржин
+// (equity − вече заетия маржин) — позицията никога не надхвърля него.
+function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol) {
+  if (freeMargin == null) freeMargin = equity;
   if (!prob || !(atr > 0) || !(entry > 0) || !(equity > 0)) return null;
+  if (!(freeMargin > 0)) return null;
   const buyPct = prob.buyPct, sellPct = prob.sellPct;
   const alpha = P.alpha;
 
@@ -57,22 +60,22 @@ function entryDecision(prob, atr, entry, equity, P, symbol) {
   const f = Math.min(fStar * P.kellyF * alpha, P.maxKelly);
   if (!(f > 0)) return null;
 
-  // Размер по риска (Kelly) + таван по маржин.
+  // Размер по риска (Kelly), ограничен от свободния маржин и ливъриджа.
   const riskAmount = f * equity;
   let units = riskAmount / loss;
-  const maxUnits = (equity * P.leverage) / entry;
+  const maxUnits = (freeMargin * P.leverage) / entry;
   units = Math.min(units, maxUnits);
   if (!(units > 0)) return null;
 
   // Преобразуване в реален обем (лотове) според спецификацията на инструмента.
   const spec = specFor(symbol);
-  let lots = floorLots(units / spec.contract, spec);
-  lots = Math.min(lots, spec.max);
-  if (lots < spec.min) lots = spec.min; // брокерите изискват минимум 1 лот
+  let lots = Math.min(floorLots(units / spec.contract, spec), spec.max);
+  if (lots < spec.min) lots = spec.min; // брокерите изискват минимум 0.01 лот
   const finalUnits = lots * spec.contract;
   const notional = finalUnits * entry;
   const margin = notional / P.leverage;
-  if (!(lots >= spec.min && margin > 0 && margin <= equity && notional >= 1)) return null;
+  // Никога не отваряме по-голяма позиция от свободните пари.
+  if (!(lots >= spec.min && margin > 0 && margin <= freeMargin && notional >= 1)) return null;
 
   if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
   const tp = dir === 'BUY' ? entry + tpDist : entry - tpDist;
