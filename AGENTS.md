@@ -1,6 +1,7 @@
 # Agent Guidance: Helious Quantum
 
 ## Architecture
+- **Portal (`heros/`)**: separate self-contained project — `heros/index.html` is the new entry page „ХЕРОС“ with top buttons to HELIOUS (`/index.html`) and HERMES (`/hermes.html`). Served at `/`, `/heros`, `/heros/` (see `server.js`). Terminal shortcut: `/helious`.
 - **Single-page app** with a zero-dep Node.js proxy server (`server.js`).
 - **UI**: `index.html` (inline CSS, scripts split under `js/`). **Forecast engine**: `forecast.js`.
 - **Frontend modules**: `js/config.js` (constants/symbols), `js/state.js` (shared state), `js/data.js` (fetchKlines), `js/news.js` (news view), `js/indicators.js` (RSI + indicator data), `js/app.js` (main app: chart, present line, realtime). Tab algorithms live in `js/tabs/`: `tabs.js` (registry + shared helpers), `indicators.js`, `average.js`, `historical.js`, `logistic.js`, `markov.js`, `expected-value.js`, `wavelet.js`, `fourier.js`, `rsi-phase.js`, `candle-forecast.js` — each registers a `renderPanel`/`drawChart` pair into `TabRegistry`.

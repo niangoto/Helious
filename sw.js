@@ -1,6 +1,6 @@
-const CACHE = 'helious-v23';
+const CACHE = 'helious-v24';
 const URLS = [
-    '/',
+    '/index.html',
     '/manifest.json',
     '/forecast.js',
     '/models.js',

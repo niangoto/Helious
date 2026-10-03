@@ -2,7 +2,7 @@
   "name": "Helious Quantum",
   "short_name": "Helious",
   "description": "Аналитичен терминал с квантова прогноза",
-  "start_url": "/",
+  "start_url": "/index.html",
   "display": "standalone",
   "orientation": "portrait",
   "background_color": "#06080f",

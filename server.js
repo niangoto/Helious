@@ -253,7 +253,12 @@ const server = http.createServer((req, res) => {
   }
 
   // Static Files
-  const filePath = path.join(__dirname, url.pathname === '/' ? 'index.html' : url.pathname);
+  // '/' и /heros → порталът ХЕРОС (отделен проект в папка heros/).
+  // /helious → аналитичният терминал Helious (index.html).
+  let urlPath = url.pathname;
+  if (urlPath === '/' || urlPath === '/heros' || urlPath === '/heros/') urlPath = '/heros/index.html';
+  else if (urlPath === '/helious' || urlPath === '/helious/') urlPath = '/index.html';
+  const filePath = path.join(__dirname, urlPath);
   fs.readFile(filePath, (err, data) => {
     if (err) {
       res.writeHead(404);
