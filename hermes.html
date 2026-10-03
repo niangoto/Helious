@@ -477,6 +477,9 @@
             border: 1px solid rgba(138, 43, 226, 0.4);
             background: linear-gradient(135deg, rgba(138, 43, 226, 0.12), rgba(0, 240, 255, 0.06));
             flex-shrink: 0;
+            /* Фиксирана височина, за да не мърда графиката при отваряне/затваряне */
+            min-height: 82px;
+            box-sizing: border-box;
         }
 
         .cp-head {
@@ -1558,7 +1561,7 @@
         // Панел „Отворени позиции“: стои постоянно видим (не мига при отваряне/
         // затваряне). Когато няма позиция, показва празни (—) числови стойности.
         let posPanelKey = null;
-        function updatePositionsPanel(legs, c) {
+        function updatePositionsPanel(legs, c, equityOverride) {
             const el = document.getElementById('currentPos');
             if (!el) return;
             if (el.style.display !== 'block') el.style.display = 'block';
@@ -1567,7 +1570,6 @@
             const key = open.map(p => p.openIdx).join(',');
             if (key !== posPanelKey) {
                 posPanelKey = key;
-                const totalMargin = open.reduce((s, p) => s + p.margin, 0);
                 const legRow = (pos) => `
                     <div class="cp-leg">
                         <b class="${pos.dir === 'BUY' ? 'pos' : 'neg'}">${pos.dir === 'BUY' ? 'BUY' : 'SELL'}</b>
@@ -1578,26 +1580,40 @@
                         <span>Вер. ${pos.prob.toFixed(1)}%</span>
                     </div>
                 `;
+                // Панелът остава постоянно видим и с еднаква структура (за да не мърда
+                // графиката). При липса на позиция редът стои с тирета, а не изчезва.
+                const legHtml = hasOpen
+                    ? open.map(legRow).join('')
+                    : '<div class="cp-leg"><b>—</b><span>Обем —</span><span>Вход —</span><span>TP —</span><span>SL —</span><span>Вер. —</span></div>';
                 el.innerHTML = `
-                    <div class="cp-head">Отворени позиции — зает маржин: ${hasOpen ? totalMargin.toFixed(2) + ' €' : '—'}</div>
+                    <div class="cp-head">Отворени позиции — зает маржин: <span id="cpUsed">—</span> · свободен маржин: <span id="cpFree">—</span></div>
                     <div class="cp-grid">
-                        ${hasOpen ? open.map(legRow).join('') : '<span>Обем —</span><span>Вход —</span><span>TP —</span><span>SL —</span><span>Вер. —</span>'}
-                        <span>Риск (α): ${hasOpen ? open[0].alpha.toFixed(2) : '—'}</span>
+                        ${legHtml}
+                        <span>Риск (α): <span id="cpRisk">${hasOpen ? open[0].alpha.toFixed(2) : '—'}</span></span>
                         <span id="cpFloat">Плаващ P/L: —</span>
                     </div>
                 `;
             }
-            const fEl = document.getElementById('cpFloat');
-            if (!fEl) return;
-            if (!hasOpen) {
-                fEl.textContent = 'Плаващ P/L: —';
-                fEl.style.color = '';
-                return;
-            }
+
+            // Винаги обновяваме маржин/свободен маржин и плаващата (без да пипаме височината).
+            const totalMargin = open.reduce((s, p) => s + p.margin, 0);
             let floatPnl = 0;
             if (c) for (const pos of open) floatPnl += pos.dir === 'BUY' ? (c.close - pos.entry) * pos.units : (pos.entry - c.close) * pos.units;
-            fEl.textContent = 'Плаващ P/L: ' + (floatPnl >= 0 ? '+' : '') + floatPnl.toFixed(2) + ' €';
-            fEl.style.color = floatPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+            const realized = (equityOverride != null) ? equityOverride : (parseFloat((document.getElementById('inpBudget') || {}).value) || 1000);
+            const totalEquity = realized + floatPnl;
+            const freeMargin = Math.max(0, totalEquity - totalMargin);
+            const usedEl = document.getElementById('cpUsed');
+            const freeEl = document.getElementById('cpFree');
+            if (usedEl) usedEl.textContent = totalMargin.toFixed(2) + ' €';
+            if (freeEl) freeEl.textContent = freeMargin.toFixed(2) + ' €';
+            const fEl = document.getElementById('cpFloat');
+            if (fEl) {
+                if (!hasOpen) { fEl.textContent = 'Плаващ P/L: —'; fEl.style.color = ''; }
+                else {
+                    fEl.textContent = 'Плаващ P/L: ' + (floatPnl >= 0 ? '+' : '') + floatPnl.toFixed(2) + ' €';
+                    fEl.style.color = floatPnl >= 0 ? 'var(--accent-green)' : 'var(--accent-red)';
+                }
+            }
         }
 
         function renderSummary(P, equity, trades, wins, maxDD) {
@@ -1756,7 +1772,7 @@
                     }
                 }
 
-                updatePositionsPanel(legs, candles[i]);
+                updatePositionsPanel(legs, candles[i], equity);
 
                 // Точка от кривата на сметката (% спрямо началото) за текущата свещ.
                 {
@@ -1802,7 +1818,7 @@
                     markersDirty = true;
                 }
                 legs = [];
-                updatePositionsPanel([], c);
+                updatePositionsPanel([], c, equity);
             }
 
             renderSummary(P, equity, tradeCount, winsCount, maxDD);
@@ -1837,7 +1853,7 @@
             const periodInfoEl = document.getElementById('periodInfo');
             if (periodInfoEl) periodInfoEl.innerHTML = 'Заявен интервал: <b>' + (intervalLabels[interval] || interval) + '</b> · зареждане на данни...';
             posPanelKey = null;
-            updatePositionsPanel([], null);
+            updatePositionsPanel([], null, parseFloat((document.getElementById('inpBudget') || {}).value) || 1000);
             document.getElementById('chartSection').style.display = 'none';
             document.getElementById('btnStart').disabled = true;
             document.getElementById('btnStart').textContent = '⏳ Работи...';
