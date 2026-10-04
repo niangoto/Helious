@@ -26,6 +26,7 @@ class PaperSession {
   constructor(id, config) {
     config = config || {};
     this.id = id;
+    this.ownerId = config.ownerId || null;   // профилът, който е стартирал сесията
     this.symbols = (Array.isArray(config.symbols) && config.symbols.length ? config.symbols : ['BTCUSDT'])
       .map(s => String(s).toUpperCase().trim()).filter(Boolean).slice(0, 10);
     this.interval = IV_SEC[config.interval] ? config.interval : '1h';
@@ -239,6 +240,7 @@ class PaperSession {
       error: this.error,
       createdAt: this.createdAt,
       startedAt: this.startedAt,
+      updatedAt: this.updatedAt,
       config: {
         symbols: this.symbols,
         interval: this.interval,
@@ -257,6 +259,7 @@ class PaperSession {
   serialize() {
     return {
       id: this.id,
+      ownerId: this.ownerId,
       symbols: this.symbols,
       interval: this.interval,
       model: this.model,
@@ -317,7 +320,7 @@ function saveAll() {
 
 function restoreSession(obj) {
   const s = new PaperSession(obj.id, {
-    symbols: obj.symbols, interval: obj.interval, model: obj.model, contra: obj.contra, params: obj.P
+    ownerId: obj.ownerId, symbols: obj.symbols, interval: obj.interval, model: obj.model, contra: obj.contra, params: obj.P
   });
   s.status = obj.status || 'running';
   s.createdAt = obj.createdAt || Date.now();
@@ -377,11 +380,28 @@ async function createSession(config) {
 }
 
 function getSession(id) { return sessions.get(id); }
-function listSessions() {
-  return [...sessions.values()].map(s => ({
-    id: s.id, status: s.status, symbols: s.symbols, interval: s.interval,
-    model: s.model, startedAt: s.startedAt, equity: s.account.equity(s.prices())
-  }));
+function owns(id, ownerId) {
+  const s = sessions.get(id);
+  if (!s) return false;
+  return !s.ownerId || !ownerId || s.ownerId === ownerId;
+}
+function listSessions(ownerId) {
+  return [...sessions.values()]
+    .filter(s => !ownerId || !s.ownerId || s.ownerId === ownerId)
+    .map(s => ({
+      id: s.id, status: s.status, symbols: s.symbols, interval: s.interval,
+      model: s.model, contra: s.contra, params: s.P,
+      createdAt: s.createdAt, startedAt: s.startedAt, updatedAt: s.updatedAt,
+      equity: s.account.equity(s.prices()), balance: s.account.balance,
+      trades: s.account.trades.length,
+      lastBars: Object.fromEntries(s.symbols.map(x => [x, s.state[x].lastBarTime || 0])),
+      errors: s.symbols.filter(x => s.state[x].error).map(x => x + ': ' + s.state[x].error)
+    }))
+    .sort((a, b) => (b.startedAt || b.createdAt || 0) - (a.startedAt || a.createdAt || 0));
+}
+// Активни (работещи/на пауза) сесии на потребител — за авто-възстановяване при вход.
+function activeSessions(ownerId) {
+  return listSessions(ownerId).filter(s => s.status === 'running' || s.status === 'paused');
 }
 function removeSession(id) {
   const s = sessions.get(id);
@@ -399,4 +419,4 @@ function hookSignals() {
 }
 hookSignals();
 
-module.exports = { PaperSession, createSession, getSession, listSessions, removeSession, init, saveAll, IV_SEC };
+module.exports = { PaperSession, createSession, getSession, listSessions, activeSessions, owns, removeSession, init, saveAll, IV_SEC };

@@ -118,6 +118,23 @@
         .contra label { display: flex; gap: 6px; align-items: center; color: var(--text-dim); }
         .contra input { width: auto; }
 
+        /* Списък сесии */
+        .sess {
+            display: flex; flex-direction: column; gap: 3px; padding: 8px 9px; border-radius: 9px;
+            border: 1px solid var(--panel-border); background: rgba(255, 255, 255, 0.03); cursor: pointer;
+        }
+        .sess:hover { border-color: var(--accent-cyan); }
+        .sess.active { border-color: var(--accent-cyan); box-shadow: 0 0 14px rgba(0, 240, 255, 0.15); }
+        .sess .r1 { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+        .sess .sym { font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; }
+        .sess .meta { font-size: 9.5px; color: var(--text-dim); letter-spacing: 0.3px; }
+        .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+        .dot.running { background: var(--accent-green); box-shadow: 0 0 8px var(--accent-green); }
+        .dot.paused { background: #ffd27a; }
+        .dot.stopped { background: var(--accent-red); }
+        .sess .x { background: none; border: none; color: var(--text-dim); cursor: pointer; font-size: 13px; padding: 0 2px; }
+        .sess .x:hover { color: var(--accent-red); }
+
         /* Main */
         main { flex: 1; display: flex; flex-direction: column; min-width: 0; padding: 12px 14px; gap: 10px; overflow-y: auto; }
 
@@ -159,6 +176,7 @@
             <span class="status-badge" id="statusBadge">не е стартирано</span>
         </div>
         <div class="hdr-actions">
+            <span class="sub" id="sessionInfo" style="color:var(--text-dim);font-size:10.5px;text-transform:none;letter-spacing:0"></span>
             <span class="sub" id="userEmail"></span>
             <a class="btn" href="/">← Портал</a>
             <button class="btn warn" id="btnPause" onclick="doAction('pause')" disabled>⏸ Пауза</button>
@@ -246,6 +264,12 @@
                 <div class="row"><input type="checkbox" id="inpReverse"> Обърната посока (контра със същия обем)</div>
                 <button class="btn primary" id="btnStart" onclick="startSession()" style="margin-top:4px">▶ Започни търговия</button>
             </div>
+
+            <div class="group">
+                <div class="gtitle">Моите сесии <span id="sessNote" style="color:var(--text-dim);letter-spacing:0;text-transform:none"></span></div>
+                <div id="sessionList"><div class="empty">Няма сесии</div></div>
+                <div class="note">Сессията върви на сървъра — работи и когато затвориш таба или излезеш от профила. При следващ вход виждаш до къде е стигнала.</div>
+            </div>
         </aside>
 
         <main>
@@ -282,6 +306,7 @@
         fetch('/api/auth/me').then(r => r.json()).then(j => {
             if (!j.ok) return toLogin();
             document.getElementById('userEmail').textContent = j.user.email;
+            loadSessions();
         }).catch(() => {});
         async function logout() {
             try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
@@ -333,9 +358,101 @@
             };
         }
 
+        // ── Моите сесии (работят на сървъра, независимо от браузъра) ──
+        let sessions = [];
+        async function loadSessions() {
+            try {
+                const r = await fetch('/api/paper/sessions').then(x => x.json());
+                sessions = (r && r.sessions) || [];
+            } catch (e) { sessions = []; }
+            renderSessionList();
+            const act = sessions.filter(s => s.status === 'running' || s.status === 'paused');
+            if (act.length) await attach(act[0].id);
+            else if (sessionId) renderSessionList();   // остана спряна сесия — показваме последното ѝ състояние
+            else { setStatus('none'); setSessionInfo(''); setControls(false); }
+        }
+
+        function renderSessionList() {
+            const el = document.getElementById('sessionList');
+            document.getElementById('sessNote').textContent = sessions.length ? '(' + sessions.length + ')' : '';
+            if (!sessions.length) { el.innerHTML = '<div class="empty">Няма сесии</div>'; return; }
+            el.innerHTML = sessions.map(s => {
+                const pnl = (s.equity != null && s.params && s.params.budget) ? (s.equity - s.params.budget) : null;
+                return `<div class="sess ${s.id === sessionId ? 'active' : ''}" onclick="attach('${s.id}')">
+                    <div class="r1">
+                        <span class="sym"><span class="dot ${s.status}"></span> ${s.symbols.join(', ')} · ${s.interval}</span>
+                        <span>${pnl == null ? '' : '<span class="' + cls(pnl) + '">' + euro(pnl) + '</span> '}
+                        ${s.status === 'stopped' ? '<button class="x" title="Изтрий" onclick="event.stopPropagation();delSession(\'' + s.id + '\')">✕</button>' : ''}</span>
+                    </div>
+                    <div class="meta">${s.trades} сделки · капитал ${fmt(s.equity)} €${s.startedAt ? ' · от ' + fmtDate(s.startedAt) : ''}${s.errors && s.errors.length ? ' · ⚠ ' + s.errors[0] : ''}</div>
+                </div>`;
+            }).join('');
+        }
+
+        function fmtDate(sec) {
+            return new Date(sec * 1000).toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        }
+
+        async function attach(id) {
+            if (!id) return;
+            const r = await fetch('/api/paper/sessions/' + id).then(x => x.json()).catch(() => null);
+            if (!r || !r.ok) { alert('Сесията не е намерена.'); return loadSessions(); }
+            sessionId = id;
+            applyConfig(r.state.config);
+            setControls(true);
+            render(r.state);
+            renderSessionList();
+            if (es) es.close();
+            es = new EventSource('/api/paper/sessions/' + id + '/stream');
+            es.onmessage = ev => { try { render(JSON.parse(ev.data)); } catch (e) {} };
+            es.onerror = () => { /* EventSource ще опита пак */ };
+        }
+
+        async function delSession(id) {
+            if (!confirm('Да се изтрие ли сесията?')) return;
+            try { await fetch('/api/paper/sessions/' + id, { method: 'DELETE' }); } catch (e) {}
+            if (sessionId === id) { sessionId = null; if (es) { es.close(); es = null; } setControls(false); }
+            loadSessions();
+        }
+
+        function applyConfig(cfg) {
+            if (!cfg) return;
+            const P = cfg.params || {};
+            const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
+            set('inpSymbols', (cfg.symbols || []).join(', '));
+            set('inpInterval', cfg.interval);
+            set('inpModel', cfg.model);
+            document.getElementById('contraBox').style.display = Number(cfg.model) === 5 ? 'grid' : 'none';
+            (cfg.contra || []).forEach((on, i) => { const el = document.getElementById('c' + i); if (el) el.checked = !!on; });
+            set('inpBudget', P.budget); set('inpLev', P.leverage); set('inpAlpha', P.alpha);
+            set('inpBuyTh', P.buyTh); set('inpSellTh', P.sellTh); set('inpMinEv', P.minEv);
+            set('inpTp', P.tpMult); set('inpSl', P.slMult); set('inpHold', P.holdBars);
+            set('inpKelly', P.kellyF); set('inpMaxKelly', P.maxKelly); set('inpMinLot', P.minLot);
+            document.getElementById('inpReverse').checked = !!P.reverse;
+        }
+
+        function setControls(hasSession) {
+            const on = !!hasSession;
+            document.getElementById('btnPause').disabled = !on;
+            document.getElementById('btnStop').disabled = !on;
+            document.getElementById('btnStart').disabled = false;
+            if (!on) {
+                document.getElementById('btnPause').textContent = '⏸ Пауза';
+                document.getElementById('btnStart').textContent = '▶ Започни търговия';
+            }
+        }
+
+        function setSessionInfo(txt) { document.getElementById('sessionInfo').textContent = txt || ''; }
+
         async function startSession() {
             const cfg = readConfig();
             if (!cfg.symbols.length) { alert('Въведи поне един символ.'); return; }
+            // Ако вече има активна сесия — спираме я, за да не се дублират.
+            const act = sessions.filter(s => s.status === 'running' || s.status === 'paused');
+            for (const s of act) {
+                if (!confirm('Има активна сесия (' + s.symbols.join(', ') + '). Да бъде спряна и да започне нова?')) return;
+                try { await fetch('/api/paper/sessions/' + s.id + '/stop', { method: 'POST' }); } catch (e) {}
+            }
             document.getElementById('btnStart').disabled = true;
             document.getElementById('btnStart').textContent = '⏳ Стартира...';
             try {
@@ -345,20 +462,13 @@
                 if (resp.status === 401) return toLogin();
                 const r = await resp.json();
                 if (!r.ok) throw new Error(r.error || 'грешка');
-                sessionId = r.id;
-                setStatus('running');
-                if (es) es.close();
-                es = new EventSource('/api/paper/sessions/' + sessionId + '/stream');
-                es.onmessage = ev => { try { render(JSON.parse(ev.data)); } catch (e) {} };
-                es.onerror = () => { /* EventSource ще опита пак */ };
-                document.getElementById('btnPause').disabled = false;
-                document.getElementById('btnStop').disabled = false;
-                document.getElementById('btnPause').textContent = '⏸ Пауза';
+                await loadSessions();
+                await attach(r.id);
             } catch (e) {
                 alert('Грешка: ' + e.message);
                 document.getElementById('btnStart').disabled = false;
+                document.getElementById('btnStart').textContent = '▶ Започни търговия';
             }
-            document.getElementById('btnStart').textContent = '▶ Започни търговия';
         }
 
         async function doAction(action) {
@@ -366,15 +476,24 @@
             try {
                 const r = await fetch('/api/paper/sessions/' + sessionId + '/' + action, { method: 'POST' }).then(x => x.json());
                 if (r.status) setStatus(r.status);
-                if (action === 'pause') document.getElementById('btnPause').textContent = '⏵ Продължи';
+                if (action === 'pause') document.getElementById('btnPause').textContent = r.status === 'paused' ? '⏵ Продължи' : '⏸ Пауза';
+                if (action === 'stop') setControls(true);
+                await loadSessions();
             } catch (e) {}
         }
 
         function setStatus(s) {
             const el = document.getElementById('statusBadge');
-            const map = { running: 'работи', paused: 'на пауза', stopped: 'спряно' };
-            el.className = 'status-badge ' + s;
+            const map = { running: 'работи', paused: 'на пауза', stopped: 'спряно', none: 'не е стартирано' };
+            el.className = 'status-badge ' + (s || 'none');
             el.textContent = map[s] || s;
+            if (sessionId) {
+                document.getElementById('btnPause').textContent = s === 'paused' ? '⏵ Продължи' : '⏸ Пауза';
+                const me = sessions.find(x => x.id === sessionId);
+                if (me) me.status = s;
+                const dot = document.querySelector('#sessionList .sess.active .dot');
+                if (dot) dot.className = 'dot ' + s;
+            }
         }
 
         function fmt(v, d) { if (v == null || isNaN(v)) return '—'; return Number(v).toFixed(d == null ? 2 : d); }
@@ -384,6 +503,15 @@
         function render(state) {
             lastState = state;
             setStatus(state.status);
+            const symKeys = Object.keys(state.symbols || {});
+            const bars = symKeys.map(k => (state.symbols[k].lastBarTime || 0)).filter(Boolean);
+            const lastBar = bars.length ? Math.max.apply(null, bars) : 0;
+            const ago = state.updatedAt ? Math.max(0, Math.round((Date.now() - state.updatedAt) / 1000)) : null;
+            setSessionInfo([
+                state.startedAt ? 'от ' + fmtDate(state.startedAt) : '',
+                lastBar ? 'последен бар ' + fmtDate(lastBar) : 'няма затворени барове още',
+                ago == null ? '' : (ago < 10 ? 'обновено току-що' : 'обновено преди ' + ago + ' сек')
+            ].filter(Boolean).join(' · '));
             const s = state.stats || {};
             const open = state.openPositions || [];
             const usedMargin = open.reduce((a, p) => a + (p.margin || 0), 0);
@@ -415,6 +543,18 @@
             renderOpenPositions(state.openPositions || []);
             renderTrades(state.trades || []);
             drawPnl();
+            const me = sessions.find(x => x.id === state.id);
+            if (me) {
+                const eq = (s.equity != null && me.params && me.params.budget) ? s.equity - me.params.budget : null;
+                me.equity = s.equity; me.trades = s.trades; me.status = state.status;
+                const box = document.querySelector('#sessionList .sess.active');
+                if (box && eq != null) {
+                    const v = box.querySelector('.r1 > span:last-child');
+                    if (v) v.innerHTML = '<span class="' + cls(eq) + '">' + euro(eq) + '</span> ';
+                    const m = box.querySelector('.meta');
+                    if (m) m.textContent = s.trades + ' сделки · капитал ' + fmt(s.equity) + ' €';
+                }
+            }
         }
 
         function renderTabs(keys) {

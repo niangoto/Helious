@@ -112,20 +112,23 @@ const server = http.createServer(async (req, res) => {
 
   // ─── Paper търговия API (изисква вход) ───────────────────────────
   if (url.pathname.startsWith('/api/paper/')) {
-    if (!authUser(req)) return sendJson(res, 401, { ok: false, error: 'Изисква вход' });
+    const user = authUser(req);
+    if (!user) return sendJson(res, 401, { ok: false, error: 'Изисква вход' });
     const engine = require('./engine/session');
     const parts = url.pathname.split('/').filter(Boolean); // api/paper/sessions/:id/:action
     const method = req.method;
     try {
       if (parts.length === 3 && parts[2] === 'sessions') {
-        if (method === 'GET') return sendJson(res, 200, { ok: true, sessions: engine.listSessions() });
+        // Само сесиите на вписания профил (legacy сесии без owner се виждат на всички).
+        if (method === 'GET') return sendJson(res, 200, { ok: true, sessions: engine.listSessions(user.id), active: engine.activeSessions(user.id).map(s => s.id) });
         if (method === 'POST') {
           const body = await readJson(req);
-          const s = await engine.createSession(body || {});
+          const s = await engine.createSession(Object.assign({}, body || {}, { ownerId: user.id }));
           return sendJson(res, 201, { ok: true, id: s.id, state: s.getState() });
         }
       }
       if (parts.length >= 4 && parts[2] === 'sessions') {
+        if (!engine.owns(parts[3], user.id)) return sendJson(res, 404, { ok: false, error: 'Няма такава сесия' });
         const s = engine.getSession(parts[3]);
         if (!s) return sendJson(res, 404, { ok: false, error: 'Няма такава сесия' });
         const action = parts[4];
@@ -147,6 +150,7 @@ const server = http.createServer(async (req, res) => {
         if (action === 'pause' && method === 'POST') { s.pause(); return sendJson(res, 200, { ok: true, status: s.status }); }
         if (action === 'resume' && method === 'POST') { s.resume(); return sendJson(res, 200, { ok: true, status: s.status }); }
         if (action === 'stop' && method === 'POST') { s.stop(); return sendJson(res, 200, { ok: true, status: s.status }); }
+        if (!action && method === 'DELETE') { engine.removeSession(parts[3]); return sendJson(res, 200, { ok: true }); }
       }
       return sendJson(res, 404, { ok: false, error: 'Неизвестен API път' });
     } catch (e) {
