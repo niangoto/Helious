@@ -139,7 +139,6 @@
         main { flex: 1; display: flex; flex-direction: column; min-width: 0; padding: 12px 14px; gap: 10px; overflow-y: auto; }
 
         .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
-        .card-stat { min-width: 0; }
         .card-stat {
             background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 11px; padding: 10px 12px;
         }
@@ -162,146 +161,10 @@
         th { text-align: left; color: var(--text-dim); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--panel-border); font-family: 'Outfit'; text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.5px; }
         td { padding: 6px 8px; border-bottom: 1px solid rgba(255,255,255,0.04); }
         .empty { color: var(--text-dim); font-family: 'Outfit'; padding: 14px; text-align: center; }
-        .two-col { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
-        @media (max-width: 900px) { .two-col { grid-template-columns: minmax(0, 1fr); } }
-        .panel { background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 12px; padding: 10px 12px; min-width: 0; }
+        .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
+        .panel { background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 12px; padding: 10px 12px; }
         .panel h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); }
-
-        /* Таблиците с много колони се превъртат хоризонтално, вместо да
-           разтягат цялата страница на телефона. */
-        .table-wrap { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 0 -2px; }
-        #openPos, #tradesList { min-width: 0; }
-        .table-wrap table { min-width: 560px; }
-        .table-hint { display: none; font-size: 9.5px; color: var(--text-dim); margin-bottom: 4px; letter-spacing: 0.3px; }
-
-        /* ───────── Адаптивност: телефон ───────── */
-        @media (max-width: 860px) {
-            body {
-                height: auto;
-                min-height: 100dvh;
-                overflow: auto;
-                -webkit-text-size-adjust: 100%;
-            }
-
-            header {
-                position: sticky;
-                top: 0;
-                z-index: 30;
-                flex-wrap: wrap;
-                gap: 8px 10px;
-                padding: 10px 12px;
-            }
-
-            .brand {
-                flex-wrap: wrap;
-                gap: 4px 8px;
-            }
-
-            .brand .logo {
-                font-size: 16px;
-                letter-spacing: 2px;
-            }
-
-            .hdr-actions {
-                flex-wrap: wrap;
-                gap: 6px;
-                width: 100%;
-            }
-
-            .hdr-actions .btn {
-                flex: 1 1 auto;
-                padding: 9px 10px;
-                font-size: 12px;
-                text-align: center;
-            }
-
-            .layout {
-                flex: none;
-                flex-direction: column;
-                min-height: 0;
-            }
-
-            aside {
-                width: 100%;
-                overflow: visible;
-                border-right: none;
-                border-bottom: 1px solid var(--panel-border);
-                padding: 12px;
-            }
-
-            main {
-                overflow: visible;
-                padding: 12px;
-                gap: 12px;
-            }
-
-            .grid2 {
-                grid-template-columns: 1fr;
-            }
-
-            .contra {
-                grid-template-columns: 1fr;
-            }
-
-            /* 16px + поне 40px височина: iOS не прави автоматичен zoom */
-            input, select, textarea {
-                font-size: 16px;
-                min-height: 40px;
-            }
-
-            .stats {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-                gap: 8px;
-            }
-
-            .card-stat .v {
-                font-size: 15px;
-            }
-
-            .tabs {
-                gap: 5px;
-            }
-
-            .tab {
-                padding: 7px 9px;
-                font-size: 11px;
-            }
-
-            #chart {
-                height: 250px;
-            }
-
-            #pnlCanvas {
-                height: 76px;
-            }
-
-            .panel {
-                padding: 10px;
-            }
-
-            .table-hint {
-                display: block;
-            }
-
-            table {
-                font-size: 10.5px;
-            }
-
-            th,
-            td {
-                padding: 6px 6px;
-            }
-        }
-
-        @media (max-width: 400px) {
-            .stats {
-                grid-template-columns: 1fr;
-            }
-
-            #chart {
-                height: 220px;
-            }
-        }
     </style>
 </head>
 
@@ -426,12 +289,10 @@
             <div class="two-col">
                 <div class="panel">
                     <h3>Отворени позиции</h3>
-                    <div class="table-hint">↔ Таблицата се мести хоризонтално</div>
                     <div id="openPos"><div class="empty">Няма отворени позиции</div></div>
                 </div>
                 <div class="panel">
                     <h3>Сделки от началото</h3>
-                    <div class="table-hint">↔ Таблицата се мести хоризонтално</div>
                     <div id="tradesList"><div class="empty">Още няма сделки</div></div>
                 </div>
             </div>
@@ -790,9 +651,9 @@
         function renderOpenPositions(list) {
             const el = document.getElementById('openPos');
             if (!list.length) { el.innerHTML = '<div class="empty">Няма отворени позиции</div>'; return; }
-            el.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Символ</th><th>Вид</th><th>Вход (реална цена)</th><th>Обем (лот)</th><th>Нотионал</th><th>Маржин</th><th>Спред</th><th>TP</th><th>SL</th><th>Плаваща</th></tr></thead><tbody>` +
+            el.innerHTML = `<table><thead><tr><th>Символ</th><th>Вид</th><th>Вход (реална цена)</th><th>Обем (лот)</th><th>Нотионал</th><th>Маржин</th><th>Спред</th><th>TP</th><th>SL</th><th>Плаваща</th></tr></thead><tbody>` +
                 list.map(p => `<tr><td>${p.symbol}</td><td class="${p.dir === 'BUY' ? 'pos' : 'neg'}">${p.dir}</td><td>${fmt(p.entry, 5)}</td><td>${fmt(p.lots, 3)}</td><td>${fmt(p.notional, 2)} €</td><td>${fmt(p.margin, 2)} €</td><td class="neg">${p.spread ? fmt(p.spread, 2) + ' €' : '—'}</td><td>${fmt(p.tp, 5)}</td><td>${fmt(p.sl, 5)}</td><td class="${cls(p.floating)}">${euro(p.floating)}</td></tr>`).join('') +
-                `</tbody></table></div>`;
+                `</tbody></table>`;
         }
 
         function renderTrades(list) {
@@ -800,7 +661,7 @@
             if (!list.length) { el.innerHTML = '<div class="empty">Още няма сделки</div>'; return; }
             const rows = list.slice().reverse().slice(0, 50).map(t =>
                 `<tr><td>${new Date(t.openedAt * 1000).toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td><td>${t.symbol}</td><td class="${t.dir === 'BUY' ? 'pos' : 'neg'}">${t.dir}</td><td>${fmt(t.lots, 3)}</td><td>${fmt(t.entry, 5)}</td><td>${fmt(t.exit, 5)}</td><td>${t.reason}</td><td class="${cls(t.pnl)}">${euro(t.pnl)}</td></tr>`).join('');
-            el.innerHTML = `<div class="table-wrap"><table><thead><tr><th>Отваряне</th><th>Символ</th><th>Вид</th><th>Обем (лот)</th><th>Вход</th><th>Изход</th><th>Причина</th><th>P/L</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+            el.innerHTML = `<table><thead><tr><th>Отваряне</th><th>Символ</th><th>Вид</th><th>Обем (лот)</th><th>Вход</th><th>Изход</th><th>Причина</th><th>P/L</th></tr></thead><tbody>${rows}</tbody></table>`;
         }
 
         // Паралелна графика: промяната на капитала в % спрямо началото.
