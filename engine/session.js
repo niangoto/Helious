@@ -8,6 +8,7 @@ const dp = require('../data-provider');
 const models = require('../models');
 const db = require('../db');
 const { normalizeParams, entryDecision, exitDecision } = require('./strategy');
+const { specFor } = require('./symbolSpec');
 const { PaperAccount } = require('./paperBroker');
 
 const IV_SEC = { '1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400 };
@@ -215,6 +216,7 @@ class PaperSession {
       symbols[sym] = {
         source: st.source,
         error: st.error,
+        contract: specFor(sym).contract,
         lastBarTime: st.lastBarTime,
         candles: st.candles.slice(-800).map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })),
         markers: this.account.markers.filter(m => m.symbol === sym).slice(-300)

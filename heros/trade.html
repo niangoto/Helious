@@ -260,8 +260,9 @@
                     <label class="f">Кели (част)<input id="inpKelly" type="number" value="0.25" min="0.01" step="0.05"></label>
                     <label class="f">Кели макс.<input id="inpMaxKelly" type="number" value="0.05" min="0.01" max="1" step="0.05"></label>
                     <label class="f">Мин. обем (лот)<input id="inpMinLot" type="number" value="0.01" min="0.01" step="0.01"></label>
-                    <label class="f" title="Начална плаваща загуба (€), когато позицията се отвори на минималния обем. От сумата и обема се смята отместването на входната цена.">Спред мин. обем (€)<input id="inpMinLotSpread" type="number" value="0" min="0" step="0.5"></label>
+                    <label class="f" title="Сумата в €, която се отчита като начална плаваща загуба за всяка позиция, отворена на ОЗНАЧЕНИЯ минимален обем (полето „Мин. обем (лот)“). От сумата и обема се смята отместването на входната цена.">Спред за мин. обем (€)<input id="inpMinLotSpread" type="number" value="0" min="0" step="0.01"></label>
                 </div>
+                <div class="note" id="minLotSpreadHint" style="color:var(--text-dim)"></div>
                 <div class="row"><input type="checkbox" id="inpReverse"> Обърната посока (контра със същия обем)</div>
                 <button class="btn primary" id="btnStart" onclick="startSession()" style="margin-top:4px">▶ Започни търговия</button>
             </div>
@@ -330,7 +331,56 @@
             const mSel = document.getElementById('inpModel');
             const updateContra = () => { document.getElementById('contraBox').style.display = parseInt(mSel.value, 10) === 5 ? 'grid' : 'none'; };
             mSel.addEventListener('change', updateContra); updateContra();
+            ['inpMinLotSpread', 'inpMinLot', 'inpAlpha', 'inpTp', 'inpSl', 'inpSymbols'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.addEventListener('input', updateMinLotSpreadHint);
+            });
         })();
+
+        // Спред за мин. обем: сумата в € се отчита само за позиции на зададения минимален обем.
+        // Показва какво означава в единици цена и предупреждава при опасен голям спред.
+        function updateMinLotSpreadHint() {
+            const el = document.getElementById('minLotSpreadHint');
+            if (!el) return;
+            const spread = Math.max(0, parseFloat(document.getElementById('inpMinLotSpread').value) || 0);
+            const minLot = Math.max(0.01, parseFloat(document.getElementById('inpMinLot').value) || 0.01);
+            const sym = (document.getElementById('inpSymbols').value.split(',')[0] || '').trim().toUpperCase();
+            if (spread <= 0) { el.textContent = 'Спредът е 0 — входът е на пазарната цена (няма начална загуба).'; return; }
+            const sd = lastState && lastState.symbols ? lastState.symbols[sym] : null;
+            if (!sd || !sd.contract) { el.textContent = 'Сумата се отчита само за позиции на зададения минимален обем (' + minLot.toFixed(2) + ' лот).'; return; }
+            const units = minLot * sd.contract;
+            const c = sd.candles || [];
+            const price = c.length ? c[c.length - 1].close : 0;
+            let atr = 0;
+            if (c.length > 1) {
+                let sum = 0, cnt = 0;
+                for (let i = Math.max(1, c.length - 14); i < c.length; i++) {
+                    sum += Math.max(c[i].high - c[i].low, Math.abs(c[i].high - c[i - 1].close), Math.abs(c[i].low - c[i - 1].close));
+                    cnt++;
+                }
+                atr = cnt ? sum / cnt : 0;
+            }
+            const alpha = Math.min(10, Math.max(0.1, parseFloat(document.getElementById('inpAlpha').value) || 1));
+            const slDist = (parseFloat(document.getElementById('inpSl').value) || 1) * alpha * atr;
+            const tpDist = (parseFloat(document.getElementById('inpTp').value) || 1.5) * alpha * atr;
+            const safeDist = Math.min(tpDist, slDist);
+            const shift = spread / units;
+            const pct = price > 0 ? (shift / price) * 100 : 0;
+            const dec = price >= 100 ? 2 : 5;
+            el.style.color = '';
+            let txt = spread.toFixed(2) + ' € при ' + minLot.toFixed(2) + ' лот (' + sym + ') = отместване ' +
+                shift.toFixed(dec) + ' пункта' + (pct > 0 ? ' (' + pct.toFixed(4) + '% от ' + price.toFixed(dec) + ')' : '') +
+                ' → начална плаваща загуба ' + spread.toFixed(2) + ' €.';
+            if (atr > 0) {
+                if (shift > safeDist) {
+                    el.style.color = '#ffb37a';
+                    txt += ' ⚠ По-голям е от разстоянието до SL/TP (' + safeDist.toFixed(dec) + ' пункта) — позицията ще излезе веднага на SL/TP. Безопасно до ~' + (safeDist * units).toFixed(2) + ' €.';
+                } else {
+                    txt += ' Безопасно (до ~' + (safeDist * units).toFixed(2) + ' € при ATR ' + atr.toFixed(dec) + ').';
+                }
+            }
+            el.textContent = txt;
+        }
 
         function readConfig() {
             const symbols = document.getElementById('inpSymbols').value.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
@@ -544,6 +594,7 @@
             renderTabs(keys);
             renderChart(state);
             renderOpenPositions(state.openPositions || []);
+            updateMinLotSpreadHint();
             renderTrades(state.trades || []);
             drawPnl();
             const me = sessions.find(x => x.id === state.id);
