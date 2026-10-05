@@ -7,7 +7,7 @@ const path = require('path');
 const dp = require('../data-provider');
 const models = require('../models');
 const db = require('../db');
-const { normalizeParams, entryDecision, exitDecision } = require('./strategy');
+const { normalizeParams, entryDecision, exitDecision, marketOpen } = require('./strategy');
 const { specFor } = require('./symbolSpec');
 const { PaperAccount } = require('./paperBroker');
 
@@ -152,8 +152,10 @@ class PaperSession {
       }
     }
 
-    // 2) Вход (само ако не сме на пауза и няма позиция на този символ)
+    // 2) Вход (само ако не сме на пауза, няма позиция и пазарът е отворен)
     if (this.status !== 'running' || this.account.positions.get(symbol)) return;
+    // Некрипто активите не се търгуват събота/неделя (пазарът е затворен).
+    if (!marketOpen(symbol, bar.time)) return;
     const win = arr.slice(0, idx + 1).slice(-WINDOW);
     if (win.length < 30) return;
     let probs;

@@ -331,7 +331,7 @@
             const mSel = document.getElementById('inpModel');
             const updateContra = () => { document.getElementById('contraBox').style.display = parseInt(mSel.value, 10) === 5 ? 'grid' : 'none'; };
             mSel.addEventListener('change', updateContra); updateContra();
-            ['inpMinLotSpread', 'inpMinLot', 'inpAlpha', 'inpTp', 'inpSl', 'inpSymbols', 'inpInterval'].forEach(id => {
+            ['inpMinLotSpread', 'inpMinLot', 'inpAlpha', 'inpLev', 'inpTp', 'inpSl', 'inpSymbols', 'inpInterval'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.addEventListener('input', updateMinLotSpreadHint);
                 if (el) el.addEventListener('change', updateMinLotSpreadHint);
@@ -384,11 +384,15 @@
             }
             const price = (c && c.length) ? c[0].close : 0;   // първа известна цена от периода
             const dec = price >= 100 ? 2 : 5;
+            const lev = Math.max(1, parseFloat(document.getElementById('inpLev').value) || 30);
 
             let txt;
             if (price > 0) {
-                txt = minLot.toFixed(2) + ' лот (' + sym + ') = ' + (units * price).toFixed(2) +
-                    ' € при първа цена ' + price.toFixed(dec) + '.';
+                const notional = units * price;
+                const margin = notional / lev;
+                txt = minLot.toFixed(2) + ' лот (' + sym + ') = ' + margin.toFixed(2) +
+                    ' € маржин при 1:' + lev + ' (нотионал ' + notional.toFixed(2) +
+                    ' € при първа цена ' + price.toFixed(dec) + ').';
             } else {
                 txt = minLot.toFixed(2) + ' лот (' + sym + ').';
             }

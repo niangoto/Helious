@@ -131,4 +131,20 @@ function floatingPnl(pos, price) {
   return pos.dir === 'BUY' ? (price - pos.entry) * pos.units : (pos.entry - price) * pos.units;
 }
 
-module.exports = { normalizeParams, entryDecision, exitDecision, floatingPnl };
+// Крипто инструментите се търгуват 24/7; при тях няма почивка.
+function isCrypto(symbol) {
+  const s = String(symbol || '').toUpperCase().trim();
+  if (/(USDT|USDC|BUSD|FDUSD|TUSD)$/.test(s)) return true;
+  return /^(BTC|ETH|SOL)(USD)?$/.test(s);
+}
+
+// Пазарът отворен ли е за нови поръчки: крипто — винаги; останалите (индекси,
+// форекс, метали, суровини) — само в делнични дни (без събота/неделя).
+function marketOpen(symbol, timeSec) {
+  if (isCrypto(symbol)) return true;
+  const t = (timeSec && isFinite(timeSec)) ? timeSec : Math.floor(Date.now() / 1000);
+  const day = new Date(t * 1000).getUTCDay();   // 0 = неделя, 6 = събота
+  return day !== 0 && day !== 6;
+}
+
+module.exports = { normalizeParams, entryDecision, exitDecision, floatingPnl, isCrypto, marketOpen };

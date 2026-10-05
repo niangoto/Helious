@@ -1024,6 +1024,19 @@
         const DEFAULT_SPEC = { contract: 1, step: 0.01, min: 0.01, max: 1000 };
         function specFor(sym) { return SYMBOL_SPECS[String(sym || '').toUpperCase().trim()] || DEFAULT_SPEC; }
         function floorLots(lots, spec) { const v = Math.floor(lots / spec.step + 1e-9) * spec.step; return Math.round(v * 1e8) / 1e8; }
+        // Криптото се търгува 24/7; не-крипто активите — само в делнични дни
+        // (без събота/неделя, когато пазарът е затворен).
+        function isCrypto(sym) {
+            const s = String(sym || '').toUpperCase().trim();
+            if (/(USDT|USDC|BUSD|FDUSD|TUSD)$/.test(s)) return true;
+            return /^(BTC|ETH|SOL)(USD)?$/.test(s);
+        }
+        function marketOpen(sym, timeSec) {
+            if (isCrypto(sym)) return true;
+            const t = (timeSec && isFinite(timeSec)) ? timeSec : Math.floor(Date.now() / 1000);
+            const day = new Date(t * 1000).getDay();   // 0 = неделя, 6 = събота
+            return day !== 0 && day !== 6;
+        }
         // Горна граница на теглените свещи (доставчикът ги пейджира). Достатъчна за
         // напр. 1м за ~34 дни; над това периодът се скъсява (вижда се в #periodInfo).
         const MAX_FETCH = 50000;
@@ -1707,7 +1720,7 @@
                     legs = stillOpen;
                 }
 
-                if (!legs.length && i < n - 1) {
+                if (!legs.length && i < n - 1 && marketOpen(currentSymbol, candles[i].time)) {
                     const pr = probs[i];
                     if (pr) {
                         const buyPct = pr.buyPct, sellPct = pr.sellPct;
@@ -1993,6 +2006,7 @@
             const price = (c && c.length) ? c[0].close : 0;
             const atr = lastAtrValue(c, 14);
             const alpha = Math.min(10, Math.max(0.1, parseFloat((document.getElementById('inpAlpha') || {}).value) || 1));
+            const lev = Math.max(1, parseFloat((document.getElementById('inpLev') || {}).value) || 30);
             const slDist = (parseFloat((document.getElementById('inpSl') || {}).value) || 1) * alpha * atr;
             const tpDist = (parseFloat((document.getElementById('inpTp') || {}).value) || 1.5) * alpha * atr;
             const safeDist = Math.min(tpDist, slDist);      // в единици цена
@@ -2001,8 +2015,11 @@
             el.classList.remove('warn');
             let txt;
             if (price > 0) {
-                txt = minLot.toFixed(2) + ' лот (' + currentSymbol + ') = ' + (units * price).toFixed(2) +
-                    ' € при първа цена ' + price.toFixed(dec) + '.';
+                const notional = units * price;
+                const margin = notional / lev;
+                txt = minLot.toFixed(2) + ' лот (' + currentSymbol + ') = ' + margin.toFixed(2) +
+                    ' € маржин при 1:' + lev + ' (нотионал ' + notional.toFixed(2) +
+                    ' € при първа цена ' + price.toFixed(dec) + ').';
             } else {
                 txt = minLot.toFixed(2) + ' лот (' + currentSymbol + ').';
             }
@@ -2065,7 +2082,7 @@
             const placeholder = document.querySelector('#ordersList div');
             if (placeholder) placeholder.dataset.placeholder = '1';
 
-            ['inpMinLotSpread', 'inpMinLot', 'inpAlpha', 'inpTp', 'inpSl'].forEach(id => {
+            ['inpMinLotSpread', 'inpMinLot', 'inpAlpha', 'inpLev', 'inpTp', 'inpSl'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.addEventListener('input', updateMinLotSpreadHint);
             });
