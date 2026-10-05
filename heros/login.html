@@ -71,6 +71,15 @@
         .back { text-align: center; margin-top: 16px; }
         .back a { color: var(--text-dim); font-size: 12px; text-decoration: none; }
         .back a:hover { color: var(--accent-cyan); }
+
+        /* Телефон: 16px в полетата (иначе iOS прави автоматичен zoom при фокус)
+           и поне 44px височина за удобно докосване. */
+        @media (max-width: 520px) {
+            .card { padding: 18px 16px; }
+            input { font-size: 16px; min-height: 46px; }
+            button { font-size: 15px; padding: 13px; min-height: 46px; }
+            .tab { padding: 10px 12px; }
+        }
     </style>
 </head>
 

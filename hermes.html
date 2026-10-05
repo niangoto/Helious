@@ -27,6 +27,9 @@
 
         body {
             margin: 0;
+            /* Височина = екранът, но страницата СЕ СКРОЛВА, когато всичко не
+               събира. Преди беше overflow: hidden и поръчките отдолу ставаха
+               невидими (вдлъбнатият flex ги смачкваше до 12px) и не можеше да се достигнат. */
             height: 100vh;
             height: 100dvh;
             display: flex;
@@ -37,7 +40,8 @@
                 radial-gradient(at 100% 100%, rgba(0, 240, 255, 0.08) 0px, transparent 50%);
             color: var(--text-main);
             font-family: 'Outfit', sans-serif;
-            overflow: hidden;
+            overflow-x: hidden;
+            overflow-y: auto;
         }
 
         header {
@@ -216,8 +220,8 @@
         .controls {
             display: flex;
             flex-wrap: wrap;
-            gap: 10px;
-            padding: 12px 18px;
+            gap: 8px 10px;
+            padding: 10px 18px;
             background: rgba(13, 18, 30, 0.5);
             border-bottom: 1px solid var(--panel-border);
             flex-shrink: 0;
@@ -488,7 +492,7 @@
             background: linear-gradient(135deg, rgba(138, 43, 226, 0.12), rgba(0, 240, 255, 0.06));
             flex-shrink: 0;
             /* Фиксирана височина, за да не мърда графиката при отваряне/затваряне */
-            min-height: 82px;
+            min-height: 68px;
             box-sizing: border-box;
         }
 
@@ -583,7 +587,7 @@
         }
 
         .orders {
-            flex: 1;
+            flex: none;
             display: flex;
             flex-direction: column;
             min-height: 0;
@@ -605,9 +609,13 @@
         }
 
         .orders-list {
-            flex: 1;
+            flex: none;
             overflow-y: auto;
-            min-height: 0;
+            overscroll-behavior: contain;
+            /* Винаги има видима площ за списъка и той се скролра вътрешно */
+            min-height: 132px;
+            max-height: 34vh;
+            -webkit-overflow-scrolling: touch;
         }
 
         .order-row {
@@ -699,7 +707,10 @@
             border: 1px solid var(--panel-border);
             border-radius: 9px;
             background: rgba(255, 255, 255, 0.02);
-            flex-shrink: 0;
+            /* Графиката поема останалото място на екрана, поръчките имат
+               гарантирана площ за скролване. */
+            flex: 1 1 auto;
+            min-height: 250px;
             display: none;
             flex-direction: column;
             overflow: hidden;
@@ -712,6 +723,7 @@
             gap: 10px;
             padding: 8px 12px;
             border-bottom: 1px solid var(--panel-border);
+            flex-shrink: 0;
             font-size: 10px;
             font-weight: 700;
             text-transform: uppercase;
@@ -751,6 +763,7 @@
             flex-wrap: wrap;
             gap: 6px 16px;
             padding: 7px 12px;
+            flex-shrink: 0;
             border-bottom: 1px solid var(--panel-border);
             font-family: 'JetBrains Mono', monospace;
             font-size: 11px;
@@ -760,6 +773,27 @@
         .live-stats b {
             color: var(--text-main);
             font-weight: 700;
+        }
+
+        .chart-tools {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 5px 12px;
+            flex-shrink: 0;
+            border-bottom: 1px solid var(--panel-border);
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .chart-tools .chart-hint {
+            font-size: 10px;
+            color: var(--text-dim);
+            line-height: 1.3;
+        }
+
+        .qbtn.off {
+            border-color: #ffd27a;
+            color: #ffd27a;
         }
 
         .live-stats b.pos {
@@ -773,11 +807,14 @@
         #simChart {
             width: 100%;
             height: 300px;
+            flex: 1 1 auto;
+            min-height: 160px;
         }
 
         .pnl-wrap {
             position: relative;
-            height: 130px;
+            height: 72px;
+            flex-shrink: 0;
             border-top: 1px solid var(--panel-border);
         }
 
@@ -799,16 +836,297 @@
             pointer-events: none;
         }
 
+        /* ───────── Адаптивност: таблет ───────── */
         @media (max-width: 900px) {
             .orders-head,
             .order-row {
                 grid-template-columns: 44px 120px 56px 80px 80px 120px 90px 100px 110px;
                 font-size: 10px;
+                /* Заглавният ред и редовете се движат заедно хоризонтално */
+                min-width: 880px;
+            }
+            .orders {
+                overflow-x: auto;
+                -webkit-overflow-scrolling: touch;
             }
             .controls input,
             .controls select {
                 width: 90px;
             }
+        }
+
+        /* ───────── Адаптивност: телефон ─────────
+           Превръщаме фиксираната „приложна“ огилка в обикновена документна
+           страница, която се превърта цялата, иначе всичко се смачква. */
+        @media (max-width: 720px) {
+            body {
+                height: auto;
+                min-height: 100dvh;
+                overflow: auto;
+                -webkit-text-size-adjust: 100%;
+            }
+
+            header {
+                position: sticky;
+                top: 0;
+                z-index: 30;
+                flex-wrap: wrap;
+                gap: 8px 10px;
+                padding: 10px 12px;
+            }
+
+            .hm-logo {
+                font-size: 14px;
+            }
+
+            .hm-badges {
+                order: 3;
+                width: 100%;
+                justify-content: flex-start;
+            }
+
+            .hdr-actions {
+                margin-left: auto;
+            }
+
+            .btn {
+                padding: 8px 12px;
+                font-size: 12px;
+            }
+
+            /* Контролите стават 2-колонна мрежа с пълна ширина на полетата */
+            .controls {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 8px 10px;
+                padding: 12px;
+                align-items: end;
+            }
+
+            .controls label,
+            .controls input,
+            .controls select,
+            .controls .cal-dates,
+            .controls .cal-quick {
+                width: 100%;
+                min-width: 0;
+            }
+
+            .controls input,
+            .controls select {
+                font-size: 16px;
+                /* 16px предотвратява автоматичния zoom на iOS при фокус */
+                padding: 9px 10px;
+                min-height: 40px;
+            }
+
+            .cal-label {
+                grid-column: 1 / -1;
+            }
+
+            .cal-dates,
+            .cal-quick {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+            }
+
+            .cal-dates input {
+                flex: 1 1 120px;
+                min-width: 0;
+            }
+
+            .qbtn {
+                flex: 1 1 auto;
+                padding: 9px 10px;
+            }
+
+            .contra-box {
+                grid-column: 1 / -1;
+                display: grid !important;
+                grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+                gap: 6px;
+            }
+
+            .contra-title {
+                grid-column: 1 / -1;
+            }
+
+            .adv {
+                grid-column: 1 / -1;
+            }
+
+            .adv-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .adv-grid input {
+                font-size: 16px;
+                min-height: 40px;
+            }
+
+            .summary {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 8px;
+                padding: 12px;
+            }
+
+            .sum-item {
+                padding: 8px 10px;
+            }
+
+            .sum-item b {
+                font-size: 14px;
+            }
+
+            .current {
+                margin: 0 12px 10px;
+                min-height: 0;
+            }
+
+            .cp-grid,
+            .cp-leg {
+                font-size: 11px;
+                gap: 6px 12px;
+            }
+
+            #simChart {
+                height: 230px;
+            }
+
+            .pnl-wrap {
+                height: 80px;
+            }
+
+            .live-stats {
+                gap: 4px 12px;
+                font-size: 10.5px;
+            }
+
+            .chart-tools {
+                flex-wrap: wrap;
+                gap: 6px 10px;
+                padding: 8px 12px;
+            }
+
+            .chart-head {
+                flex-wrap: wrap;
+                gap: 6px;
+                padding: 8px 12px;
+            }
+
+            .chart-head .leg {
+                gap: 4px 10px;
+            }
+
+            .progress-wrap,
+            .period-info {
+                margin-left: 12px;
+                margin-right: 12px;
+            }
+
+            /* Таблицата с поръчките става карти (без хоризонтален скрол) */
+            .orders {
+                flex: none;
+                min-height: 0;
+                padding: 0 12px 12px;
+            }
+
+            .orders-head {
+                display: none;
+            }
+
+            .orders-list {
+                flex: none;
+                overflow: visible;
+                min-height: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+                padding-top: 10px;
+            }
+
+            .orders-list > div[style*="justify-items"] {
+                padding: 16px 4px !important;
+                text-align: center;
+                line-height: 1.5;
+            }
+
+            .order-row {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 5px 10px;
+                padding: 10px 11px;
+                font-size: 11.5px;
+                border: 1px solid var(--panel-border);
+                border-radius: 9px;
+                background: rgba(255, 255, 255, 0.02);
+                align-items: baseline;
+            }
+
+            .order-row span {
+                display: flex;
+                flex-direction: column;
+                gap: 1px;
+                min-width: 0;
+                overflow-wrap: anywhere;
+            }
+
+            .order-row span::before {
+                content: attr(data-l);
+                font-family: 'Outfit', sans-serif;
+                font-size: 8.5px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+                text-transform: uppercase;
+                color: var(--text-dim);
+            }
+
+            .order-row .c-num,
+            .order-row .c-dir {
+                font-weight: 800;
+            }
+
+            /* Карта: редовете се подреждат в 3 колони с етикети */
+            .order-row .c-num { grid-column: 1; grid-row: 1; }
+            .order-row .c-time { grid-column: 2 / 4; grid-row: 1; text-align: right; }
+            .order-row .c-dir { grid-column: 1; grid-row: 2; }
+            .order-row .c-vol { grid-column: 2; grid-row: 2; }
+            .order-row .c-entry { grid-column: 3; grid-row: 2; text-align: right; }
+            .order-row .c-tpsl { grid-column: 1 / 3; grid-row: 3; }
+            .order-row .c-exit { grid-column: 3; grid-row: 3; text-align: right; }
+            .order-row .c-pnl { grid-column: 1 / 3; grid-row: 4; }
+            .order-row .c-eq { grid-column: 3; grid-row: 4; text-align: right; }
+
+            .footer {
+                padding: 14px 12px 28px;
+                font-size: 10.5px;
+                line-height: 1.55;
+            }
+        }
+
+        @media (max-width: 380px) {
+            .summary {
+                grid-template-columns: 1fr;
+            }
+
+            .controls,
+            .adv-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .order-row {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .order-row .c-num { grid-column: 1; grid-row: 1; }
+            .order-row .c-time { grid-column: 2; grid-row: 1; text-align: right; }
+            .order-row .c-dir { grid-column: 1; grid-row: 2; }
+            .order-row .c-vol { grid-column: 2; grid-row: 2; text-align: right; }
+            .order-row .c-entry { grid-column: 1; grid-row: 3; }
+            .order-row .c-tpsl { grid-column: 2; grid-row: 3; text-align: right; }
+            .order-row .c-exit { grid-column: 1 / 3; grid-row: 4; text-align: left; }
+            .order-row .c-pnl { grid-column: 1; grid-row: 5; }
+            .order-row .c-eq { grid-column: 2; grid-row: 5; text-align: right; }
         }
     </style>
 </head>
@@ -930,6 +1248,10 @@
             </span>
         </div>
         <div class="live-stats" id="liveStats"></div>
+        <div class="chart-tools">
+            <button type="button" class="qbtn" id="btnFollow" onclick="setSimFollow(!simFollow)">⤓ Следвай: вкл</button>
+            <span class="chart-hint" id="chartHint">Изгледът върви със свещите. Мести или мащабирай графиката — тя няма да се връща сама.</span>
+        </div>
         <div id="simChart"></div>
         <div class="pnl-wrap" id="simPnlWrap">
             <canvas id="simPnlCanvas"></canvas>
@@ -1282,7 +1604,30 @@
                     drawPnlChart();
                 });
                 ro.observe(container);
-                try { simChart.timeScale().subscribeVisibleLogicalRangeChange(() => drawPnlChart()); } catch (e) {}
+                try { simChart.timeScale().subscribeVisibleLogicalRangeChange((r) => {
+                    if (r && !simFollow && (r.to - r.from) >= 20) simFollowBars = Math.round(r.to - r.from);
+                    drawPnlChart(simLastTick);
+                }); } catch (e) {}
+
+                // Спираме авто-следването при реален ръчен жест — плъзгане или
+                // мащабиране на графиката. Клик/докосване за преглед на свещ
+                // не го спира. Така графиката никога не се връща сама в началото.
+                try {
+                    let draggingView = false, dragX = 0, dragged = false;
+                    container.addEventListener('pointerdown', (e) => {
+                        draggingView = true; dragX = e.clientX; dragged = false;
+                    });
+                    window.addEventListener('pointermove', (e) => {
+                        if (!draggingView) return;
+                        if (Math.abs(e.clientX - dragX) > 4) dragged = true;
+                    });
+                    window.addEventListener('pointerup', () => {
+                        if (draggingView && dragged && simFollow) setSimFollow(false);
+                        draggingView = false;
+                    });
+                    window.addEventListener('pointercancel', () => { draggingView = false; });
+                    container.addEventListener('wheel', () => { if (simFollow) setSimFollow(false); }, { passive: true });
+                } catch (e) {}
             }
 
             simCandleSeries.setData(candles.map(c => ({
@@ -1290,10 +1635,82 @@
             })));
 
             simCandleSeries.setMarkers(sortedMarkers());
-            if (fit !== false) simChart.timeScale().fitContent();
-            setTimeout(() => {
-                if (container.clientWidth) simChart.applyOptions({ width: container.clientWidth, height: container.clientHeight });
-            }, 0);
+            if (fit !== false) {
+                withRangeLock(() => simChart.timeScale().fitContent());
+                simAppliedRange = null;
+            }
+            setTimeout(resizeSimChart, 0);
+        }
+
+        // Преоразмерява графиката при смяна на ширината (завъртане на телефон,
+        // промяна на размерите на прозореца) и прерисува P/L графиката.
+        let simResizeTimer = null;
+        function resizeSimChart() {
+            const container = document.getElementById('simChart');
+            if (!simChart || !container || !container.clientWidth) return;
+            withRangeLock(() => simChart.applyOptions({ width: container.clientWidth, height: container.clientHeight }));
+            drawPnlChart(simLastTick);
+        }
+
+        window.addEventListener('resize', () => {
+            if (simResizeTimer) clearTimeout(simResizeTimer);
+            simResizeTimer = setTimeout(resizeSimChart, 150);
+        });
+        window.addEventListener('orientationchange', () => setTimeout(resizeSimChart, 250));
+
+        // Авто-следване на изгледа при възпроизвеждане. Ако потребителят мести/мащабира
+        // графиката сам, следването се изключва и изгледът вече не се връща обратно сам.
+        const SIM_FOLLOW_BARS = 140;   // колко свещи се виждат при авто-следване
+        let simFollow = true;
+        let simFollowBars = SIM_FOLLOW_BARS;
+        let simAppliedRange = null;     // последният изглед, поставен от нас
+        let simRangeLock = false;      // пазим кадър по наше собствено преместване
+        let simLastTick = 0;           // последен кадър на възпроизвеждането
+
+        // Запомня изгледа, който сме поставили ние, за да не бъде взет за
+        // действие на потребителя (събитието може да дойде и асинхронно).
+        function syncAppliedRange() {
+            if (!simChart) return;
+            try {
+                const r = simChart.timeScale().getVisibleLogicalRange();
+                if (r && typeof r.from === 'number') simAppliedRange = { from: r.from, to: r.to };
+            } catch (e) {}
+        }
+
+        // Всички наши собствени промени на изгледа (авто-следване, resize, fitContent)
+        // минават през тази функция.
+        function withRangeLock(fn) {
+            simRangeLock = true;
+            try { fn(); } catch (e) {}
+            simRangeLock = false;
+            syncAppliedRange();
+        }
+
+        function applySimRange(i) {
+            if (!simChart || !simChartCandles.length) return;
+            const n = simChartCandles.length;
+            const bars = Math.max(20, Math.min(simFollowBars, Math.max(40, n)));
+            const rightPad = Math.max(2, Math.round(bars * 0.02));
+            const to = Math.min(n - 1, i + rightPad);
+            const from = Math.max(0, to - bars);
+            const prev = simAppliedRange;
+            // Не пренареждаме изгледа, ако вече е приблизително същият (избягваме трептене).
+            if (prev && Math.abs(prev.from - from) < 0.5 && Math.abs(prev.to - to) < 0.5) return;
+            simAppliedRange = { from, to };
+            withRangeLock(() => simChart.timeScale().setVisibleLogicalRange({ from, to }));
+        }
+
+        function setSimFollow(on) {
+            simFollow = !!on;
+            if (simFollow) syncAppliedRange();
+            const btn = document.getElementById('btnFollow');
+            if (btn) {
+                btn.textContent = simFollow ? '⤓ Следвай: вкл' : '⤓ Следвай: изкл';
+                btn.classList.toggle('off', !simFollow);
+                btn.title = simFollow
+                    ? 'Изгледът върви със свещите. Натисни, за да го задържиш на място.'
+                    : 'Изгледът е задържан ръчно. Натисни, за да се върне автоматичното следване.';
+            }
         }
 
         // Подготвя графиката за възпроизвеждане на живо: показва я и позиционира
@@ -1305,7 +1722,9 @@
             renderSimChart(simChartCandles, [], false);
             if (simChart && simChartCandles.length) {
                 const start = Math.min(60, simChartCandles.length - 1);
-                simChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, start - 80), to: start + 2 });
+                simAppliedRange = { from: Math.max(0, start - SIM_FOLLOW_BARS), to: start + 2 };
+                withRangeLock(() => simChart.timeScale().setVisibleLogicalRange(simAppliedRange));
+                setSimFollow(true);
             }
         }
 
@@ -1323,7 +1742,7 @@
                 floatPnl += p.dir === 'BUY' ? (c.close - p.entry) * p.units : (p.entry - c.close) * p.units;
             }
             if (simChart) {
-                simChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, i - 140), to: i + 3 });
+                if (simFollow) applySimRange(i);
                 if (markersDirty) { simCandleSeries.setMarkers(sortedMarkers()); markersDirty = false; }
             }
             const el = document.getElementById('liveStats');
@@ -1344,6 +1763,7 @@
                     (c ? `<span>${fmtTime(c.time)} · <b>${fmt(c.close)}</b></span>` : '');
             }
             setProgress(Math.round(((i - 30) / Math.max(1, n - 30)) * 100), `Свещ ${i}/${n} — ${tradeCount} сделки`);
+            simLastTick = i;
             drawPnlChart(i);
         }
 
@@ -1560,16 +1980,17 @@
             if (placeholder && placeholder.dataset && placeholder.dataset.placeholder) listEl.innerHTML = '';
             const row = document.createElement('div');
             row.className = 'order-row';
+            // data-l се ползва само за етикетите в картовия изглед на телефон
             row.innerHTML = `
-                <span class="c-num">#${seq}</span>
-                <span class="c-time">${fmtTime(pos.openTime)}</span>
-                <span class="c-dir ${pos.dir === 'BUY' ? 'buy' : 'sell'}">${pos.dir === 'BUY' ? 'BUY' : 'SELL'}</span>
-                <span class="c-vol">${(pos.lots != null ? pos.lots : pos.units).toFixed(2)} лот</span>
-                <span class="c-entry">${fmt(pos.entry)}</span>
-                <span class="c-tpsl">${fmt(pos.tp)} / ${fmt(pos.sl)}</span>
-                <span class="c-exit">${fmt(exitPrice)} <small>${reason}</small></span>
-                <span class="c-pnl ${pnl >= 0 ? 'pos' : 'neg'}">${(pnl >= 0 ? '+' : '') + pnl.toFixed(2)} €</span>
-                <span class="c-eq">${equity.toFixed(2)} €</span>
+                <span class="c-num" data-l="№">#${seq}</span>
+                <span class="c-time" data-l="Отваряне">${fmtTime(pos.openTime)}</span>
+                <span class="c-dir ${pos.dir === 'BUY' ? 'buy' : 'sell'}" data-l="Вид">${pos.dir === 'BUY' ? 'BUY' : 'SELL'}</span>
+                <span class="c-vol" data-l="Обем">${(pos.lots != null ? pos.lots : pos.units).toFixed(2)} лот</span>
+                <span class="c-entry" data-l="Вход">${fmt(pos.entry)}</span>
+                <span class="c-tpsl" data-l="TP / SL">${fmt(pos.tp)} / ${fmt(pos.sl)}</span>
+                <span class="c-exit" data-l="Изход">${fmt(exitPrice)} <small>${reason}</small></span>
+                <span class="c-pnl ${pnl >= 0 ? 'pos' : 'neg'}" data-l="P/L">${(pnl >= 0 ? '+' : '') + pnl.toFixed(2)} €</span>
+                <span class="c-eq" data-l="Баланс">${equity.toFixed(2)} €</span>
             `;
             listEl.prepend(row);
         }

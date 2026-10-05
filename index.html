@@ -277,6 +277,20 @@
             cursor: ew-resize;
             z-index: 60;
             transform: translateX(-1px);
+            /* На телефон пръстът да мести линията, а не да скролва страницата */
+            touch-action: none;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+
+        /* Невидима, но широка зона за хващане — 2px линията е твърде тясна за пръст */
+        .present-line::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            bottom: 0;
+            left: -13px;
+            width: 28px;
         }
 
         .present-line .label {
