@@ -648,7 +648,6 @@
             overflow-x: auto;
             overflow-y: hidden;
             scroll-snap-type: x mandatory;
-            scroll-snap-stop: always;
             -webkit-overflow-scrolling: touch;
             scrollbar-width: none;
         }
@@ -673,37 +672,15 @@
             padding: 8px 0 4px;
         }
 
-        /* Точката е 22px (пръст), а видимата точка 7px се рисува вътре в нея —
-           на телефон няма стрелки, така че точките са единственият начин
-           за прескачане към конкретен модел (напр. „Средна вероятност"). */
         .iv-page-dot {
-            position: relative;
-            width: 22px;
-            height: 22px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-            background: none;
-            border: 0;
-            padding: 0;
-            -webkit-tap-highlight-color: transparent;
-        }
-
-        .iv-page-dot::after {
-            content: '';
-            width: 7px;
-            height: 7px;
+            width: 6px;
+            height: 6px;
             border-radius: 50%;
-            background: rgba(255, 255, 255, 0.14);
-            transition: background 0.3s, transform 0.3s;
+            background: rgba(255, 255, 255, 0.12);
+            transition: background 0.3s;
         }
 
-        .iv-page-dot:hover::after { background: rgba(255, 255, 255, 0.35); }
-        .iv-page-dot.active::after {
-            background: var(--accent-cyan);
-            transform: scale(1.25);
-        }
+        .iv-page-dot.active { background: var(--accent-cyan); }
 
         /* Desktop arrows for page navigation */
         .iv-nav-arrow {
