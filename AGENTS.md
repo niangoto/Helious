@@ -26,6 +26,7 @@ Defined in `data-provider.js` `SYMBOL_ALIASES` table. Canonical names: DAX, NDX,
 - **HEROS trade** (`heros/trade.html`): ≤860px → document scroll, `aside` stacks above `main`, tables live in `.table-wrap` (horizontal scroll, hint text shown), 16px inputs.
 - **Login** (`heros/login.html`): ≤520px → 16px inputs, 46px tap targets.
 - **Terminal** (`index.html`): pre-existing breakpoints at 768/480px; `.present-line` has `touch-action: none` and a 28px invisible `::before` grab strip so a finger can drag it.
+- **Terminal dashboard pages** (`#ivPages`, 10 pages): the only navigation on a phone is the dot row — the `‹›` arrows only appear at ≥769px. Dots are `<button class="iv-page-dot">` 22×22px (`::after` draws the visible 7px dot), built in `js/app.js:init()` with `title`/`aria-label` from `IV_PAGE_LABELS` (`js/config.js`) and a click → `goToIvPage(i)`. `.iv-pages` uses `scroll-snap-type: x mandatory` **plus `scroll-snap-stop: always`** — without it a single finger swipe jumped 2 pages at once and skipped „Средна вероятност“ (page 1), making the probability panel look missing.
 
 ## Commands
 - **Start (dev)**: `node server.js` (listens on `PORT` env var or `3001`). DB е изключена, ако няма `pg`/`DATABASE_URL`.

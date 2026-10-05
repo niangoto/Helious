@@ -82,9 +82,14 @@ function init() {
     const dotContainer = document.getElementById('ivPageDots');
     if (dotContainer) {
         for (let i = 0; i < 10; i++) {
-            const dot = document.createElement('div');
+            const dot = document.createElement('button');
+            dot.type = 'button';
             dot.className = 'iv-page-dot' + (i === 0 ? ' active' : '');
             dot.id = 'ivDot' + i;
+            dot.title = IV_PAGE_LABELS[i] || ('Страница ' + (i + 1));
+            dot.setAttribute('aria-label', dot.title);
+            // На телефон няма стрелки → точката е единственият начин за преход.
+            dot.addEventListener('click', () => goToIvPage(i));
             dotContainer.appendChild(dot);
         }
     }
@@ -390,6 +395,14 @@ function scrollIvPage(dir) {
         return;
     }
     pages.scrollBy({ left: dir * w, behavior: 'smooth' });
+}
+
+// Прескачване към конкретна страница на таблото (от клик на точката).
+function goToIvPage(idx) {
+    const pages = document.getElementById('ivPages');
+    if (!pages) return;
+    const i = Math.max(0, Math.min(idx, 9));
+    pages.scrollTo({ left: i * pages.clientWidth, behavior: 'smooth' });
 }
 
 function tryAddCustomSymbol(input) {
