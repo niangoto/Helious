@@ -263,7 +263,16 @@ async function fetchTwelvedata(symbol, interval) {
   const cacheKey = 'td_' + symbol + '_' + interval;
   const cached = tdCache[cacheKey];
   if (cached && Date.now() - cached.time < 300000) return cached.data;
-  const int = interval === '1d' ? 'day' : interval === '1h' ? '1hour' : interval === '5m' ? '5min' : '15min';
+  // TwelveData приема само: 1min, 5min, 15min, 30min, 1h, 2h, 4h, 6h, 8h, 12h, 1day, 3month.
+  // („1hour“ и „day“ НЕ са валидни и водят до „Invalid interval“; невалиден интервал
+  // преди това мълчащо падаше на 15min → 500 свещи = ~5 дни вместо заявения период.)
+  const TD_INTERVALS = {
+    '1m': '1min', '5m': '5min', '15m': '15min', '30m': '30min',
+    '1h': '1h', '2h': '2h', '4h': '4h', '6h': '6h', '8h': '8h', '12h': '12h',
+    '1d': '1day'
+  };
+  const int = TD_INTERVALS[interval];
+  if (!int) throw new Error('TwelveData: unsupported interval ' + interval);
 
   // Try multiple symbol variants for commodities
   const variants = [symbol];
