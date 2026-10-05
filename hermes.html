@@ -909,8 +909,8 @@
                 <label>Времево затваряне (барове) <input type="number" id="inpHold" value="50" min="1" step="1"></label>
                 <label>Кели (дробна част) <input type="number" id="inpKelly" value="0.25" min="0.01" step="0.05"></label>
                 <label>Кели (макс. фракция) <input type="number" id="inpMaxKelly" value="0.05" min="0.01" max="1" step="0.05"></label>
-                <label>Мин. обем (лот) <input type="number" id="inpMinLot" value="0.01" min="0.01" step="0.01"></label>
-                <label title="Сумата в €, която се отчита като начална плаваща загуба за всяка позиция, отворена на ОЗНАЧЕНИЯ минимален обем (полето „Мин. обем (лот)“). От сумата и обема се смята отместването на входната цена.">Спред за мин. обем (€) <input type="number" id="inpMinLotSpread" value="0" min="0" step="0.01"></label>
+                <label title="Номиналната стойност в € на минималната позиция. Обемът се пресмята автоматично: лот = сума / (цена × contract), закръглен НАГОРЕ към стъпката на брокера, за да е поне зададената сума. Полето се преизчислява при всяка промяна на пазарната цена със същия процент, така че зададеният обем остава постоянен. 0 = минималната стъпка на брокера (0.01 лот).">Мин. обем (€) <input type="number" id="inpMinNotional" value="0" min="0" step="any"></label>
+                <label title="Сумата в €, която се отчита като начална плаваща загуба за всяка позиция, отворена на ОЗНАЧЕНИЯ минимален обем (полето „Мин. обем (€)“). От сумата и обема се смята отместването на входната цена.">Спред за мин. обем (€) <input type="number" id="inpMinLotSpread" value="0" min="0" step="0.01"></label>
                 <div class="note" id="minLotSpreadHint" style="grid-column:1/-1"></div>
             </div>
         </details>
@@ -1207,6 +1207,7 @@
             currentSymbol = sym;
             const badge = document.getElementById('hSymbol');
             if (badge) badge.textContent = sym;
+            syncMinNotionalField();
             updateMinLotSpreadHint();
             toggleSymbolSearch(false);
             // Ако в момента тече симулация — спираме я и пускаме нова за новия актив.
@@ -1343,6 +1344,8 @@
                     (hasOpen ? `<span>Обем: <b>${lots.toFixed(2)} лот</b></span><span>Маржин: <b>${margin.toFixed(2)} €</b></span><span>Нотионал: <b>${notional.toFixed(2)} €</b></span>` : `<span>Обем: <b>—</b></span><span>Маржин: <b>—</b></span><span>Нотионал: <b>—</b></span>`) +
                     (c ? `<span>${fmtTime(c.time)} · <b>${fmt(c.close)}</b></span>` : '');
             }
+            // € сумата на минималния обем се движи със същия процент, с който се движи цената.
+            if (c) syncMinNotionalField(c.close);
             setProgress(Math.round(((i - 30) / Math.max(1, n - 30)) * 100), `Свещ ${i}/${n} — ${tradeCount} сделки`);
             drawPnlChart(i);
         }
@@ -1548,7 +1551,6 @@
                 holdBars: Math.max(1, parseInt(document.getElementById('inpHold').value) || 50),
                 kellyF: Math.min(1, Math.max(0.01, parseFloat(document.getElementById('inpKelly').value) || 0.25)),
                 maxKelly: Math.min(1, Math.max(0.01, parseFloat(document.getElementById('inpMaxKelly').value) || 0.05)),
-                minLot: Math.max(0.01, parseFloat((document.getElementById('inpMinLot') || {}).value) || 0.01),
                 minLotSpread: Math.max(0, parseFloat((document.getElementById('inpMinLotSpread') || {}).value) || 0),
                 reverse: document.getElementById('inpReverse').checked
             };
@@ -1749,7 +1751,9 @@
                                     const minLot = P.minLot || spec.min;
                                     const maxUnits = (freeMargin * P.leverage) / entry;
                                     units = Math.min(units, maxUnits);
-                                    let lots = Math.floor((units / spec.contract) / minLot + 1e-9) * minLot;
+                                    // Закръгляме към стъпката на брокера, а минималният обем
+                                    // (от € сумата в настройките) е ДОЛНА граница, не стъпка.
+                                    let lots = Math.floor((units / spec.contract) / spec.step + 1e-9) * spec.step;
                                     lots = Math.min(lots, spec.max);
                                     if (lots < minLot) lots = minLot; // зададеният минимален обем
                                     lots = Math.round(lots * 1e8) / 1e8;
@@ -1890,6 +1894,11 @@
                 const candles = await fetchCandles(currentSymbol, interval, limit);
                 if (!candles || candles.length < 30) throw new Error('Недостатъчно данни (минимум 30 свещи).');
                 lastCandles = candles;
+                syncMinNotionalField();
+                // Водеща е стойността в ЛОТОВЕ (minLotsUser), не € полето: то вече е
+                // преизчислено по новата цена и обратното четене би дало друг обем.
+                const sp = specFor(currentSymbol);
+                P.minLot = Math.min(Math.max(minLotsUser || sp.min, sp.min), sp.max);
                 updateMinLotSpreadHint();
 
                 // Попълване на календара с реалния обхват на данните (само ако не е пипан от потребителя)
@@ -1923,6 +1932,9 @@
                 if (getPlaybackCps() > 0) prepareSimChart(simCandles);
                 await simulate(simCandles, atrSeries, probs, P);
                 if (!cancelFlag) {
+                    // И при „мгновено“ изпълнение (без живо възпроизвеждане) изравняваме
+                    // € сумата с последната цена от периода.
+                    syncMinNotionalField();
                     renderSimChart(simCandles, tradeMarkers);
                     drawPnlChart();
                 }
@@ -1956,12 +1968,66 @@
             return cnt ? sum / cnt : 0;
         }
 
+        // ── Минимален обем, зададен като НОМИНАЛНА СТОЙНОСТ в € ──
+        // Водещата величина е обемът в лотове (minLotsUser); полето „Мин. обем (€)“
+        // е неговият номинал при текущата цена. Затова при движение на пазара сумата
+        // се променя със същия процент, с който се променя цената, а обемът остава същият.
+        let minLotsUser = 0.01;
+
+        function lastClosePrice() {
+            return (lastCandles && lastCandles.length) ? lastCandles[lastCandles.length - 1].close : 0;
+        }
+
+        // € → лотове: закръгляме НАГОРЕ към стъпката, иначе реалният номинал би бил
+        // под зададения (напр. 0.017 лот → стъпката 0.01 и минималното 0.01).
+        function notionalToLots(eur, symbol, price) {
+            const spec = specFor(symbol);
+            if (!(price > 0) || !(eur > 0)) return spec.min;
+            const q = (eur / (price * spec.contract)) / spec.step;
+            // Толеранс: сума, която е само на закръгляне над границата на стъпката, остава
+            // в тази стъпка. Без него показваната (закръглена) € сума се четеше обратно
+            // като следващия лот — 0.01 лот се превръщаше в 0.02 само от закръглянето.
+            const snapped = Math.abs(q - Math.round(q)) < 1e-6 ? Math.round(q) : Math.ceil(q - 1e-9);
+            const lots = snapped * spec.step;
+            return Math.min(Math.max(lots, spec.min), spec.max);
+        }
+
+        function lotsToNotional(lots, symbol, price) {
+            const spec = specFor(symbol);
+            return Math.max(0, lots || 0) * Math.max(0, price || 0) * spec.contract;
+        }
+
+        // Преизписва видимата € сума според текущата цена (докато потребителят пише — не пипаме).
+        function syncMinNotionalField(price) {
+            const el = document.getElementById('inpMinNotional');
+            if (!el) return;
+            // Смяна на актив: обемът се пренася, но трябва да си остане в границите на брокера.
+            const spec = specFor(currentSymbol);
+            minLotsUser = Math.min(Math.max(minLotsUser || spec.min, spec.min), spec.max);
+            if (typeof document !== 'undefined' && document.activeElement === el) return;
+            const px = (price != null && price > 0) ? price : lastClosePrice();
+            if (!(px > 0)) return;
+            const eur = lotsToNotional(minLotsUser, currentSymbol, px);
+            el.value = Math.round(eur * 1e4) / 1e4;
+        }
+
+        // Потребителят е въвел нова € сума → преизчисляваме обема.
+        function onMinNotionalInput() {
+            const el = document.getElementById('inpMinNotional');
+            if (!el) return;
+            const eur = parseFloat(el.value);
+            const px = lastClosePrice();
+            if (px > 0 && eur > 0) minLotsUser = notionalToLots(eur, currentSymbol, px);
+            else if (!(eur > 0)) minLotsUser = specFor(currentSymbol).min;   // 0 → минималната стъпка
+            updateMinLotSpreadHint();
+        }
+
         function updateMinLotSpreadHint() {
             const el = document.getElementById('minLotSpreadHint');
             if (!el) return;
             const spread = Math.max(0, parseFloat((document.getElementById('inpMinLotSpread') || {}).value) || 0);
-            const minLot = Math.max(0.01, parseFloat((document.getElementById('inpMinLot') || {}).value) || 0.01);
             const spec = specFor(currentSymbol);
+            const minLot = minLotsUser || spec.min;
             const units = minLot * spec.contract;
             const price = (lastCandles && lastCandles.length) ? lastCandles[lastCandles.length - 1].close : 0;
             const atr = lastAtrValue(14);
@@ -1972,13 +2038,41 @@
             const safeEur = safeDist * units;               // безопасен спред в €
             const dec = price >= 100 ? 2 : 5;
             el.classList.remove('warn');
+
+            // Какво реално е зададено като минимален обем — в лотове и в € при текущата цена.
+            const notional = lotsToNotional(minLot, currentSymbol, price);
+            const stepEur = lotsToNotional(spec.step, currentSymbol, price);
+            const fieldEur = parseFloat((document.getElementById('inpMinNotional') || {}).value);
+            let volTxt = minLot.toFixed(2) + ' лот (' + currentSymbol + ')';
+            if (price > 0) {
+                volTxt += ' = ' + notional.toFixed(2) + ' € номинал';
+                if (isFinite(fieldEur) && fieldEur > 0) {
+                    volTxt += ' за въведени ' + fieldEur.toFixed(2) + ' €';
+                    if (notional > fieldEur * 1.005) {
+                        volTxt += ' → закръглено нагоре към стъпката (' + stepEur.toFixed(2) + ' € на ' +
+                            spec.step.toFixed(2) + ' лот)';
+                        el.classList.add('warn');
+                    } else {
+                        volTxt += ' (точно)';
+                    }
+                } else {
+                    volTxt += ' (0 = минималната стъпка на брокера)';
+                }
+                const maxEur = lotsToNotional(spec.max, currentSymbol, price);
+                if (notional >= maxEur * 0.999) {
+                    volTxt += ' ⚠ максималният обем на брокера е ' + spec.max.toFixed(2) + ' лот (' +
+                        maxEur.toFixed(2) + ' €) — сумата е ограничена до него';
+                    el.classList.add('warn');
+                }
+            }
+
             if (spread <= 0) {
-                el.textContent = 'Спредът е 0 — входът е на пазарната цена (няма начална загуба).';
+                el.textContent = 'Минимален обем: ' + volTxt + '. Спредът е 0 — входът е на пазарната цена (няма начална загуба).';
                 return;
             }
             const shift = spread / units;
             const pct = price > 0 ? (shift / price) * 100 : 0;
-            let txt = spread.toFixed(2) + ' € при ' + minLot.toFixed(2) + ' лот (' + currentSymbol + ') = отместване ' +
+            let txt = spread.toFixed(2) + ' € при ' + volTxt + ' = отместване ' +
                 shift.toFixed(dec) + ' пункта' + (pct > 0 ? ' (' + pct.toFixed(4) + '% от ' + price.toFixed(dec) + ')' : '') +
                 ' → начална плаваща загуба ' + spread.toFixed(2) + ' €.';
             if (atr > 0) {
@@ -2030,10 +2124,16 @@
             const placeholder = document.querySelector('#ordersList div');
             if (placeholder) placeholder.dataset.placeholder = '1';
 
-            ['inpMinLotSpread', 'inpMinLot', 'inpAlpha', 'inpTp', 'inpSl'].forEach(id => {
+            ['inpMinLotSpread', 'inpAlpha', 'inpTp', 'inpSl'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.addEventListener('input', updateMinLotSpreadHint);
             });
+            const minNotionalEl = document.getElementById('inpMinNotional');
+            if (minNotionalEl) {
+                minNotionalEl.addEventListener('input', onMinNotionalInput);
+                // При излизане от полето показваме реалната закръглена сума, а не въведената.
+                minNotionalEl.addEventListener('blur', () => { syncMinNotionalField(); updateMinLotSpreadHint(); });
+            }
             updateMinLotSpreadHint();
 
             runSimulation();
