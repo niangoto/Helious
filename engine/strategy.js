@@ -29,7 +29,9 @@ function normalizeParams(p) {
 // { buyPct, sellPct } = prob; atr/entry = текущи;
 // equity = общ капитал (за рисковото правило); freeMargin = свободен маржин
 // (equity − вече заетия маржин) — позицията никога не надхвърля него.
-function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol) {
+// fx = колко EUR е 1 единица от котираната валута (напр. USD→EUR ≈ 0.92).
+function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn) {
+  const fx = (fxIn > 0) ? fxIn : 1;
   if (freeMargin == null) freeMargin = equity;
   if (!prob || !(atr > 0) || !(entry > 0) || !(equity > 0)) return null;
   if (!(freeMargin > 0)) return null;
@@ -63,9 +65,10 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol) {
   if (!(f > 0)) return null;
 
   // Размер по риска (Kelly), ограничен от свободния маржин и ливъриджа.
+  // € риск за 1 единица при движение loss в цена = loss × fx.
   const riskAmount = f * equity;
-  let units = riskAmount / loss;
-  const maxUnits = (freeMargin * P.leverage) / entry;
+  let units = riskAmount / (loss * fx);
+  const maxUnits = (freeMargin * P.leverage) / (entry * fx);
   units = Math.min(units, maxUnits);
   if (!(units > 0)) return null;
 
@@ -78,8 +81,9 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol) {
   if (lots < minLot) lots = minLot;
   lots = Math.round(lots * 1e8) / 1e8;
   const finalUnits = lots * spec.contract;
-  const notional = finalUnits * entry;
-  const margin = notional / P.leverage;
+  const notionalQuote = finalUnits * entry;      // в котираната валута
+  const notional = notionalQuote * fx;           // в EUR
+  const margin = notional / P.leverage;          // в EUR
   // Никога не отваряме по-голяма позиция от свободните пари.
   if (!(lots >= minLot && margin > 0 && margin <= freeMargin && notional >= 1)) return null;
 
@@ -88,10 +92,10 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol) {
   // Спред за минималния обем: зададената сума (€) отмества реалния вход (BUY
   // нагоре, SELL надолу), т.е. позицията се отваря на реалната цена със спреда
   // и той веднага влиза в рисковите изчисления (плаваща загуба, свободен маржин).
-  // Отместване = спред / units  →  плаваща = отместване × units = спред.
+  // Отместване = спред(€) / (units × fx)  →  плаваща = отместване × units × fx = спред.
   const atMinLot = lots <= minLot + 1e-9;
   const spreadCost = atMinLot ? Math.max(0, P.minLotSpread || 0) : 0;
-  const shift = spreadCost > 0 ? spreadCost / finalUnits : 0;
+  const shift = spreadCost > 0 ? spreadCost / (finalUnits * fx) : 0;
   const fill = dir === 'BUY' ? entry + shift : entry - shift;
 
   const tp = dir === 'BUY' ? fill + tpDist : fill - tpDist;
@@ -100,8 +104,8 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol) {
 
   return {
     dir, entry: fill, lots, contract: spec.contract, units: finalUnits,
-    notional, margin, tp, sl, atr, tpDist, slDist, prob: probPct,
-    spreadCost, fillShift: shift
+    notional, notionalQuote, margin, tp, sl, atr, tpDist, slDist, prob: probPct,
+    spreadCost, fillShift: shift, fx
   };
 }
 
@@ -120,15 +124,17 @@ function exitDecision(pos, candle, heldBars, P) {
     else if (held >= P.holdBars) { exitPrice = candle.close; reason = 'Време'; }
   }
   if (exitPrice === null) return null;
-  const pnl = pos.dir === 'BUY'
+  const fx = (pos.fx > 0) ? pos.fx : 1;
+  const pnl = (pos.dir === 'BUY'
     ? (exitPrice - pos.entry) * pos.units
-    : (pos.entry - exitPrice) * pos.units;
+    : (pos.entry - exitPrice) * pos.units) * fx;
   return { exitPrice, reason, pnl };
 }
 
-// Плаваща печалба на позиция при дадена цена.
+// Плаваща печалба на позиция при дадена цена (в EUR).
 function floatingPnl(pos, price) {
-  return pos.dir === 'BUY' ? (price - pos.entry) * pos.units : (pos.entry - price) * pos.units;
+  const fx = (pos.fx > 0) ? pos.fx : 1;
+  return (pos.dir === 'BUY' ? (price - pos.entry) * pos.units : (pos.entry - price) * pos.units) * fx;
 }
 
 // Крипто инструментите се търгуват 24/7; при тях няма почивка.

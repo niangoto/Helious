@@ -1037,6 +1037,31 @@
             const day = new Date(t * 1000).getDay();   // 0 = неделя, 6 = събота
             return day !== 0 && day !== 6;
         }
+        // Валутна конверсия към EUR (валутата на сметката). Повечето инструменти са
+        // в USD, някои в GBP/JPY/CHF/CAD/AUD, а DAX/CAC в EUR.
+        const INDEX_CCY = { DAX: 'EUR', CAC: 'EUR', UK100: 'GBP', NI225: 'JPY', NDX: 'USD', SPX: 'USD', DJI: 'USD' };
+        function quoteCurrency(sym) {
+            const s = String(sym || '').toUpperCase().trim();
+            if (INDEX_CCY[s]) return INDEX_CCY[s];
+            if (['XAUUSD', 'XAGUSD', 'WTI', 'BRENT'].includes(s)) return 'USD';
+            if (isCrypto(s)) return 'USD';
+            if (/^[A-Z]{6}$/.test(s)) return s.slice(3);
+            return 'EUR';
+        }
+        const FX_PAIRS = { USD: 'EURUSD', GBP: 'EURGBP', JPY: 'EURJPY', CHF: 'EURCHF', CAD: 'EURCAD', AUD: 'EURAUD' };
+        let fxRates = { EUR: 1 }, fxFetchedAt = 0, fxFetching = null;
+        function fxFor(sym) { const r = fxRates[quoteCurrency(sym)]; return (r > 0) ? r : 1; }
+        function ensureFxRates() {
+            if (fxFetchedAt && Date.now() - fxFetchedAt < 300000) return Promise.resolve(fxRates);
+            if (fxFetching) return fxFetching;
+            fxFetching = Promise.all(Object.entries(FX_PAIRS).map(([ccy, pair]) =>
+                fetch('/data?symbol=' + encodeURIComponent(pair) + '&interval=1d&limit=5')
+                    .then(r => r.json())
+                    .then(j => { const c = j && j.candles; const last = c && c.length ? c[c.length - 1].close : 0; if (last > 0) fxRates[ccy] = 1 / last; })
+                    .catch(() => {})
+            )).then(() => { fxFetchedAt = Date.now(); fxFetching = null; updateMinLotSpreadHint(); return fxRates; });
+            return fxFetching;
+        }
         // Горна граница на теглените свещи (доставчикът ги пейджира). Достатъчна за
         // напр. 1м за ~34 дни; над това периодът се скъсява (вижда се в #periodInfo).
         const MAX_FETCH = 50000;
@@ -1335,7 +1360,7 @@
             const c = simChartCandles[i];
             let floatPnl = 0;
             if (c) for (const p of (legs || [])) {
-                floatPnl += p.dir === 'BUY' ? (c.close - p.entry) * p.units : (p.entry - c.close) * p.units;
+                floatPnl += (p.dir === 'BUY' ? (c.close - p.entry) * p.units : (p.entry - c.close) * p.units) * (p.fx || 1);
             }
             if (simChart) {
                 simChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, i - 140), to: i + 3 });
@@ -1348,7 +1373,7 @@
                 const change = total - simBudget;
                 const changePct = simBudget > 0 ? (change / simBudget) * 100 : 0;
                 let margin = 0, notional = 0, lots = 0;
-                if (c) for (const p of legs) { margin += p.margin; lots += (p.lots != null ? p.lots : 0); notional += p.units * c.close; }
+                if (c) for (const p of legs) { margin += p.margin; lots += (p.lots != null ? p.lots : 0); notional += p.units * c.close * (p.fx || 1); }
                 el.innerHTML =
                     `<span>От начало: <b class="${change >= 0 ? 'pos' : 'neg'}">${(change >= 0 ? '+' : '') + change.toFixed(2)} € (${(changePct >= 0 ? '+' : '') + changePct.toFixed(2)}%)</b></span>` +
                     `<span>Баланс: <b>${equity.toFixed(2)} €</b></span>` +
@@ -1630,7 +1655,7 @@
             // Винаги обновяваме маржин/свободен маржин и плаващата (без да пипаме височината).
             const totalMargin = open.reduce((s, p) => s + p.margin, 0);
             let floatPnl = 0;
-            if (c) for (const pos of open) floatPnl += pos.dir === 'BUY' ? (c.close - pos.entry) * pos.units : (pos.entry - c.close) * pos.units;
+            if (c) for (const pos of open) floatPnl += (pos.dir === 'BUY' ? (c.close - pos.entry) * pos.units : (pos.entry - c.close) * pos.units) * (pos.fx || 1);
             const realized = (equityOverride != null) ? equityOverride : (parseFloat((document.getElementById('inpBudget') || {}).value) || 1000);
             const totalEquity = realized + floatPnl;
             const freeMargin = Math.max(0, totalEquity - totalMargin);
@@ -1664,6 +1689,7 @@
         }
 
         async function simulate(candles, atrSeries, probs, P) {
+            await ensureFxRates();   // валутни курсове към EUR (кеширани)
             let equity = P.budget;
             let peak = equity;
             let maxDD = 0;
@@ -1695,9 +1721,9 @@
                             else if (held >= P.holdBars) { exitPrice = c.close; reason = 'Време'; }
                         }
                         if (exitPrice !== null) {
-                            const pnl = pos.dir === 'BUY'
+                            const pnl = (pos.dir === 'BUY'
                                 ? (exitPrice - pos.entry) * pos.units
-                                : (pos.entry - exitPrice) * pos.units;
+                                : (pos.entry - exitPrice) * pos.units) * (pos.fx || 1);
                             equity += pnl;
                             tradeCount++;
                             if (pnl > 0) winsCount++;
@@ -1727,6 +1753,7 @@
                         const atr = atrSeries[i] || atrSeries[atrSeries.length - 1] || 1;
                         const entry = candles[i].close;
                         const alpha = P.alpha;
+                        const fx = fxFor(currentSymbol);   // котирана валута → EUR
 
                         // (3) R:R — рискът разширява/стеснява TP и SL (агресивен: далечен SL + голям TP)
                         const tpDist = P.tpMult * alpha * atr;
@@ -1756,32 +1783,34 @@
                                 let f = Math.min(fStar * P.kellyF * alpha, P.maxKelly);
                                 if (f > 0) {
                                     const riskAmount = f * equity;
-                                    let units = riskAmount / loss;
+                                    // € риск за 1 единица при движение loss в цена = loss × fx.
+                                    let units = riskAmount / (loss * fx);
                                     // Свободен маржин = капитал − заетия маржин на позициите
                                     let usedMargin = 0;
                                     for (const pp of legs) usedMargin += pp.margin || 0;
                                     const freeMargin = Math.max(0, equity - usedMargin);
                                     const spec = specFor(currentSymbol);
                                     const minLot = P.minLot || spec.min;
-                                    const maxUnits = (freeMargin * P.leverage) / entry;
+                                    const maxUnits = (freeMargin * P.leverage) / (entry * fx);
                                     units = Math.min(units, maxUnits);
                                     let lots = Math.floor((units / spec.contract) / minLot + 1e-9) * minLot;
                                     lots = Math.min(lots, spec.max);
                                     if (lots < minLot) lots = minLot; // зададеният минимален обем
                                     lots = Math.round(lots * 1e8) / 1e8;
                                     const finalUnits = lots * spec.contract;
-                                    const notional = finalUnits * entry;
-                                    const margin = notional / P.leverage;
+                                    const notional = finalUnits * entry * fx;   // в EUR
+                                    const margin = notional / P.leverage;       // в EUR
                                     // Никога не отваряме повече от свободните пари.
                                     if (lots >= minLot && margin > 0 && margin <= freeMargin && notional >= 1) {
                                         // Отваря се само обратната поръчка вместо определената, със същия обем
                                         if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
                                         // Спред за мин. обем: отмества реалния вход (BUY нагоре,
                                         // SELL надолу) и веднага влиза в рисковите изчисления
-                                        // (плаваща загуба, свободен маржин).
+                                        // (плаваща загуба, свободен маржин). Отместването е в
+                                        // котираната валута: спред(€) / (units × fx).
                                         const atMinLot = lots <= minLot + 1e-9;
                                         const spreadCost = atMinLot ? Math.max(0, P.minLotSpread || 0) : 0;
-                                        const shift = spreadCost > 0 ? spreadCost / finalUnits : 0;
+                                        const shift = spreadCost > 0 ? spreadCost / (finalUnits * fx) : 0;
                                         const fill = dir === 'BUY' ? entry + shift : entry - shift;
                                         const t = candles[i].time;
                                         legs = [{
@@ -1798,7 +1827,8 @@
                                             margin,
                                             openTime: t,
                                             alpha,
-                                            spread: spreadCost
+                                            spread: spreadCost,
+                                            fx
                                         }];
                                         tradeMarkers.push({
                                             time: t,
@@ -1821,7 +1851,7 @@
                 {
                     let fl = 0;
                     const cc = candles[i];
-                    if (cc) for (const p of legs) fl += p.dir === 'BUY' ? (cc.close - p.entry) * p.units : (p.entry - cc.close) * p.units;
+                    if (cc) for (const p of legs) fl += (p.dir === 'BUY' ? (cc.close - p.entry) * p.units : (p.entry - cc.close) * p.units) * (p.fx || 1);
                     equityPct[i] = simBudget > 0 ? ((equity + fl) - simBudget) / simBudget * 100 : 0;
                 }
 
@@ -1844,9 +1874,9 @@
             if (legs.length && n > 0) {
                 const c = candles[n - 1];
                 for (const pos of legs) {
-                    const pnl = pos.dir === 'BUY'
+                    const pnl = (pos.dir === 'BUY'
                         ? (c.close - pos.entry) * pos.units
-                        : (pos.entry - c.close) * pos.units;
+                        : (pos.entry - c.close) * pos.units) * (pos.fx || 1);
                     equity += pnl;
                     tradeCount++;
                     if (pnl > 0) winsCount++;
@@ -2009,13 +2039,15 @@
             const lev = Math.max(1, parseFloat((document.getElementById('inpLev') || {}).value) || 30);
             const slDist = (parseFloat((document.getElementById('inpSl') || {}).value) || 1) * alpha * atr;
             const tpDist = (parseFloat((document.getElementById('inpTp') || {}).value) || 1.5) * alpha * atr;
+            const fx = fxFor(currentSymbol);                // котирана валута → EUR
+            if (!fxFetchedAt) ensureFxRates();
             const safeDist = Math.min(tpDist, slDist);      // в единици цена
-            const safeEur = safeDist * units;               // безопасен спред в €
+            const safeEur = safeDist * units * fx;          // безопасен спред в €
             const dec = price >= 100 ? 2 : 5;
             el.classList.remove('warn');
             let txt;
             if (price > 0) {
-                const notional = units * price;
+                const notional = units * price * fx;        // в EUR
                 const margin = notional / lev;
                 txt = minLot.toFixed(2) + ' лот (' + currentSymbol + ') = ' + margin.toFixed(2) +
                     ' € маржин при 1:' + lev + ' (нотионал ' + notional.toFixed(2) +
@@ -2028,7 +2060,7 @@
                 el.textContent = txt;
                 return;
             }
-            const shift = spread / units;
+            const shift = spread / (units * fx);
             const pct = price > 0 ? (shift / price) * 100 : 0;
             txt += ' Спред ' + spread.toFixed(2) + ' € при ' + minLot.toFixed(2) + ' лот = отместване ' +
                 shift.toFixed(dec) + ' пункта' + (pct > 0 ? ' (' + pct.toFixed(4) + '% от ' + price.toFixed(dec) + ')' : '') +

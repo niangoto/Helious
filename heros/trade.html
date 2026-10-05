@@ -349,6 +349,31 @@
         };
         function contractFor(sym) { return CONTRACTS[String(sym || '').toUpperCase().trim()] || 1; }
 
+        // Валутна конверсия към EUR (сметката е в EUR). Повечето инструменти са в USD.
+        const INDEX_CCY = { DAX: 'EUR', CAC: 'EUR', UK100: 'GBP', NI225: 'JPY', NDX: 'USD', SPX: 'USD', DJI: 'USD' };
+        function quoteCurrency(sym) {
+            const s = String(sym || '').toUpperCase().trim();
+            if (INDEX_CCY[s]) return INDEX_CCY[s];
+            if (['XAUUSD', 'XAGUSD', 'WTI', 'BRENT'].includes(s)) return 'USD';
+            if (/(USDT|USDC|BUSD)$/.test(s) || /^(BTC|ETH|SOL)(USD)?$/.test(s)) return 'USD';
+            if (/^[A-Z]{6}$/.test(s)) return s.slice(3);
+            return 'EUR';
+        }
+        const FX_PAIRS = { USD: 'EURUSD', GBP: 'EURGBP', JPY: 'EURJPY', CHF: 'EURCHF', CAD: 'EURCAD', AUD: 'EURAUD' };
+        let fxRates = { EUR: 1 }, fxFetchedAt = 0, fxFetching = null;
+        function fxFor(sym) { const r = fxRates[quoteCurrency(sym)]; return (r > 0) ? r : 1; }
+        function ensureFxRates() {
+            if (fxFetchedAt && Date.now() - fxFetchedAt < 300000) return Promise.resolve(fxRates);
+            if (fxFetching) return fxFetching;
+            fxFetching = Promise.all(Object.entries(FX_PAIRS).map(([ccy, pair]) =>
+                fetch('/data?symbol=' + encodeURIComponent(pair) + '&interval=1d&limit=5')
+                    .then(r => r.json())
+                    .then(j => { const c = j && j.candles; const last = c && c.length ? c[c.length - 1].close : 0; if (last > 0) fxRates[ccy] = 1 / last; })
+                    .catch(() => {})
+            )).then(() => { fxFetchedAt = Date.now(); fxFetching = null; updateMinLotSpreadHint(); return fxRates; });
+            return fxFetching;
+        }
+
         // Кеш на свещи, когато още няма сесия — за „първата известна цена от периода“.
         let hintCandles = {}, hintPending = {};
         function ensureHintCandles(sym, iv) {
@@ -385,10 +410,12 @@
             const price = (c && c.length) ? c[0].close : 0;   // първа известна цена от периода
             const dec = price >= 100 ? 2 : 5;
             const lev = Math.max(1, parseFloat(document.getElementById('inpLev').value) || 30);
+            const fx = fxFor(sym);                             // котирана валута → EUR
+            if (!fxFetchedAt) ensureFxRates();
 
             let txt;
             if (price > 0) {
-                const notional = units * price;
+                const notional = units * price * fx;           // в EUR
                 const margin = notional / lev;
                 txt = minLot.toFixed(2) + ' лот (' + sym + ') = ' + margin.toFixed(2) +
                     ' € маржин при 1:' + lev + ' (нотионал ' + notional.toFixed(2) +
@@ -415,8 +442,8 @@
             const slDist = (parseFloat(document.getElementById('inpSl').value) || 1) * alpha * atr;
             const tpDist = (parseFloat(document.getElementById('inpTp').value) || 1.5) * alpha * atr;
             const safeDist = Math.min(tpDist, slDist);
-            const safeEur = safeDist * units;
-            const shift = spread / units;
+            const safeEur = safeDist * units * fx;
+            const shift = spread / (units * fx);
             const pct = price > 0 ? (shift / price) * 100 : 0;
             txt += ' Спред ' + spread.toFixed(2) + ' € при ' + minLot.toFixed(2) + ' лот = отместване ' +
                 shift.toFixed(dec) + ' пункта' + (pct > 0 ? ' (' + pct.toFixed(4) + '% от ' + price.toFixed(dec) + ')' : '') +

@@ -7,7 +7,8 @@ const path = require('path');
 const dp = require('../data-provider');
 const models = require('../models');
 const db = require('../db');
-const { normalizeParams, entryDecision, exitDecision, marketOpen } = require('./strategy');
+const { normalizeParams, entryDecision, exitDecision, floatingPnl, marketOpen } = require('./strategy');
+const fx = require('./fx');
 const { specFor } = require('./symbolSpec');
 const { PaperAccount } = require('./paperBroker');
 
@@ -95,6 +96,8 @@ class PaperSession {
     if (this._ticking || this.status === 'stopped') return;
     this._ticking = true;
     try {
+      // Обновяване на валутните курсове към EUR (кеширани 5 мин).
+      try { await fx.loadRates(); } catch (e) { /* ignore */ }
       const iv = IV_SEC[this.interval];
       for (const s of this.symbols) {
         const st = this.state[s];
@@ -171,7 +174,8 @@ class PaperSession {
     let usedMargin = 0;
     for (const p of this.account.positions.values()) usedMargin += p.margin || 0;
     const freeMargin = Math.max(0, equity - usedMargin);
-    const dec = entryDecision(prob, atr, bar.close, equity, freeMargin, this.P, symbol);
+    const fxr = fx.eurRateForSymbol(symbol);
+    const dec = entryDecision(prob, atr, bar.close, equity, freeMargin, this.P, symbol, fxr);
     if (!dec) return;
     this.account.open({
       symbol,
@@ -182,6 +186,7 @@ class PaperSession {
       units: dec.units,
       notional: dec.notional,
       margin: dec.margin,
+      fx: dec.fx,
       tp: dec.tp,
       sl: dec.sl,
       atr: dec.atr,
@@ -258,7 +263,8 @@ class PaperSession {
       openTime: pos.openTime,
       prob: pos.prob,
       spread: pos.spread || 0,
-      floating: p[pos.symbol] != null ? (pos.dir === 'BUY' ? (p[pos.symbol] - pos.entry) * pos.units : (pos.entry - p[pos.symbol]) * pos.units) : null
+      fx: pos.fx || 1,
+      floating: p[pos.symbol] != null ? floatingPnl(pos, p[pos.symbol]) : null
     }));
     return {
       id: this.id,

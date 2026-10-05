@@ -43,9 +43,10 @@ class PaperAccount {
   close(symbol, exitPrice, reason, time) {
     const pos = this.positions.get(symbol);
     if (!pos) return null;
-    const pnl = pos.dir === 'BUY'
+    const fx = (pos.fx > 0) ? pos.fx : 1;
+    const pnl = (pos.dir === 'BUY'
       ? (exitPrice - pos.entry) * pos.units
-      : (pos.entry - exitPrice) * pos.units;
+      : (pos.entry - exitPrice) * pos.units) * fx;
     this.balance += pnl;
     if (this.balance > this.peak) this.peak = this.balance;
     const dd = this.peak > 0 ? (this.peak - this.balance) / this.peak * 100 : 0;

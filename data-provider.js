@@ -70,6 +70,8 @@ const SYMBOL_ALIASES = {
   'USDCAD':  { canonical: 'USDCAD', sources: ['twelvedata:USDCAD', 'forex:USDCAD', 'yahoo:USDCAD=X', 'mt5:USDCAD'] },
   'EURGBP':  { canonical: 'EURGBP', sources: ['twelvedata:EURGBP', 'forex:EURGBP', 'yahoo:EURGBP=X', 'mt5:EURGBP'] },
   'EURAUD':  { canonical: 'EURAUD', sources: ['twelvedata:EURAUD', 'forex:EURAUD', 'yahoo:EURAUD=X', 'mt5:EURAUD'] },
+  'EURCHF':  { canonical: 'EURCHF', sources: ['twelvedata:EURCHF', 'forex:EURCHF', 'yahoo:EURCHF=X', 'mt5:EURCHF'] },
+  'EURCAD':  { canonical: 'EURCAD', sources: ['twelvedata:EURCAD', 'forex:EURCAD', 'yahoo:EURCAD=X', 'mt5:EURCAD'] },
   'GBPCHF':  { canonical: 'GBPCHF', sources: ['twelvedata:GBPCHF', 'forex:GBPCHF', 'yahoo:GBPCHF=X', 'mt5:GBPCHF'] },
 
   // Metals
