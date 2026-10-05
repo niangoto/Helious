@@ -900,6 +900,7 @@
                 <label>Кели (дробна част) <input type="number" id="inpKelly" value="0.25" min="0.01" step="0.05"></label>
                 <label>Кели (макс. фракция) <input type="number" id="inpMaxKelly" value="0.05" min="0.01" max="1" step="0.05"></label>
                 <label>Мин. обем (лот) <input type="number" id="inpMinLot" value="0.01" min="0.01" step="0.01"></label>
+                <label title="Начална плаваща загуба (€), когато позицията се отвори на минималния обем. От сумата и обема се смята отместването на входната цена.">Спред мин. обем (€) <input type="number" id="inpMinLotSpread" value="0" min="0" step="0.5"></label>
             </div>
         </details>
     </section>
@@ -1536,6 +1537,7 @@
                 kellyF: Math.min(1, Math.max(0.01, parseFloat(document.getElementById('inpKelly').value) || 0.25)),
                 maxKelly: Math.min(1, Math.max(0.01, parseFloat(document.getElementById('inpMaxKelly').value) || 0.05)),
                 minLot: Math.max(0.01, parseFloat((document.getElementById('inpMinLot') || {}).value) || 0.01),
+                minLotSpread: Math.max(0, parseFloat((document.getElementById('inpMinLotSpread') || {}).value) || 0),
                 reverse: document.getElementById('inpReverse').checked
             };
         }
@@ -1746,21 +1748,28 @@
                                     if (lots >= minLot && margin > 0 && margin <= freeMargin && notional >= 1) {
                                         // Отваря се само обратната поръчка вместо определената, със същия обем
                                         if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
+                                        // Спред за минималния обем → начална плаваща загуба:
+                                        // отместване = спред (€) / реален обем (units)
+                                        const atMinLot = lots <= minLot + 1e-9;
+                                        const spreadCost = atMinLot ? Math.max(0, P.minLotSpread || 0) : 0;
+                                        const shift = spreadCost > 0 ? spreadCost / finalUnits : 0;
+                                        const fill = dir === 'BUY' ? entry + shift : entry - shift;
                                         const t = candles[i].time;
                                         legs = [{
                                             dir,
-                                            entry,
+                                            entry: fill,
                                             lots,
                                             contract: spec.contract,
                                             units: finalUnits,
-                                            tp: dir === 'BUY' ? entry + tpDist : entry - tpDist,
-                                            sl: dir === 'BUY' ? entry - slDist : entry + slDist,
+                                            tp: dir === 'BUY' ? fill + tpDist : fill - tpDist,
+                                            sl: dir === 'BUY' ? fill - slDist : fill + slDist,
                                             atr,
                                             openIdx: i,
                                             prob: (dir === 'BUY' ? pRise : pFall) * 100,
                                             margin,
                                             openTime: t,
-                                            alpha
+                                            alpha,
+                                            spread: spreadCost
                                         }];
                                         tradeMarkers.push({
                                             time: t,

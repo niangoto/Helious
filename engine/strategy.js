@@ -20,6 +20,7 @@ function normalizeParams(p) {
     kellyF: Math.min(1, Math.max(0.01, num(p.kellyF, 0.25))),
     maxKelly: Math.min(1, Math.max(0.01, num(p.maxKelly, 0.05))),
     minLot: Math.max(0.01, num(p.minLot, 0.01)),
+    minLotSpread: Math.max(0, num(p.minLotSpread, 0)),
     reverse: !!p.reverse
   };
 }
@@ -83,13 +84,23 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol) {
   if (!(lots >= minLot && margin > 0 && margin <= freeMargin && notional >= 1)) return null;
 
   if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
-  const tp = dir === 'BUY' ? entry + tpDist : entry - tpDist;
-  const sl = dir === 'BUY' ? entry - slDist : entry + slDist;
+
+  // Спред за минималния обем: зададената сума (€) става начална плаваща загуба.
+  // Отместването на цената се смята от сумата и реално отворения обем:
+  //   отместване = спред / units  →  плаваща = отместване × units = спред
+  const atMinLot = lots <= minLot + 1e-9;
+  const spreadCost = atMinLot ? Math.max(0, P.minLotSpread || 0) : 0;
+  const shift = spreadCost > 0 ? spreadCost / finalUnits : 0;
+  const fill = dir === 'BUY' ? entry + shift : entry - shift;
+
+  const tp = dir === 'BUY' ? fill + tpDist : fill - tpDist;
+  const sl = dir === 'BUY' ? fill - slDist : fill + slDist;
   const probPct = (dir === 'BUY' ? pRise : pFall) * 100;
 
   return {
-    dir, entry, lots, contract: spec.contract, units: finalUnits,
-    notional, margin, tp, sl, atr, tpDist, slDist, prob: probPct
+    dir, entry: fill, lots, contract: spec.contract, units: finalUnits,
+    notional, margin, tp, sl, atr, tpDist, slDist, prob: probPct,
+    spreadCost, fillShift: shift
   };
 }
 

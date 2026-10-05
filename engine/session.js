@@ -174,6 +174,7 @@ class PaperSession {
       sl: dec.sl,
       atr: dec.atr,
       prob: dec.prob,
+      spread: dec.spreadCost,
       openTime: bar.time
     });
   }
@@ -232,6 +233,7 @@ class PaperSession {
       sl: pos.sl,
       openTime: pos.openTime,
       prob: pos.prob,
+      spread: pos.spread || 0,
       floating: p[pos.symbol] != null ? (pos.dir === 'BUY' ? (p[pos.symbol] - pos.entry) * pos.units : (pos.entry - p[pos.symbol]) * pos.units) : null
     }));
     return {

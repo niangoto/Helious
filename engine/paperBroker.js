@@ -65,7 +65,8 @@ class PaperAccount {
       closedAt: time,
       pnl,
       reason,
-      prob: pos.prob
+      prob: pos.prob,
+      spread: pos.spread || 0
     };
     this.trades.push(trade);
     this.positions.delete(symbol);
