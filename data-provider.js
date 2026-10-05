@@ -196,13 +196,16 @@ async function fetchYahoo(symbol, interval) {
   // Кратък кеш, за да не изостава paper двигателят с до 5 мин (той проверява на 5с).
   if (cached && Date.now() - cached.time < 60000) return cached.data;
 
-  const fallbacks = { '5m': '1h', '15m': '1h', '30m': '1h', '1h': '1d' };
+  // Yahoo ограничава range според интервала: 1m → най-много 7d, 2m..90m → 60d,
+  // 1h → 730d. Затова не бива да се иска „1mo“ за 1m (връща 422/празно).
+  const ranges = { '1m': '7d', '2m': '60d', '5m': '60d', '15m': '60d', '30m': '60d', '90m': '60d', '1h': '730d', '1d': '10y' };
+  const fallbacks = { '1m': '5m', '5m': '15m', '15m': '1h', '30m': '1h', '1h': '1d' };
   const tried = [];
   let currentInterval = interval;
   
   while (!tried.includes(currentInterval)) {
     tried.push(currentInterval);
-    const range = currentInterval === '1d' ? '1y' : currentInterval === '1h' ? '6mo' : '1mo';
+    const range = ranges[currentInterval] || '1mo';
     try {
       const url = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(symbol)}?interval=${currentInterval}&range=${range}&includePrePost=false`;
       const raw = await fetchFromURL(url);
@@ -257,12 +260,53 @@ async function fetchForex(pair) {
   }
 }
 
-// Twelve Data (requires TWELVEDATA_KEY env var)
+// Twelve Data (requires TWELVEDATA_KEY env var).
+// Безплатният план дава 8 кредита/мин и до 5000 свещи на заявка. За по-дълги
+// периоди (напр. 1м за ~месец ≈ 43 000 свещи) теглим последователни страници
+// назад във времето чрез `end_date`, ограничени до 8 страници на извикване
+// (≈40 000 свещи ≈ 27 дни 1м), за да не надхвърлим кредитите.
 const tdCache = {};
-async function fetchTwelvedata(symbol, interval) {
+const TD_PAGE = 5000;      // максимум свещи на заявка
+const TD_MAX_PAGES = 8;    // ≈40 000 свещи на извикване (в рамките на 8 кредита/мин)
+const TD_PER_MIN = 8;      // кредити на минута (безплатен план)
+let tdReqTimes = [];
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// Изчаква свободен кредит, за да не хвърля 429 „out of API credits“.
+async function tdThrottle() {
+  for (;;) {
+    const now = Date.now();
+    tdReqTimes = tdReqTimes.filter(t => now - t < 60000);
+    if (tdReqTimes.length < TD_PER_MIN) break;
+    await sleep(60000 - (now - tdReqTimes[0]) + 100);
+  }
+  tdReqTimes.push(Date.now());
+}
+
+// Една страница; хвърля при 429 (за да не повтаряме излишно) и при грешка.
+async function tdFetchPage(baseUrl, endDate) {
+  let url = baseUrl + '&outputsize=' + TD_PAGE;
+  if (endDate) url += '&end_date=' + encodeURIComponent(endDate);
+  await tdThrottle();
+  const raw = await fetchFromURL(url);
+  const parsed = JSON.parse(raw);
+  if (parsed.status === 'error') {
+    const err = new Error(parsed.message || ('TwelveData error ' + (parsed.code || '')));
+    err.tdCode = parsed.code;
+    throw err;
+  }
+  return parsed.values || [];
+}
+
+async function fetchTwelvedata(symbol, interval, limit) {
+  const want = Math.max(parseInt(limit, 10) || 500, 1);
+  const maxAvailable = TD_PAGE * TD_MAX_PAGES;
   const cacheKey = 'td_' + symbol + '_' + interval;
   const cached = tdCache[cacheKey];
-  if (cached && Date.now() - cached.time < 300000) return cached.data;
+  if (cached && Date.now() - cached.time < 300000 && cached.data.length >= Math.min(want, maxAvailable)) {
+    return cached.data;
+  }
   // TwelveData приема само: 1min, 5min, 15min, 30min, 1h, 2h, 4h, 6h, 8h, 12h, 1day, 3month.
   // („1hour“ и „day“ НЕ са валидни и водят до „Invalid interval“; невалиден интервал
   // преди това мълчащо падаше на 15min → 500 свещи = ~5 дни вместо заявения период.)
@@ -286,34 +330,48 @@ async function fetchTwelvedata(symbol, interval) {
   else if (symbol === 'CAC') variants.push('FCHI', 'CAC40');
   else if (symbol === 'NI225') variants.push('JP225', 'NIKKEI');
 
+  let lastErr = null;
   for (const sym of variants) {
-    try {
-      const url = `https://api.twelvedata.com/time_series?symbol=${sym}&interval=${int}&outputsize=500&apikey=${KEYS.twelvedata}`;
-
-      // For forex pairs, also try slash format (EUR/USD instead of EURUSD)
-      const slashUrl = sym.length === 6 && /^[A-Z]{6}$/.test(sym)
-        ? `https://api.twelvedata.com/time_series?symbol=${sym.slice(0, 3)}/${sym.slice(3)}&interval=${int}&outputsize=500&apikey=${KEYS.twelvedata}`
-        : null;
-
-      // Try both URL formats
-      for (const u of [url, slashUrl].filter(Boolean)) {
-        try {
-          const raw = await fetchFromURL(u);
-          const parsed = JSON.parse(raw);
-          if (parsed.status === 'error') continue;
-          const values = parsed.values || [];
-          if (values.length === 0) continue;
-          const data = values.map(v => ({
-            time: Math.floor(new Date(v.datetime).getTime() / 1000),
-            open: parseFloat(v.open), high: parseFloat(v.high), low: parseFloat(v.low),
-            close: parseFloat(v.close), volume: parseInt(v.volume) || 0
-          })).reverse();
-          tdCache[cacheKey] = { time: Date.now(), data };
-          return data;
-        } catch (e) {}
+    const bases = [`https://api.twelvedata.com/time_series?symbol=${sym}&interval=${int}&apikey=${KEYS.twelvedata}`];
+    // For forex pairs, also try slash format (EUR/USD instead of EURUSD)
+    if (sym.length === 6 && /^[A-Z]{6}$/.test(sym)) {
+      bases.push(`https://api.twelvedata.com/time_series?symbol=${sym.slice(0, 3)}/${sym.slice(3)}&interval=${int}&apikey=${KEYS.twelvedata}`);
+    }
+    for (const base of bases) {
+      try {
+        const byTime = new Map();
+        let endDate = null;
+        let pages = 0;
+        while (byTime.size < want && pages < TD_MAX_PAGES) {
+          pages++;
+          const values = await tdFetchPage(base, endDate);
+          if (!values.length) break;
+          for (const v of values) {
+            const t = Math.floor(new Date(v.datetime).getTime() / 1000);
+            if (!byTime.has(t)) {
+              byTime.set(t, {
+                time: t, open: parseFloat(v.open), high: parseFloat(v.high),
+                low: parseFloat(v.low), close: parseFloat(v.close), volume: parseInt(v.volume) || 0
+              });
+            }
+          }
+          const oldest = values[values.length - 1].datetime;
+          if (endDate && oldest >= endDate) break;   // няма напредък във времето
+          endDate = oldest;
+          if (values.length < TD_PAGE) break;        // стигнали сме началото на историята
+        }
+        if (byTime.size === 0) continue;
+        const data = [...byTime.values()].sort((a, b) => a.time - b.time);
+        tdCache[cacheKey] = { time: Date.now(), data };
+        return data;
+      } catch (e) {
+        lastErr = e;
+        // 429 / невалиден символ → не продължавай с други варианти (спестява кредити)
+        if (e.tdCode === 429) throw e;
       }
-    } catch (e) {}
+    }
   }
+  if (lastErr) throw lastErr;
   throw new Error('TwelveData: no data for any variant of ' + symbol);
 }
 
@@ -345,7 +403,7 @@ async function fetchData(symbol, interval, limit) {
       }
       if (provider === 'twelvedata') {
         if (!KEYS.twelvedata) throw new Error('TwelveData key not set; use TWELVEDATA_KEY env var');
-        const data = await fetchTwelvedata(sym, interval);
+        const data = await fetchTwelvedata(sym, interval, limit);
         if (data.length > 10) return { symbol: canonical, interval, candles: data, source: 'twelvedata:' + sym };
       }
       if (provider === 'binance') {

@@ -20,8 +20,10 @@
 
 ## Data provider quirks
 - **TwelveData intervals**: `fetchTwelvedata()` maps the app interval to the API's own vocabulary via the `TD_INTERVALS` table (`data-provider.js`) — `1m/5m/15m/30m/1h/2h/4h/6h/8h/12h/1d` → `1min/5min/15min/30min/1h/2h/4h/6h/8h/12h/1day`. Only these are accepted; `1hour` and `day` are **invalid** and return `Invalid interval`. Previously the mapping was a ternary chain that sent `1h`→`1hour` (rejected → silent fallback to Yahoo) and fell through to `15min` for everything else, so a requested `4h` on XAUUSD returned 500 × 15min ≈ **5 days** instead of ~83. Unsupported intervals now throw instead of degrading.
-- TwelveData returns at most `outputsize=500` candles per call (hardcoded), so max coverage ≈ 500 × interval: 4h→~83 дни, 1h→~20 дни, 1d→~515 дни. `handleDataRequest()` then trims to the requested `limit`.
-- Free-tier rate limit is ~8 req/min per key → a burst of tests can make a source fail and fall through to the next one in the source list.
+- TwelveData: `fetchTwelvedata()` вече пейджира (по 5000 свещи със `end_date`, до `TD_MAX_PAGES=8` страници ≈ 40 000 свещи на извикване), за да покрива дълги периоди (1м за ~месец). Преди беше твърдо `outputsize=500` → само ~8ч 1м. `handleDataRequest()` реже до заявения `limit`. (При 24/7 инструменти 40 000 × 1м ≈ 27 дни; при инструменти с паузи обхватът календарно е по-дълъг.)
+- Free-tier rate limit е 8 кредита/мин (и 800/ден) за ключа. `tdThrottle()` чака свободен кредит при нужда, а при 429 спира пейджинга (и не опитва други варианти) — така не се хаби излишно.
+- Yahoo intraday range е ограничен: 1m → най-много `7d`, 2m..90m → `60d`, 1h → `730d`. `fetchYahoo()` вече ползва точен range map (преди искаше `1mo` за 1m → празно/422 и 1m нямаше от Yahoo).
+- Cash indices/commodities (DAX, WTI, …) trade only their session, so their intraday series има паузи — 40 000 1м бара могат да покрият месеци календарно.
 - Cash indices/commodities (DAX, WTI, SPX, …) trade only their session, so TwelveData's `4h` series has **2 bars per trading day** (e.g. 06:30 and 10:30 UTC). HERMES labels the median gap as „реален интервал“, which therefore reads „20ч“ and a weekend makes „периодът е скъсен“ appear — both are display artifacts, not wrong data.
 
 ## Symbol Aliases
