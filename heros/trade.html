@@ -260,7 +260,7 @@
                     <label class="f">Кели (част)<input id="inpKelly" type="number" value="0.25" min="0.01" step="0.05"></label>
                     <label class="f">Кели макс.<input id="inpMaxKelly" type="number" value="0.05" min="0.01" max="1" step="0.05"></label>
                     <label class="f">Мин. обем (лот)<input id="inpMinLot" type="number" value="0.01" min="0.01" step="0.01"></label>
-                    <label class="f" title="Сумата в €, която се отчита като начална плаваща загуба за всяка позиция, отворена на ОЗНАЧЕНИЯ минимален обем (полето „Мин. обем (лот)“). От сумата и обема се смята отместването на входната цена.">Спред за мин. обем (€)<input id="inpMinLotSpread" type="number" value="0" min="0" step="0.01"></label>
+                    <label class="f" title="Сумата в €, която отмества реалния вход (начална плаваща загуба) за всяка позиция, отворена на ОЗНАЧЕНИЯ минимален обем (полето „Мин. обем (лот)“). От сумата и обема се смята отместването на входната цена и влиза в рисковите изчисления.">Спред за мин. обем (€)<input id="inpMinLotSpread" type="number" value="0" min="0" step="0.01"></label>
                 </div>
                 <div class="note" id="minLotSpreadHint" style="color:var(--text-dim)"></div>
                 <div class="row"><input type="checkbox" id="inpReverse"> Обърната посока (контра със същия обем)</div>
@@ -331,28 +331,75 @@
             const mSel = document.getElementById('inpModel');
             const updateContra = () => { document.getElementById('contraBox').style.display = parseInt(mSel.value, 10) === 5 ? 'grid' : 'none'; };
             mSel.addEventListener('change', updateContra); updateContra();
-            ['inpMinLotSpread', 'inpMinLot', 'inpAlpha', 'inpTp', 'inpSl', 'inpSymbols'].forEach(id => {
+            ['inpMinLotSpread', 'inpMinLot', 'inpAlpha', 'inpTp', 'inpSl', 'inpSymbols', 'inpInterval'].forEach(id => {
                 const el = document.getElementById(id);
                 if (el) el.addEventListener('input', updateMinLotSpreadHint);
+                if (el) el.addEventListener('change', updateMinLotSpreadHint);
             });
         })();
 
-        // Спред за мин. обем: сумата в € се отчита само за позиции на зададения минимален обем.
-        // Показва какво означава в единици цена и предупреждава при опасен голям спред.
+        // Contract size по инструмент (както engine/symbolSpec.js) — за пресмятане
+        // на номинала на мин. обем още преди да има стартирана сесия.
+        const CONTRACTS = {
+            EURUSD: 100000, GBPUSD: 100000, USDJPY: 100000, USDCHF: 100000, EURJPY: 100000,
+            GBPJPY: 100000, AUDUSD: 100000, NZDUSD: 100000, USDCAD: 100000, EURGBP: 100000,
+            EURAUD: 100000, GBPCHF: 100000, XAUUSD: 100, XAGUSD: 5000, WTI: 1000, BRENT: 1000,
+            DAX: 1, NDX: 1, SPX: 1, DJI: 1, CAC: 1, UK100: 1, NI225: 1,
+            BTCUSDT: 1, ETHUSDT: 1, SOLUSDT: 1
+        };
+        function contractFor(sym) { return CONTRACTS[String(sym || '').toUpperCase().trim()] || 1; }
+
+        // Кеш на свещи, когато още няма сесия — за „първата известна цена от периода“.
+        let hintCandles = {}, hintPending = {};
+        function ensureHintCandles(sym, iv) {
+            const key = sym + '|' + iv;
+            if (hintCandles[key] || hintPending[key]) return;
+            hintPending[key] = true;
+            fetch('/data?symbol=' + encodeURIComponent(sym) + '&interval=' + encodeURIComponent(iv) + '&limit=200')
+                .then(r => r.json())
+                .then(j => { if (j && j.ok && Array.isArray(j.candles) && j.candles.length) hintCandles[key] = j.candles; })
+                .catch(() => {})
+                .then(() => { hintPending[key] = false; updateMinLotSpreadHint(); });
+        }
+
+        // Мин. обем: показва на колко € се равнява при първата известна цена от периода.
+        // Спред за мин. обем: сумата се отчита само за позиции на зададения минимален
+        // обем, отмества реалния вход (начална плаваща загуба) и показва отместването.
         function updateMinLotSpreadHint() {
             const el = document.getElementById('minLotSpreadHint');
             if (!el) return;
             const spread = Math.max(0, parseFloat(document.getElementById('inpMinLotSpread').value) || 0);
             const minLot = Math.max(0.01, parseFloat(document.getElementById('inpMinLot').value) || 0.01);
             const sym = (document.getElementById('inpSymbols').value.split(',')[0] || '').trim().toUpperCase();
-            if (spread <= 0) { el.textContent = 'Спредът е 0 — входът е на пазарната цена (няма начална загуба).'; return; }
+            const iv = document.getElementById('inpInterval').value || '1h';
+            const units = minLot * contractFor(sym);
+
+            let c = null;
             const sd = lastState && lastState.symbols ? lastState.symbols[sym] : null;
-            if (!sd || !sd.contract) { el.textContent = 'Сумата се отчита само за позиции на зададения минимален обем (' + minLot.toFixed(2) + ' лот).'; return; }
-            const units = minLot * sd.contract;
-            const c = sd.candles || [];
-            const price = c.length ? c[c.length - 1].close : 0;
+            if (sd && sd.candles && sd.candles.length) c = sd.candles;
+            else {
+                const key = sym + '|' + iv;
+                if (!hintCandles[key]) ensureHintCandles(sym, iv);
+                c = hintCandles[key] || null;
+            }
+            const price = (c && c.length) ? c[0].close : 0;   // първа известна цена от периода
+            const dec = price >= 100 ? 2 : 5;
+
+            let txt;
+            if (price > 0) {
+                txt = minLot.toFixed(2) + ' лот (' + sym + ') = ' + (units * price).toFixed(2) +
+                    ' € при първа цена ' + price.toFixed(dec) + '.';
+            } else {
+                txt = minLot.toFixed(2) + ' лот (' + sym + ').';
+            }
+            el.style.color = '';
+            if (spread <= 0) {
+                txt += ' Спредът е 0 — входът е на пазарната цена (няма начална загуба).';
+                el.textContent = txt;
+                return;
+            }
             let atr = 0;
-            if (c.length > 1) {
+            if (c && c.length > 1) {
                 let sum = 0, cnt = 0;
                 for (let i = Math.max(1, c.length - 14); i < c.length; i++) {
                     sum += Math.max(c[i].high - c[i].low, Math.abs(c[i].high - c[i - 1].close), Math.abs(c[i].low - c[i - 1].close));
@@ -364,23 +411,23 @@
             const slDist = (parseFloat(document.getElementById('inpSl').value) || 1) * alpha * atr;
             const tpDist = (parseFloat(document.getElementById('inpTp').value) || 1.5) * alpha * atr;
             const safeDist = Math.min(tpDist, slDist);
+            const safeEur = safeDist * units;
             const shift = spread / units;
             const pct = price > 0 ? (shift / price) * 100 : 0;
-            const dec = price >= 100 ? 2 : 5;
-            el.style.color = '';
-            let txt = spread.toFixed(2) + ' € при ' + minLot.toFixed(2) + ' лот (' + sym + ') = отместване ' +
+            txt += ' Спред ' + spread.toFixed(2) + ' € при ' + minLot.toFixed(2) + ' лот = отместване ' +
                 shift.toFixed(dec) + ' пункта' + (pct > 0 ? ' (' + pct.toFixed(4) + '% от ' + price.toFixed(dec) + ')' : '') +
-                ' → начална плаваща загуба ' + spread.toFixed(2) + ' €.';
+                ' → начална плаваща загуба ' + spread.toFixed(2) + ' € (влиза в рисковите изчисления).';
             if (atr > 0) {
                 if (shift > safeDist) {
                     el.style.color = '#ffb37a';
-                    txt += ' ⚠ По-голям е от разстоянието до SL/TP (' + safeDist.toFixed(dec) + ' пункта) — позицията ще излезе веднага на SL/TP. Безопасно до ~' + (safeDist * units).toFixed(2) + ' €.';
+                    txt += ' ⚠ По-голям е от разстоянието до SL/TP (' + safeDist.toFixed(dec) + ' пункта) — позицията ще излезе веднага на SL/TP. Безопасно до ~' + safeEur.toFixed(2) + ' €.';
                 } else {
-                    txt += ' Безопасно (до ~' + (safeDist * units).toFixed(2) + ' € при ATR ' + atr.toFixed(dec) + ').';
+                    txt += ' Безопасно (до ~' + safeEur.toFixed(2) + ' € при ATR ' + atr.toFixed(dec) + ').';
                 }
             }
             el.textContent = txt;
         }
+        updateMinLotSpreadHint();
 
         function readConfig() {
             const symbols = document.getElementById('inpSymbols').value.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
@@ -597,6 +644,9 @@
             updateMinLotSpreadHint();
             renderTrades(state.trades || []);
             drawPnl();
+            // След презареждане размерите/оста на графиката може да се установят
+            // в следващия кадър — рисуваме % графиката отново, за да е цялата видима.
+            requestAnimationFrame(() => drawPnl());
             const me = sessions.find(x => x.id === state.id);
             if (me) {
                 const eq = (s.equity != null && me.params && me.params.budget) ? s.equity - me.params.budget : null;
@@ -631,6 +681,7 @@
             candleSeries = chart.addCandlestickSeries({ upColor: '#00ff66', downColor: '#ff0055', borderVisible: false, wickUpColor: '#00ff66', wickDownColor: '#ff0055' });
             const ro = new ResizeObserver(() => { if (el.clientWidth) { chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }); drawPnl(); } });
             ro.observe(el);
+            window.addEventListener('resize', () => drawPnl());
             try { chart.timeScale().subscribeVisibleLogicalRangeChange(() => drawPnl()); } catch (e) {}
         }
 
@@ -678,14 +729,24 @@
             const series = lastState.equitySeries || [];
             const initial = (lastState.stats && lastState.stats.initial) || 1;
             if (series.length < 2) return;
+            // Ако цялата серия е в видимия диапазон на ценовата графика — подравняваме
+            // по нейната времева ос; иначе (напр. след презареждане серията е по-дълга
+            // от заредените свещи) я разпъваме по цялата ширина, за да се вижда цялата.
+            const t0 = series[0].t, t1 = series[series.length - 1].t;
+            const vr = chart.timeScale().getVisibleRange();
+            const aligned = !!(vr && t0 >= vr.from);
+            const span = Math.max(1, t1 - t0);
+            const xOf = aligned
+                ? (t => chart.timeScale().timeToCoordinate(t))
+                : (t => ((t - t0) / span) * w);
             let maxAbs = 0;
             const pts = [];
             for (const pt of series) {
                 const pct = (pt.equity - initial) / initial * 100;
-                const x = chart.timeScale().timeToCoordinate(pt.t);
+                const x = xOf(pt.t);
                 if (x == null) continue;
-                if (x < -20) continue;
-                if (x > w + 20) break;
+                if (aligned && x < -20) continue;
+                if (aligned && x > w + 20) break;
                 pts.push({ x, v: pct });
                 if (Math.abs(pct) > maxAbs) maxAbs = Math.abs(pct);
             }

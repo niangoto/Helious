@@ -37,7 +37,8 @@
                 radial-gradient(at 100% 100%, rgba(0, 240, 255, 0.08) 0px, transparent 50%);
             color: var(--text-main);
             font-family: 'Outfit', sans-serif;
-            overflow: hidden;
+            overflow-x: hidden;
+            overflow-y: auto;
         }
 
         header {
@@ -583,10 +584,10 @@
         }
 
         .orders {
-            flex: 1;
+            flex: 1 0 auto;
             display: flex;
             flex-direction: column;
-            min-height: 0;
+            min-height: 300px;
             padding: 0 18px 12px;
         }
 
@@ -910,7 +911,7 @@
                 <label>Кели (дробна част) <input type="number" id="inpKelly" value="0.25" min="0.01" step="0.05"></label>
                 <label>Кели (макс. фракция) <input type="number" id="inpMaxKelly" value="0.05" min="0.01" max="1" step="0.05"></label>
                 <label>Мин. обем (лот) <input type="number" id="inpMinLot" value="0.01" min="0.01" step="0.01"></label>
-                <label title="Сумата в €, която се отчита като начална плаваща загуба за всяка позиция, отворена на ОЗНАЧЕНИЯ минимален обем (полето „Мин. обем (лот)“). От сумата и обема се смята отместването на входната цена.">Спред за мин. обем (€) <input type="number" id="inpMinLotSpread" value="0" min="0" step="0.01"></label>
+                <label title="Сумата в €, която отмества реалния вход (начална плаваща загуба) за всяка позиция, отворена на ОЗНАЧЕНИЯ минимален обем (полето „Мин. обем (лот)“). От сумата и обема се смята отместването на входната цена и влиза в рисковите изчисления.">Спред за мин. обем (€) <input type="number" id="inpMinLotSpread" value="0" min="0" step="0.01"></label>
                 <div class="note" id="minLotSpreadHint" style="grid-column:1/-1"></div>
             </div>
         </details>
@@ -1033,6 +1034,7 @@
         let running = false;
         let datesTouched = false;
         let lastCandles = [];
+        let lastCandlesKey = '';   // „SYMBOL|интервал“, за който се отнасят lastCandles
 
         // Дата-помощни функции: свещите са с локално "изместено" време (timeToLocal),
         // затова датите се четат/пишат в локален вид през new Date.
@@ -1593,6 +1595,7 @@
                         <span>Вход ${fmt(pos.entry)}</span>
                         <span>TP ${fmt(pos.tp)}</span>
                         <span>SL ${fmt(pos.sl)}</span>
+                        <span>Спред ${pos.spread ? fmt(pos.spread) + ' €' : '—'}</span>
                         <span>Вер. ${pos.prob.toFixed(1)}%</span>
                     </div>
                 `;
@@ -1600,7 +1603,7 @@
                 // графиката). При липса на позиция редът стои с тирета, а не изчезва.
                 const legHtml = hasOpen
                     ? open.map(legRow).join('')
-                    : '<div class="cp-leg"><b>—</b><span>Обем —</span><span>Вход —</span><span>TP —</span><span>SL —</span><span>Вер. —</span></div>';
+                    : '<div class="cp-leg"><b>—</b><span>Обем —</span><span>Вход —</span><span>TP —</span><span>SL —</span><span>Спред —</span><span>Вер. —</span></div>';
                 el.innerHTML = `
                     <div class="cp-head">Отворени позиции — зает маржин: <span id="cpUsed">—</span> · свободен маржин: <span id="cpFree">—</span></div>
                     <div class="cp-grid">
@@ -1760,8 +1763,9 @@
                                     if (lots >= minLot && margin > 0 && margin <= freeMargin && notional >= 1) {
                                         // Отваря се само обратната поръчка вместо определената, със същия обем
                                         if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
-                                        // Спред за минималния обем → начална плаваща загуба:
-                                        // отместване = спред (€) / реален обем (units)
+                                        // Спред за мин. обем: отмества реалния вход (BUY нагоре,
+                                        // SELL надолу) и веднага влиза в рисковите изчисления
+                                        // (плаваща загуба, свободен маржин).
                                         const atMinLot = lots <= minLot + 1e-9;
                                         const spreadCost = atMinLot ? Math.max(0, P.minLotSpread || 0) : 0;
                                         const shift = spreadCost > 0 ? spreadCost / finalUnits : 0;
@@ -1890,6 +1894,7 @@
                 const candles = await fetchCandles(currentSymbol, interval, limit);
                 if (!candles || candles.length < 30) throw new Error('Недостатъчно данни (минимум 30 свещи).');
                 lastCandles = candles;
+                lastCandlesKey = currentSymbol + '|' + interval;
                 updateMinLotSpreadHint();
 
                 // Попълване на календара с реалния обхват на данните (само ако не е пипан от потребителя)
@@ -1942,10 +1947,27 @@
             setProgress(0, 'Спиране...');
         }
 
-        // Спред за мин. обем: показва какво означава сумата в € (отместване в цената)
-        // и предупреждава, когато спредът надхвърля разстоянието до SL/TP (риск от мигновен изход).
-        function lastAtrValue(n) {
-            const c = lastCandles || [];
+        // Мин. обем: показва на колко € се равнява при първата известна цена от периода.
+        // Спред за мин. обем: показва отместването в цената и предупреждава, когато
+        // надхвърля разстоянието до SL/TP (дори TP-затваряне излиза на загуба).
+        // Ако още няма заредени свещи (симулацията не е приключила/неуспешна), теглим
+        // малък набор, за да покажем € стойността веднага.
+        let hintCandles = {}, hintPending = {};
+        function ensureHintCandles() {
+            const sym = currentSymbol;
+            const iv = (document.getElementById('inpInterval') || {}).value || '5m';
+            const key = sym + '|' + iv;
+            if (hintCandles[key] || hintPending[key]) return;
+            hintPending[key] = true;
+            fetch('/data?symbol=' + encodeURIComponent(sym) + '&interval=' + encodeURIComponent(iv) + '&limit=200')
+                .then(r => r.json())
+                .then(j => { if (j && j.ok && Array.isArray(j.candles) && j.candles.length) hintCandles[key] = j.candles; })
+                .catch(() => {})
+                .then(() => { hintPending[key] = false; updateMinLotSpreadHint(); });
+        }
+
+        function lastAtrValue(candles, n) {
+            const c = candles || [];
             if (c.length < 2) return 0;
             const from = Math.max(1, c.length - (n || 14));
             let sum = 0, cnt = 0;
@@ -1963,8 +1985,13 @@
             const minLot = Math.max(0.01, parseFloat((document.getElementById('inpMinLot') || {}).value) || 0.01);
             const spec = specFor(currentSymbol);
             const units = minLot * spec.contract;
-            const price = (lastCandles && lastCandles.length) ? lastCandles[lastCandles.length - 1].close : 0;
-            const atr = lastAtrValue(14);
+            // Първа известна цена от периода — по нея се пресмята на колко € се равнява обемът.
+            const iv = (document.getElementById('inpInterval') || {}).value || '5m';
+            const hintKey = currentSymbol + '|' + iv;
+            let c = (lastCandles && lastCandles.length && lastCandlesKey === hintKey) ? lastCandles : hintCandles[hintKey];
+            if (!c || !c.length) { ensureHintCandles(); c = null; }
+            const price = (c && c.length) ? c[0].close : 0;
+            const atr = lastAtrValue(c, 14);
             const alpha = Math.min(10, Math.max(0.1, parseFloat((document.getElementById('inpAlpha') || {}).value) || 1));
             const slDist = (parseFloat((document.getElementById('inpSl') || {}).value) || 1) * alpha * atr;
             const tpDist = (parseFloat((document.getElementById('inpTp') || {}).value) || 1.5) * alpha * atr;
@@ -1972,15 +1999,23 @@
             const safeEur = safeDist * units;               // безопасен спред в €
             const dec = price >= 100 ? 2 : 5;
             el.classList.remove('warn');
+            let txt;
+            if (price > 0) {
+                txt = minLot.toFixed(2) + ' лот (' + currentSymbol + ') = ' + (units * price).toFixed(2) +
+                    ' € при първа цена ' + price.toFixed(dec) + '.';
+            } else {
+                txt = minLot.toFixed(2) + ' лот (' + currentSymbol + ').';
+            }
             if (spread <= 0) {
-                el.textContent = 'Спредът е 0 — входът е на пазарната цена (няма начална загуба).';
+                txt += ' Спредът е 0 — входът е на пазарната цена (няма начална загуба).';
+                el.textContent = txt;
                 return;
             }
             const shift = spread / units;
             const pct = price > 0 ? (shift / price) * 100 : 0;
-            let txt = spread.toFixed(2) + ' € при ' + minLot.toFixed(2) + ' лот (' + currentSymbol + ') = отместване ' +
+            txt += ' Спред ' + spread.toFixed(2) + ' € при ' + minLot.toFixed(2) + ' лот = отместване ' +
                 shift.toFixed(dec) + ' пункта' + (pct > 0 ? ' (' + pct.toFixed(4) + '% от ' + price.toFixed(dec) + ')' : '') +
-                ' → начална плаваща загуба ' + spread.toFixed(2) + ' €.';
+                ' → начална плаваща загуба ' + spread.toFixed(2) + ' € (влиза в рисковите изчисления).';
             if (atr > 0) {
                 if (shift > safeDist) {
                     el.classList.add('warn');
@@ -2034,6 +2069,7 @@
                 const el = document.getElementById(id);
                 if (el) el.addEventListener('input', updateMinLotSpreadHint);
             });
+            iSel.addEventListener('change', updateMinLotSpreadHint);
             updateMinLotSpreadHint();
 
             runSimulation();

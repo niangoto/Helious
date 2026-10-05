@@ -85,9 +85,10 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol) {
 
   if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
 
-  // Спред за минималния обем: зададената сума (€) става начална плаваща загуба.
-  // Отместването на цената се смята от сумата и реално отворения обем:
-  //   отместване = спред / units  →  плаваща = отместване × units = спред
+  // Спред за минималния обем: зададената сума (€) отмества реалния вход (BUY
+  // нагоре, SELL надолу), т.е. позицията се отваря на реалната цена със спреда
+  // и той веднага влиза в рисковите изчисления (плаваща загуба, свободен маржин).
+  // Отместване = спред / units  →  плаваща = отместване × units = спред.
   const atMinLot = lots <= minLot + 1e-9;
   const spreadCost = atMinLot ? Math.max(0, P.minLotSpread || 0) : 0;
   const shift = spreadCost > 0 ? spreadCost / finalUnits : 0;

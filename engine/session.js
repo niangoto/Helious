@@ -15,6 +15,7 @@ const IV_SEC = { '1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h':
 const WINDOW = 1000;      // свещи за модела/ATR
 const POLL_MS = 5000;     // период на проверка
 const MAX_NEW_BARS = 20;  // колко изпуснати бара да навакса наведнъж
+const MAX_EQ = 4000;      // горна граница на точките в equitySeries (разреждане)
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const STORE_FILE = path.join(DATA_DIR, 'paper-sessions.json');
 
@@ -121,7 +122,15 @@ class PaperSession {
       const p = this.prices();
       const eq = this.account.equity(p);
       this.equitySeries.push({ t: nowSec(), equity: eq, balance: this.account.balance, floating: this.account.floating(p) });
-      if (this.equitySeries.length > 6000) this.equitySeries.splice(0, this.equitySeries.length - 6000);
+      // Разреждаме старата половина (вместо да режем началото), за да покрива
+      // кривата целия живот на сесията, а не само последните часове.
+      if (this.equitySeries.length > MAX_EQ) {
+        const half = Math.floor(this.equitySeries.length / 2);
+        const out = [];
+        for (let i = 0; i < half; i += 2) out.push(this.equitySeries[i]);
+        for (let i = half; i < this.equitySeries.length; i++) out.push(this.equitySeries[i]);
+        this.equitySeries = out;
+      }
       this.updatedAt = Date.now();
       // Периодично записване на състоянието (за възстановяване след рестарт)
       if (Date.now() - (this._lastPersist || 0) > 30000) { saveAll(); this._lastPersist = Date.now(); }
@@ -196,15 +205,26 @@ class PaperSession {
 
   destroy() { if (this.timer) clearInterval(this.timer); this.timer = null; this.listeners.clear(); }
 
+  // Реалната промяна на капитала от началото на периода до сега (вкл. плаващата),
+  // а не максималната/пиковата стойност. Базовата точка е последният запис от
+  // equitySeries преди началото на периода (или началният капитал).
+  periodPnl(ms, equityNow) {
+    const s = this.equitySeries;
+    let base = this.account.initial;
+    for (let i = s.length - 1; i >= 0; i--) {
+      if (s[i].t * 1000 < ms) { base = s[i].equity; break; }
+    }
+    return equityNow - base;
+  }
+
   stats() {
     const p = this.prices();
     const s = this.account.summary(p);
-    const sumSince = (ms) => this.account.trades.filter(t => (t.closedAt * 1000) >= ms).reduce((a, t) => a + t.pnl, 0);
     return {
       ...s,
-      dayPnl: sumSince(startOfDay()),
-      weekPnl: sumSince(startOfWeek()),
-      monthPnl: sumSince(startOfMonth())
+      dayPnl: this.periodPnl(startOfDay(), s.equity),
+      weekPnl: this.periodPnl(startOfWeek(), s.equity),
+      monthPnl: this.periodPnl(startOfMonth(), s.equity)
     };
   }
 
@@ -256,7 +276,9 @@ class PaperSession {
       openPositions,
       trades: this.account.trades.slice(-100),
       symbols,
-      equitySeries: this.equitySeries.slice(-1500)
+      // Цялата серия (ограничена до MAX_EQ точки чрез разреждане), за да се
+      // вижда цялата % графика при презареждане, а не само последните часове.
+      equitySeries: this.equitySeries
     };
   }
 
