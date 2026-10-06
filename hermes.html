@@ -1647,7 +1647,7 @@
                     ? open.map(legRow).join('')
                     : '<div class="cp-leg"><b>—</b><span>Обем —</span><span>Вход —</span><span>TP —</span><span>SL —</span><span>Спред —</span><span>Вер. —</span></div>';
                 el.innerHTML = `
-                    <div class="cp-head">Отворени позиции — зает маржин: <span id="cpUsed">—</span> · свободен маржин: <span id="cpFree">—</span></div>
+                    <div class="cp-head">Отворени позиции — зает маржин: <span id="cpUsed">—</span> · свободен маржин: <span id="cpFree">—</span> · маржин ниво: <span id="cpLevel">—</span></div>
                     <div class="cp-grid">
                         ${legHtml}
                         <span>Риск (α): <span id="cpRisk">${hasOpen ? open[0].alpha.toFixed(2) : '—'}</span></span>
@@ -1667,6 +1667,14 @@
             const freeEl = document.getElementById('cpFree');
             if (usedEl) usedEl.textContent = totalMargin.toFixed(2) + ' €';
             if (freeEl) freeEl.textContent = freeMargin.toFixed(2) + ' €';
+            // Маржин ниво = капитал / обща цена (нотионал) на отворените позиции.
+            const totalNotional = open.reduce((s, p) => s + Math.abs(p.notional || 0), 0);
+            const lvl = totalNotional > 0 ? (totalEquity / totalNotional) * 100 : Infinity;
+            const lvlEl = document.getElementById('cpLevel');
+            if (lvlEl) {
+                lvlEl.textContent = isFinite(lvl) ? lvl.toFixed(1) + '%' : '—';
+                lvlEl.style.color = (isFinite(lvl) && lvl < 50) ? 'var(--accent-red)' : '';
+            }
             const fEl = document.getElementById('cpFloat');
             if (fEl) {
                 if (!hasOpen) { fEl.textContent = 'Плаващ P/L: —'; fEl.style.color = ''; }
@@ -1750,6 +1758,41 @@
                     legs = stillOpen;
                 }
 
+                // Маржин ниво = капитал / обща цена (нотионал) на отворените позиции.
+                // Под 50% → затваряме позицията с най-голяма загуба по цената на свещта.
+                if (legs.length) {
+                    const c = candles[i];
+                    let floatPnl = 0, totNotional = 0;
+                    for (const p of legs) {
+                        floatPnl += (p.dir === 'BUY' ? (c.close - p.entry) : (p.entry - c.close)) * p.units * (p.fx || 1);
+                        totNotional += Math.abs(p.notional || 0);
+                    }
+                    const equityNow = equity + floatPnl;
+                    if (totNotional > 0 && equityNow / totNotional * 100 < 50) {
+                        let worst = null, wl = Infinity;
+                        for (const p of legs) {
+                            const f = (p.dir === 'BUY' ? (c.close - p.entry) : (p.entry - c.close)) * p.units * (p.fx || 1);
+                            if (f < wl) { wl = f; worst = p; }
+                        }
+                        if (worst) {
+                            const pnl = wl;
+                            equity += pnl; tradeCount++; if (pnl > 0) winsCount++;
+                            if (equity > peak) peak = equity;
+                            const dd = peak > 0 ? (peak - equity) / peak * 100 : 0; if (dd > maxDD) maxDD = dd;
+                            prependOrder(worst, c.close, 'Маржин', pnl, equity, tradeCount);
+                            tradeMarkers.push({
+                                time: c.time,
+                                position: worst.dir === 'BUY' ? 'aboveBar' : 'belowBar',
+                                color: '#ff0055',
+                                shape: 'circle',
+                                text: 'Маржин ' + pnl.toFixed(2) + '€'
+                            });
+                            markersDirty = true;
+                            legs = legs.filter(p => p !== worst);
+                        }
+                    }
+                }
+
                 if (!legs.length && i < n - 1 && marketOpen(currentSymbol, candles[i].time)) {
                     const pr = probs[i];
                     if (pr) {
@@ -1799,25 +1842,33 @@
                                     // Разход за 1 единица = маржин + начален спред; свободният
                                     // маржин трябва да покрие и двете, иначе не отваряме.
                                     const perUnitCost = (entry * fx) / P.leverage + minSpread / (minLot * spec.contract);
-                                    const maxUnits = perUnitCost > 0 ? freeMargin / perUnitCost : 0;
+                                    const perUnitNotional = entry * fx;
+                                    // Ограничаваме размера и от свободния маржин (маржин + спред),
+                                    // и от цената на позицията (нотионал < свободен маржин).
+                                    const maxUnits = perUnitCost > 0
+                                        ? Math.min(freeMargin / perUnitCost, freeMargin / perUnitNotional)
+                                        : 0;
                                     units = Math.min(units, maxUnits);
                                     let lots = Math.floor((units / spec.contract) / minLot + 1e-9) * minLot;
                                     lots = Math.min(lots, spec.max);
                                     if (lots < minLot) lots = minLot; // зададеният минимален обем
                                     lots = Math.round(lots * 1e8) / 1e8;
                                     const finalUnits = lots * spec.contract;
-                                    const notional = finalUnits * entry * fx;   // в EUR
-                                    const margin = notional / P.leverage;       // в EUR
+                                    // Само обратната посока, ако е избрана (влиза в посоката на спреда).
+                                    if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
+                                    // Отместване в котираната валута: спред(€) / (units × fx).
                                     const spreadCost = minSpread * (lots / minLot);
-                                    // Никога не отваряме повече от свободните пари (маржин + спред).
-                                    if (lots >= minLot && margin > 0 && margin + spreadCost <= freeMargin + 1e-9 && notional >= 1) {
-                                        // Отваря се само обратната поръчка вместо определената, със същия обем
-                                        if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
-                                        // Отместване в котираната валута: спред(€) / (units × fx).
-                                        // Спредът се пази в състоянието (fillShift/spread), но TP/SL
-                                        // НЕ го взимат предвид — нивата са спрямо пазарната цена.
-                                        const shift = spreadCost > 0 ? spreadCost / (finalUnits * fx) : 0;
-                                        const fill = dir === 'BUY' ? entry + shift : entry - shift;
+                                    const shift = spreadCost > 0 ? spreadCost / (finalUnits * fx) : 0;
+                                    // Цената за отваряне: пазарната цена след обема и спреда.
+                                    const fill = dir === 'BUY' ? entry + shift : entry - shift;
+                                    // Сметката/маржинът се смятат по цената за отваряне (fill),
+                                    // а нивата TP/SL — по пазарната цена (entry).
+                                    const notional = finalUnits * fill * fx;   // в EUR
+                                    const margin = notional / P.leverage;       // в EUR
+                                    const riskCost = slDist * finalUnits * fx + spreadCost; // загуба до SL + спред
+                                    // Отваряме само ако свободният маржин е над цената ѝ
+                                    // (нотионала) и покрива маржин + спред + риск до SL.
+                                    if (lots >= minLot && margin > 0 && notional < freeMargin && margin + spreadCost <= freeMargin + 1e-9 && riskCost <= freeMargin + 1e-9 && notional >= 1) {
                                         const t = candles[i].time;
                                         legs = [{
                                             dir,
@@ -1831,6 +1882,7 @@
                                             openIdx: i,
                                             prob: (dir === 'BUY' ? pRise : pFall) * 100,
                                             margin,
+                                            notional,
                                             openTime: t,
                                             alpha,
                                             spread: spreadCost,
@@ -1933,7 +1985,12 @@
                 if (useDates && dvFrom && dvTo) {
                     const fromS = timeToLocal(new Date(dvFrom + 'T00:00:00').getTime() / 1000);
                     const toS = timeToLocal(new Date(dvTo + 'T23:59:59').getTime() / 1000);
-                    const need = Math.ceil((toS - fromS) / intervalSecs(interval)) + 60;
+                    // Доставчикът връща свещи, завършващи СЕГА. Затова броят се смята
+                    // до сега (или до toS, ако е в бъдещето), за да стигнем от fromS
+                    // назад — иначе при минал toS периодът не се покрива.
+                    const nowLocal = timeToLocal(Math.floor(Date.now() / 1000));
+                    const endS = Math.max(toS, nowLocal);
+                    const need = Math.ceil((endS - fromS) / intervalSecs(interval)) + 60;
                     if (need > limit) limit = Math.min(MAX_FETCH, need);
                 }
             }

@@ -17,6 +17,7 @@ const WINDOW = 1000;      // свещи за модела/ATR
 const POLL_MS = 5000;     // период на проверка
 const MAX_NEW_BARS = 20;  // колко изпуснати бара да навакса наведнъж
 const MAX_EQ = 4000;      // горна граница на точките в equitySeries (разреждане)
+const MARGIN_LEVEL_MIN = 50; // под това ниво (капитал/нотионал) затваряме на загуба
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const STORE_FILE = path.join(DATA_DIR, 'paper-sessions.json');
 
@@ -122,6 +123,17 @@ class PaperSession {
           if (idx >= 0) this.processBar(s, arr, idx, bar);
         }
         st.lastBarTime = newBars.length ? newBars[newBars.length - 1].time : closed.time;
+      }
+
+      // Маржин ниво = капитал / обща цена (нотионал) на отворените позиции.
+      // Ако падне под 50%, затваряме позицията с най-голяма загуба (маржин кол).
+      for (let guard = 0; guard < 50 && this.account.positions.size; guard++) {
+        const mp = this.prices();
+        if (this.account.marginLevel(mp) >= MARGIN_LEVEL_MIN) break;
+        const worst = this.account.worstPosition(mp);
+        if (!worst) break;
+        const tr = this.account.close(worst, mp[worst], 'Маржин', nowSec());
+        if (tr) this.persistTrade(tr);
       }
 
       const p = this.prices();

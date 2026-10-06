@@ -24,6 +24,32 @@ class PaperAccount {
 
   equity(prices) { return this.balance + this.floating(prices); }
 
+  // Обща „цена“ (нотионал в EUR) на всички отворени позиции.
+  totalNotional() {
+    let n = 0;
+    for (const pos of this.positions.values()) n += Math.abs(pos.notional || 0);
+    return n;
+  }
+
+  // Маржин ниво = капитал / обща цена на отворените позиции × 100 (%).
+  marginLevel(prices) {
+    const n = this.totalNotional();
+    if (n <= 0) return Infinity;
+    return this.equity(prices) / n * 100;
+  }
+
+  // Символът на позицията с най-голяма плаваща загуба (за принудително затваряне).
+  worstPosition(prices) {
+    let worst = null, wl = 0;
+    for (const [sym, pos] of this.positions) {
+      const price = prices[sym];
+      if (price == null) continue;
+      const f = floatingPnl(pos, price);
+      if (f < wl) { wl = f; worst = sym; }
+    }
+    return worst;
+  }
+
   hasPosition(symbol) { return this.positions.has(symbol); }
 
   open(pos) {
