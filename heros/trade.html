@@ -110,6 +110,7 @@
             border: 1px solid var(--panel-border); cursor: pointer; color: var(--text-dim);
         }
         .chip:hover { border-color: var(--accent-cyan); color: var(--accent-cyan); }
+        .chip.active { border-color: var(--accent-cyan); color: #06080f; background: var(--accent-cyan); font-weight: 700; }
         .note { font-size: 10.5px; color: #ffd27a; line-height: 1.4; }
         .row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-dim); }
         .row input[type=checkbox] { width: auto; }
@@ -260,7 +261,7 @@
                     <label class="f">Кели (част)<input id="inpKelly" type="number" value="0.25" min="0.01" step="0.05"></label>
                     <label class="f">Кели макс.<input id="inpMaxKelly" type="number" value="0.05" min="0.01" max="1" step="0.05"></label>
                     <label class="f">Мин. обем (лот)<input id="inpMinLot" type="number" value="0.01" min="0.01" step="0.01"></label>
-                    <label class="f" title="Сумата в €, която отмества реалния вход (начална плаваща загуба) за всяка позиция, отворена на ОЗНАЧЕНИЯ минимален обем (полето „Мин. обем (лот)“). От сумата и обема се смята отместването на входната цена и влиза в рисковите изчисления.">Спред за мин. обем (€)<input id="inpMinLotSpread" type="number" value="0" min="0" step="0.01"></label>
+                    <label class="f" title="Спред в € за ЕДИН минимален обем (полето „Мин. обем (лот)“). Пропорционален е на броя минимални обеми (3× мин. обем = 3× сумата). Отмества реалния вход (начална плаваща загуба) и влиза в рисковите изчисления.">Спред на мин. обем (€)<input id="inpMinLotSpread" type="number" value="0" min="0" step="0.01"></label>
                 </div>
                 <div class="note" id="minLotSpreadHint" style="color:var(--text-dim)"></div>
                 <div class="row"><input type="checkbox" id="inpReverse"> Обърната посока (контра със същия обем)</div>
@@ -318,16 +319,28 @@
         // ── Инициализация на контролите ──
         (function initControls() {
             const chips = document.getElementById('symChips');
+            const symEl = document.getElementById('inpSymbols');
+            const curSyms = () => symEl.value.split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
+            const syncChips = () => {
+                const cur = curSyms();
+                chips.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', cur.includes(c.textContent)));
+            };
             SYMBOLS.forEach(s => {
                 const c = document.createElement('span');
                 c.className = 'chip'; c.textContent = s;
+                // Клик включва/изключва символа (за да може да се смени стоката,
+                // а не само да се добавят нови към BTC по подразбиране).
                 c.onclick = () => {
-                    const el = document.getElementById('inpSymbols');
-                    const cur = el.value.split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
-                    if (!cur.includes(s)) { cur.push(s); el.value = cur.join(', '); }
+                    let cur = curSyms();
+                    if (cur.includes(s)) cur = cur.filter(x => x !== s); else cur.push(s);
+                    symEl.value = cur.join(', ');
+                    syncChips();
+                    updateMinLotSpreadHint();
                 };
                 chips.appendChild(c);
             });
+            symEl.addEventListener('input', syncChips);
+            syncChips();
             const mSel = document.getElementById('inpModel');
             const updateContra = () => { document.getElementById('contraBox').style.display = parseInt(mSel.value, 10) === 5 ? 'grid' : 'none'; };
             mSel.addEventListener('change', updateContra); updateContra();
@@ -359,18 +372,15 @@
             if (/^[A-Z]{6}$/.test(s)) return s.slice(3);
             return 'EUR';
         }
-        const FX_PAIRS = { USD: 'EURUSD', GBP: 'EURGBP', JPY: 'EURJPY', CHF: 'EURCHF', CAD: 'EURCAD', AUD: 'EURAUD' };
         let fxRates = { EUR: 1 }, fxFetchedAt = 0, fxFetching = null;
         function fxFor(sym) { const r = fxRates[quoteCurrency(sym)]; return (r > 0) ? r : 1; }
         function ensureFxRates() {
             if (fxFetchedAt && Date.now() - fxFetchedAt < 300000) return Promise.resolve(fxRates);
             if (fxFetching) return fxFetching;
-            fxFetching = Promise.all(Object.entries(FX_PAIRS).map(([ccy, pair]) =>
-                fetch('/data?symbol=' + encodeURIComponent(pair) + '&interval=1d&limit=5')
-                    .then(r => r.json())
-                    .then(j => { const c = j && j.candles; const last = c && c.length ? c[c.length - 1].close : 0; if (last > 0) fxRates[ccy] = 1 / last; })
-                    .catch(() => {})
-            )).then(() => { fxFetchedAt = Date.now(); fxFetching = null; updateMinLotSpreadHint(); return fxRates; });
+            fxFetching = fetch('/fx').then(r => r.json())
+                .then(j => { if (j && j.ok && j.rates) fxRates = Object.assign({ EUR: 1 }, j.rates); })
+                .catch(() => {})
+                .then(() => { fxFetchedAt = Date.now(); fxFetching = null; updateMinLotSpreadHint(); return fxRates; });
             return fxFetching;
         }
 
@@ -445,15 +455,15 @@
             const safeEur = safeDist * units * fx;
             const shift = spread / (units * fx);
             const pct = price > 0 ? (shift / price) * 100 : 0;
-            txt += ' Спред ' + spread.toFixed(2) + ' € при ' + minLot.toFixed(2) + ' лот = отместване ' +
+            txt += ' Спред ' + spread.toFixed(2) + ' € на мин. обем (' + minLot.toFixed(2) + ' лот) = отместване ' +
                 shift.toFixed(dec) + ' пункта' + (pct > 0 ? ' (' + pct.toFixed(4) + '% от ' + price.toFixed(dec) + ')' : '') +
-                ' → начална плаваща загуба ' + spread.toFixed(2) + ' € (влиза в рисковите изчисления).';
+                ' → начална плаваща загуба ' + spread.toFixed(2) + ' € (за N мин. обема сумата е N×).';
             if (atr > 0) {
                 if (shift > safeDist) {
                     el.style.color = '#ffb37a';
-                    txt += ' ⚠ По-голям е от разстоянието до SL/TP (' + safeDist.toFixed(dec) + ' пункта) — позицията ще излезе веднага на SL/TP. Безопасно до ~' + safeEur.toFixed(2) + ' €.';
+                    txt += ' ⚠ По-голям е от разстоянието до SL/TP (' + safeDist.toFixed(dec) + ' пункта) — позицията ще излезе веднага на SL/TP. Безопасно до ~' + safeEur.toFixed(2) + ' € на мин. обем.';
                 } else {
-                    txt += ' Безопасно (до ~' + safeEur.toFixed(2) + ' € при ATR ' + atr.toFixed(dec) + ').';
+                    txt += ' Безопасно (до ~' + safeEur.toFixed(2) + ' € на мин. обем при ATR ' + atr.toFixed(dec) + ').';
                 }
             }
             el.textContent = txt;
@@ -550,6 +560,7 @@
             const P = cfg.params || {};
             const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
             set('inpSymbols', (cfg.symbols || []).join(', '));
+            document.getElementById('inpSymbols').dispatchEvent(new Event('input', { bubbles: true }));
             set('inpInterval', cfg.interval);
             set('inpModel', cfg.model);
             document.getElementById('contraBox').style.display = Number(cfg.model) === 5 ? 'grid' : 'none';

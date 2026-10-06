@@ -158,6 +158,17 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // Валутни курсове към EUR (за клиента — HERMES/HEROS). Безплатен източник.
+  if (url.pathname === '/fx' && req.method === 'GET') {
+    try {
+      const fxmod = require('./engine/fx');
+      await fxmod.loadRates();
+      return sendJson(res, 200, { ok: true, rates: fxmod.snapshot() });
+    } catch (e) {
+      return sendJson(res, 200, { ok: false, rates: { EUR: 1 } });
+    }
+  }
+
   // Health check (за Docker healthcheck и мониторинг)
   if (url.pathname === '/health') {
     const dbHealth = await db.health().catch((e) => ({ enabled: true, ok: false, error: e.message }));

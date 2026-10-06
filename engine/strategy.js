@@ -66,16 +66,20 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn) {
 
   // Размер по риска (Kelly), ограничен от свободния маржин и ливъриджа.
   // € риск за 1 единица при движение loss в цена = loss × fx.
+  const spec = specFor(symbol);
+  const minLot = P.minLot || spec.min;
+  const minSpread = Math.max(0, P.minLotSpread || 0);
+  // Разход за 1 единица = маржин + начален спред (за 1 единица спредът е
+  // minSpread / (minLot × contract)). Свободният маржин трябва да покрие и двете.
+  const perUnitCost = (entry * fx) / P.leverage + minSpread / (minLot * spec.contract);
   const riskAmount = f * equity;
   let units = riskAmount / (loss * fx);
-  const maxUnits = (freeMargin * P.leverage) / (entry * fx);
+  const maxUnits = perUnitCost > 0 ? freeMargin / perUnitCost : 0;
   units = Math.min(units, maxUnits);
   if (!(units > 0)) return null;
 
   // Преобразуване в реален обем (лотове) според спецификацията на инструмента.
   // Минималният/стъпковият обем се задава (по подразбиране 0.01 лот).
-  const spec = specFor(symbol);
-  const minLot = P.minLot || spec.min;
   let lots = Math.floor((units / spec.contract) / minLot + 1e-9) * minLot;
   lots = Math.min(lots, spec.max);
   if (lots < minLot) lots = minLot;
@@ -84,17 +88,17 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn) {
   const notionalQuote = finalUnits * entry;      // в котираната валута
   const notional = notionalQuote * fx;           // в EUR
   const margin = notional / P.leverage;          // в EUR
-  // Никога не отваряме по-голяма позиция от свободните пари.
-  if (!(lots >= minLot && margin > 0 && margin <= freeMargin && notional >= 1)) return null;
+  const spreadCost = minSpread * (lots / minLot);
+  // Никога не отваряме по-голяма позиция от свободните пари (маржин + спред).
+  if (!(lots >= minLot && margin > 0 && margin + spreadCost <= freeMargin + 1e-9 && notional >= 1)) return null;
 
   if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
 
-  // Спред за минималния обем: зададената сума (€) отмества реалния вход (BUY
-  // нагоре, SELL надолу), т.е. позицията се отваря на реалната цена със спреда
-  // и той веднага влиза в рисковите изчисления (плаваща загуба, свободен маржин).
+  // Спред на минимален обем: `minLotSpread` (€) е за ЕДИН минимален обем и е
+  // пропорционален на броя минимални обеми (напр. 3× мин. обем = 3× сумата).
+  // Отмества реалния вход (BUY нагоре, SELL надолу) и влиза веднага в рисковите
+  // изчисления (плаваща загуба, свободен маржин).
   // Отместване = спред(€) / (units × fx)  →  плаваща = отместване × units × fx = спред.
-  const atMinLot = lots <= minLot + 1e-9;
-  const spreadCost = atMinLot ? Math.max(0, P.minLotSpread || 0) : 0;
   const shift = spreadCost > 0 ? spreadCost / (finalUnits * fx) : 0;
   const fill = dir === 'BUY' ? entry + shift : entry - shift;
 

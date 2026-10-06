@@ -417,6 +417,18 @@
             color: #ffb37a;
         }
 
+        #minLotSpreadHint {
+            flex-basis: 100%;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+            line-height: 1.45;
+            color: var(--text-dim);
+        }
+
+        #minLotSpreadHint.warn {
+            color: #ffb37a;
+        }
+
         .adv-grid label {
             display: flex;
             flex-direction: column;
@@ -911,10 +923,11 @@
                 <label>Кели (дробна част) <input type="number" id="inpKelly" value="0.25" min="0.01" step="0.05"></label>
                 <label>Кели (макс. фракция) <input type="number" id="inpMaxKelly" value="0.05" min="0.01" max="1" step="0.05"></label>
                 <label>Мин. обем (лот) <input type="number" id="inpMinLot" value="0.01" min="0.01" step="0.01"></label>
-                <label title="Сумата в €, която отмества реалния вход (начална плаваща загуба) за всяка позиция, отворена на ОЗНАЧЕНИЯ минимален обем (полето „Мин. обем (лот)“). От сумата и обема се смята отместването на входната цена и влиза в рисковите изчисления.">Спред за мин. обем (€) <input type="number" id="inpMinLotSpread" value="0" min="0" step="0.01"></label>
-                <div class="note" id="minLotSpreadHint" style="grid-column:1/-1"></div>
+                <label title="Спред в € за ЕДИН минимален обем (полето „Мин. обем (лот)“). Пропорционален е на броя минимални обеми (3× мин. обем = 3× сумата). Отмества реалния вход (начална плаваща загуба) и влиза в рисковите изчисления.">Спред на мин. обем (€) <input type="number" id="inpMinLotSpread" value="0" min="0" step="0.01"></label>
             </div>
         </details>
+        <!-- Винаги видимо: колко струва минималният обем (маржин с левериджа). -->
+        <div class="note" id="minLotSpreadHint"></div>
     </section>
 
     <section class="summary" id="summary"></section>
@@ -1048,18 +1061,15 @@
             if (/^[A-Z]{6}$/.test(s)) return s.slice(3);
             return 'EUR';
         }
-        const FX_PAIRS = { USD: 'EURUSD', GBP: 'EURGBP', JPY: 'EURJPY', CHF: 'EURCHF', CAD: 'EURCAD', AUD: 'EURAUD' };
         let fxRates = { EUR: 1 }, fxFetchedAt = 0, fxFetching = null;
         function fxFor(sym) { const r = fxRates[quoteCurrency(sym)]; return (r > 0) ? r : 1; }
         function ensureFxRates() {
             if (fxFetchedAt && Date.now() - fxFetchedAt < 300000) return Promise.resolve(fxRates);
             if (fxFetching) return fxFetching;
-            fxFetching = Promise.all(Object.entries(FX_PAIRS).map(([ccy, pair]) =>
-                fetch('/data?symbol=' + encodeURIComponent(pair) + '&interval=1d&limit=5')
-                    .then(r => r.json())
-                    .then(j => { const c = j && j.candles; const last = c && c.length ? c[c.length - 1].close : 0; if (last > 0) fxRates[ccy] = 1 / last; })
-                    .catch(() => {})
-            )).then(() => { fxFetchedAt = Date.now(); fxFetching = null; updateMinLotSpreadHint(); return fxRates; });
+            fxFetching = fetch('/fx').then(r => r.json())
+                .then(j => { if (j && j.ok && j.rates) fxRates = Object.assign({ EUR: 1 }, j.rates); })
+                .catch(() => {})
+                .then(() => { fxFetchedAt = Date.now(); fxFetching = null; updateMinLotSpreadHint(); return fxRates; });
             return fxFetching;
         }
         // Горна граница на теглените свещи (доставчикът ги пейджира). Достатъчна за
@@ -1070,6 +1080,7 @@
 
         let cancelFlag = false;
         let running = false;
+        let runPending = false;   // има ли чакащ рестарт след текущата симулация
         let datesTouched = false;
         let lastCandles = [];
         let lastCandlesKey = '';   // „SYMBOL|интервал“, за който се отнасят lastCandles
@@ -1249,15 +1260,8 @@
             if (badge) badge.textContent = sym;
             updateMinLotSpreadHint();
             toggleSymbolSearch(false);
-            // Ако в момента тече симулация — спираме я и пускаме нова за новия актив.
-            if (running) {
-                cancelFlag = true;
-                const wait = setInterval(() => {
-                    if (!running) { clearInterval(wait); runSimulation(); }
-                }, 100);
-            } else {
-                runSimulation();
-            }
+            // Пуска нова симулация за новия актив (runSimulation сам спира текущата).
+            runSimulation();
         }
 
         document.addEventListener('click', (e) => {
@@ -1689,7 +1693,7 @@
         }
 
         async function simulate(candles, atrSeries, probs, P) {
-            await ensureFxRates();   // валутни курсове към EUR (кеширани)
+            ensureFxRates();   // валутни курсове към EUR (кеширани; не блокира)
             let equity = P.budget;
             let peak = equity;
             let maxDD = 0;
@@ -1791,7 +1795,11 @@
                                     const freeMargin = Math.max(0, equity - usedMargin);
                                     const spec = specFor(currentSymbol);
                                     const minLot = P.minLot || spec.min;
-                                    const maxUnits = (freeMargin * P.leverage) / (entry * fx);
+                                    const minSpread = Math.max(0, P.minLotSpread || 0);
+                                    // Разход за 1 единица = маржин + начален спред; свободният
+                                    // маржин трябва да покрие и двете, иначе не отваряме.
+                                    const perUnitCost = (entry * fx) / P.leverage + minSpread / (minLot * spec.contract);
+                                    const maxUnits = perUnitCost > 0 ? freeMargin / perUnitCost : 0;
                                     units = Math.min(units, maxUnits);
                                     let lots = Math.floor((units / spec.contract) / minLot + 1e-9) * minLot;
                                     lots = Math.min(lots, spec.max);
@@ -1800,16 +1808,12 @@
                                     const finalUnits = lots * spec.contract;
                                     const notional = finalUnits * entry * fx;   // в EUR
                                     const margin = notional / P.leverage;       // в EUR
-                                    // Никога не отваряме повече от свободните пари.
-                                    if (lots >= minLot && margin > 0 && margin <= freeMargin && notional >= 1) {
+                                    const spreadCost = minSpread * (lots / minLot);
+                                    // Никога не отваряме повече от свободните пари (маржин + спред).
+                                    if (lots >= minLot && margin > 0 && margin + spreadCost <= freeMargin + 1e-9 && notional >= 1) {
                                         // Отваря се само обратната поръчка вместо определената, със същия обем
                                         if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
-                                        // Спред за мин. обем: отмества реалния вход (BUY нагоре,
-                                        // SELL надолу) и веднага влиза в рисковите изчисления
-                                        // (плаваща загуба, свободен маржин). Отместването е в
-                                        // котираната валута: спред(€) / (units × fx).
-                                        const atMinLot = lots <= minLot + 1e-9;
-                                        const spreadCost = atMinLot ? Math.max(0, P.minLotSpread || 0) : 0;
+                                        // Отместване в котираната валута: спред(€) / (units × fx).
                                         const shift = spreadCost > 0 ? spreadCost / (finalUnits * fx) : 0;
                                         const fill = dir === 'BUY' ? entry + shift : entry - shift;
                                         const t = candles[i].time;
@@ -1899,9 +1903,12 @@
         }
 
         async function runSimulation() {
-            if (running) return;
+            // Ако вече тече симулация — спираме я и пускаме нова (отначало, с новите
+            // настройки). Така смяната на параметър/интервал/модел рестартира.
+            if (running) { cancelFlag = true; runPending = true; return; }
             running = true;
             cancelFlag = false;
+            runPending = false;
 
             currentModel = parseInt(document.getElementById('inpModel').value, 10);
 
@@ -1928,8 +1935,10 @@
             posPanelKey = null;
             updatePositionsPanel([], null, parseFloat((document.getElementById('inpBudget') || {}).value) || 1000);
             document.getElementById('chartSection').style.display = 'none';
-            document.getElementById('btnStart').disabled = true;
-            document.getElementById('btnStart').textContent = '⏳ Работи...';
+            // Бутонът остава активен и по време на симулация — натискането му
+            // отменя текущата и пуска нова отначало с новите настройки.
+            document.getElementById('btnStart').disabled = false;
+            document.getElementById('btnStart').textContent = '↻ Стартирай отново';
             document.getElementById('progBar').classList.remove('err');
 
             try {
@@ -1982,6 +1991,7 @@
                 running = false;
                 document.getElementById('btnStart').disabled = false;
                 document.getElementById('btnStart').textContent = '▶ Стартирай отново';
+                if (runPending) { runPending = false; runSimulation(); }
             }
         }
 
@@ -2062,15 +2072,15 @@
             }
             const shift = spread / (units * fx);
             const pct = price > 0 ? (shift / price) * 100 : 0;
-            txt += ' Спред ' + spread.toFixed(2) + ' € при ' + minLot.toFixed(2) + ' лот = отместване ' +
+            txt += ' Спред ' + spread.toFixed(2) + ' € на мин. обем (' + minLot.toFixed(2) + ' лот) = отместване ' +
                 shift.toFixed(dec) + ' пункта' + (pct > 0 ? ' (' + pct.toFixed(4) + '% от ' + price.toFixed(dec) + ')' : '') +
-                ' → начална плаваща загуба ' + spread.toFixed(2) + ' € (влиза в рисковите изчисления).';
+                ' → начална плаваща загуба ' + spread.toFixed(2) + ' € (за N мин. обема сумата е N×).';
             if (atr > 0) {
                 if (shift > safeDist) {
                     el.classList.add('warn');
-                    txt += ' ⚠ По-голям е от разстоянието до SL/TP (' + safeDist.toFixed(dec) + ' пункта) — позицията ще излезе веднага на SL/TP. Безопасно до ~' + safeEur.toFixed(2) + ' €.';
+                    txt += ' ⚠ По-голям е от разстоянието до SL/TP (' + safeDist.toFixed(dec) + ' пункта) — позицията ще излезе веднага на SL/TP. Безопасно до ~' + safeEur.toFixed(2) + ' € на мин. обем.';
                 } else {
-                    txt += ' Безопасно (до ~' + safeEur.toFixed(2) + ' € при ATR ' + atr.toFixed(dec) + ').';
+                    txt += ' Безопасно (до ~' + safeEur.toFixed(2) + ' € на мин. обем при ATR ' + atr.toFixed(dec) + ').';
                 }
             }
             el.textContent = txt;
@@ -2119,6 +2129,7 @@
                 if (el) el.addEventListener('input', updateMinLotSpreadHint);
             });
             iSel.addEventListener('change', updateMinLotSpreadHint);
+            ensureFxRates();
             updateMinLotSpreadHint();
 
             runSimulation();

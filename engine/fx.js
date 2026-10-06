@@ -17,34 +17,27 @@ function quoteCurrency(symbol) {
   return 'EUR';
 }
 
-// EUR кросове: EURXXX = колко XXX струва 1 EUR → XXX→EUR = 1 / EURXXX.
-const PAIRS = { USD: 'EURUSD', GBP: 'EURGBP', JPY: 'EURJPY', CHF: 'EURCHF', CAD: 'EURCAD', AUD: 'EURAUD' };
-
 let rates = { EUR: 1 };
 let loadedAt = 0;
 let loading = null;
 
-// Зарежда курсовете (кеширани 5 мин). Безопасно е да се вика често.
+// Зарежда курсовете (кеширани 5 мин) от безплатния currency-api (без ключ и
+// без лимит) — за да не хаби TwelveData кредити и да не блокира търговията.
 async function loadRates(force) {
   if (!force && loadedAt && Date.now() - loadedAt < 300000) return rates;
   if (loading) return loading;
   loading = (async () => {
-    const out = { EUR: 1 };
-    await Promise.all(Object.entries(PAIRS).map(async ([ccy, pair]) => {
-      try {
-        const r = await dp.fetchData(pair, '1d', 5);
-        const c = r && r.candles;
-        const last = c && c.length ? c[c.length - 1].close : 0;
-        out[ccy] = last > 0 ? 1 / last : 1;
-      } catch (e) { out[ccy] = 1; }
-    }));
-    rates = out;
-    loadedAt = Date.now();
+    try {
+      const r = await dp.fetchEurRates();
+      if (r && r.EUR) { rates = r; loadedAt = Date.now(); }
+    } catch (e) { /* пази старите курсове */ }
     loading = null;
     return rates;
   })();
   return loading;
 }
+
+function snapshot() { return Object.assign({ EUR: 1 }, rates); }
 
 // Колко EUR е 1 единица от валутата (напр. 1 USD → ~0.92 EUR).
 function eurRate(ccy) {
@@ -54,4 +47,4 @@ function eurRate(ccy) {
 
 function eurRateForSymbol(symbol) { return eurRate(quoteCurrency(symbol)); }
 
-module.exports = { quoteCurrency, eurRate, eurRateForSymbol, loadRates };
+module.exports = { quoteCurrency, eurRate, eurRateForSymbol, loadRates, snapshot };

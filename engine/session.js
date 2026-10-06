@@ -79,6 +79,7 @@ class PaperSession {
   start(preserveStartedAt) {
     if (!preserveStartedAt || !this.startedAt) this.startedAt = nowSec();
     if (this.timer) clearInterval(this.timer);
+    fx.loadRates().catch(() => {});
     this.timer = setInterval(() => { this.tick().catch(e => console.error('[paper] tick:', e.message)); }, POLL_MS);
     this.emit();
   }
@@ -96,8 +97,9 @@ class PaperSession {
     if (this._ticking || this.status === 'stopped') return;
     this._ticking = true;
     try {
-      // Обновяване на валутните курсове към EUR (кеширани 5 мин).
-      try { await fx.loadRates(); } catch (e) { /* ignore */ }
+      // Обновяване на валутните курсове към EUR във фонов режим (не блокира
+      // обработката на баровете; при първия тик може да ползва кешираните).
+      fx.loadRates().catch(() => {});
       const iv = IV_SEC[this.interval];
       for (const s of this.symbols) {
         const st = this.state[s];

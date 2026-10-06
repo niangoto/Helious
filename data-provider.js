@@ -262,6 +262,21 @@ async function fetchForex(pair) {
   }
 }
 
+// Безплатни дневни курсове EUR→XXX (currency-api) — без ключ и без лимит.
+// Връща колко EUR е 1 единица от валутата (напр. USD ≈ 0.89).
+const eurRatesCache = { time: 0, rates: null };
+async function fetchEurRates() {
+  if (eurRatesCache.rates && Date.now() - eurRatesCache.time < 3600000) return eurRatesCache.rates;
+  const raw = await fetchFromURL('https://latest.currency-api.pages.dev/v1/currencies/eur.json');
+  const parsed = JSON.parse(raw);
+  const r = parsed.eur || {};
+  const perEur = { USD: r.usd, GBP: r.gbp, JPY: r.jpy, CHF: r.chf, CAD: r.cad, AUD: r.aud };
+  const rates = { EUR: 1 };
+  for (const [ccy, v] of Object.entries(perEur)) rates[ccy] = (v > 0) ? 1 / v : 1;
+  if (rates.USD > 0 && rates.USD !== 1) { eurRatesCache.rates = rates; eurRatesCache.time = Date.now(); }
+  return rates;
+}
+
 // Twelve Data (requires TWELVEDATA_KEY env var).
 // Безплатният план дава 8 кредита/мин и до 5000 свещи на заявка. За по-дълги
 // периоди (напр. 1м за ~месец ≈ 43 000 свещи) теглим последователни страници
@@ -519,4 +534,4 @@ async function handleDataRequest(urlParams) {
   }
 }
 
-module.exports = { resolveSymbol, getCanonicalName, getAllCanonicalSymbols, searchSymbols, fetchData, handleDataRequest, checkMT5, log };
+module.exports = { resolveSymbol, getCanonicalName, getAllCanonicalSymbols, searchSymbols, fetchData, fetchEurRates, handleDataRequest, checkMT5, log };
