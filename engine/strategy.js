@@ -72,17 +72,14 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn) {
   // Разход за 1 единица = маржин + начален спред (за 1 единица спредът е
   // minSpread / (minLot × contract)). Свободният маржин трябва да покрие и двете.
   const perUnitSpread = minSpread / (minLot * spec.contract);
-  const perUnitCost = (entry * fx) / P.leverage + perUnitSpread;
-  // Нотионалът се смята по цената за отваряне (fill = entry ± спред), затова
-  // за 1 единица той е entry×fx + спред/единица.
-  const perUnitNotional = entry * fx + perUnitSpread;
+  // Разход за 1 единица = маржин + начален спред. Свободният маржин трябва да
+  // покрие и двете. Лимвъриджът се отчита чрез маржина (entry×fx/leverage), а не
+  // чрез нотионала — както при реален брокер.
+  const perUnitMargin = (entry * fx) / P.leverage;
+  const perUnitCost = perUnitMargin + perUnitSpread;
   const riskAmount = f * equity;
   let units = riskAmount / (loss * fx);
-  // Размерът се ограничава и от свободния маржин (маржин + спред за 1 единица),
-  // и от цената на позицията (нотионал за 1 единица < свободен маржин).
-  const maxUnits = perUnitCost > 0
-    ? Math.min(freeMargin / perUnitCost, freeMargin / perUnitNotional)
-    : 0;
+  const maxUnits = perUnitCost > 0 ? freeMargin / perUnitCost : 0;
   units = Math.min(units, maxUnits);
   if (!(units > 0)) return null;
 
@@ -113,9 +110,10 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn) {
   const sl = dir === 'BUY' ? entry - slDist : entry + slDist;
   // Загубата до SL от реалния вход (fill) включва и началния спред.
   const riskCost = slDist * finalUnits * fx + spreadCost;
-  // Отваряме само ако свободният маржин е над цената ѝ и покрива маржина,
-  // началния спред и потенциалната загуба до SL.
-  if (!(lots >= minLot && margin > 0 && notional < freeMargin
+  // Отваряме само ако свободният маржин покрива маржина, началния спред и
+  // потенциалната загуба до SL (както при реален брокер — не се изисква
+  // нотионалът да е под свободния маржин).
+  if (!(lots >= minLot && margin > 0
         && margin + spreadCost <= freeMargin + 1e-9 && riskCost <= freeMargin + 1e-9 && notional >= 1)) return null;
 
   const probPct = (dir === 'BUY' ? pRise : pFall) * 100;

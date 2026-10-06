@@ -1668,9 +1668,8 @@
             const freeEl = document.getElementById('cpFree');
             if (usedEl) usedEl.textContent = totalMargin.toFixed(2) + ' €';
             if (freeEl) freeEl.textContent = freeMargin.toFixed(2) + ' €';
-            // Маржин ниво = капитал / обща цена (нотионал) на отворените позиции.
-            const totalNotional = open.reduce((s, p) => s + Math.abs(p.notional || 0), 0);
-            const lvl = totalNotional > 0 ? (totalEquity / totalNotional) * 100 : Infinity;
+            // Маржин ниво = капитал / зает маржин × 100 (както при реален брокер).
+            const lvl = totalMargin > 0 ? (totalEquity / totalMargin) * 100 : Infinity;
             const lvlEl = document.getElementById('cpLevel');
             if (lvlEl) {
                 lvlEl.textContent = isFinite(lvl) ? lvl.toFixed(1) + '%' : '—';
@@ -1760,17 +1759,17 @@
                     legs = stillOpen;
                 }
 
-                // Маржин ниво = капитал / обща цена (нотионал) на отворените позиции.
+                // Маржин ниво = капитал / зает маржин на отворените позиции.
                 // Под 50% → затваряме позицията с най-голяма загуба по цената на свещта.
                 if (legs.length) {
                     const c = candles[i];
-                    let floatPnl = 0, totNotional = 0;
+                    let floatPnl = 0, totMargin = 0;
                     for (const p of legs) {
                         floatPnl += (p.dir === 'BUY' ? (c.close - p.entry) : (p.entry - c.close)) * p.units * (p.fx || 1);
-                        totNotional += Math.abs(p.notional || 0);
+                        totMargin += Math.abs(p.margin || 0);
                     }
                     const equityNow = equity + floatPnl;
-                    if (totNotional > 0 && equityNow / totNotional * 100 < 50) {
+                    if (totMargin > 0 && equityNow / totMargin * 100 < 50) {
                         let worst = null, wl = Infinity;
                         for (const p of legs) {
                             const f = (p.dir === 'BUY' ? (c.close - p.entry) : (p.entry - c.close)) * p.units * (p.fx || 1);
@@ -1842,16 +1841,12 @@
                                     const minLot = P.minLot || spec.min;
                                     const minSpread = Math.max(0, P.minLotSpread || 0);
                                     // Разход за 1 единица = маржин + начален спред; свободният
-                                    // маржин трябва да покрие и двете, иначе не отваряме.
+                                    // маржин трябва да покрие и двете. Лимвъриджът се отчита
+                                    // чрез маржина (entry×fx/leverage), не чрез нотионала.
                                     const perUnitSpread = minSpread / (minLot * spec.contract);
-                                    const perUnitCost = (entry * fx) / P.leverage + perUnitSpread;
-                                    // Нотионалът е по цената за отваряне (fill = entry ± спред).
-                                    const perUnitNotional = entry * fx + perUnitSpread;
-                                    // Ограничаваме размера и от свободния маржин (маржин + спред),
-                                    // и от цената на позицията (нотионал < свободен маржин).
-                                    const maxUnits = perUnitCost > 0
-                                        ? Math.min(freeMargin / perUnitCost, freeMargin / perUnitNotional)
-                                        : 0;
+                                    const perUnitMargin = (entry * fx) / P.leverage;
+                                    const perUnitCost = perUnitMargin + perUnitSpread;
+                                    const maxUnits = perUnitCost > 0 ? freeMargin / perUnitCost : 0;
                                     units = Math.min(units, maxUnits);
                                     let lots = Math.floor((units / spec.contract) / minLot + 1e-9) * minLot;
                                     lots = Math.min(lots, spec.max);
@@ -1870,9 +1865,9 @@
                                     const notional = finalUnits * fill * fx;   // в EUR
                                     const margin = notional / P.leverage;       // в EUR
                                     const riskCost = slDist * finalUnits * fx + spreadCost; // загуба до SL + спред
-                                    // Отваряме само ако свободният маржин е над цената ѝ
-                                    // (нотионала) и покрива маржин + спред + риск до SL.
-                                    if (lots >= minLot && margin > 0 && notional < freeMargin && margin + spreadCost <= freeMargin + 1e-9 && riskCost <= freeMargin + 1e-9 && notional >= 1) {
+                                    // Отваряме само ако свободният маржин покрива маржин +
+                                    // спред + риск до SL (както при реален брокер).
+                                    if (lots >= minLot && margin > 0 && margin + spreadCost <= freeMargin + 1e-9 && riskCost <= freeMargin + 1e-9 && notional >= 1) {
                                         const t = candles[i].time;
                                         legs = [{
                                             dir,

@@ -31,11 +31,19 @@ class PaperAccount {
     return n;
   }
 
-  // Маржин ниво = капитал / обща цена на отворените позиции × 100 (%).
+  // Зает маржин (в EUR) на всички отворени позиции.
+  totalMargin() {
+    let m = 0;
+    for (const pos of this.positions.values()) m += Math.abs(pos.margin || 0);
+    return m;
+  }
+
+  // Маржин ниво = капитал / зает маржин × 100 (%) — както при реален брокер
+  // (не / нотионал; при ливъридж 30 това е 30× разлика).
   marginLevel(prices) {
-    const n = this.totalNotional();
-    if (n <= 0) return Infinity;
-    return this.equity(prices) / n * 100;
+    const m = this.totalMargin();
+    if (m <= 0) return Infinity;
+    return this.equity(prices) / m * 100;
   }
 
   // Символът на позицията с най-голяма плаваща загуба (за принудително затваряне).

@@ -125,7 +125,7 @@ class PaperSession {
         st.lastBarTime = newBars.length ? newBars[newBars.length - 1].time : closed.time;
       }
 
-      // Маржин ниво = капитал / обща цена (нотионал) на отворените позиции.
+      // Маржин ниво = капитал / зает маржин на отворените позиции.
       // Ако падне под 50%, затваряме позицията с най-голяма загуба (маржин кол).
       for (let guard = 0; guard < 50 && this.account.positions.size; guard++) {
         const mp = this.prices();
