@@ -1814,6 +1814,8 @@
                                         // Отваря се само обратната поръчка вместо определената, със същия обем
                                         if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
                                         // Отместване в котираната валута: спред(€) / (units × fx).
+                                        // Спредът се пази в състоянието (fillShift/spread), но TP/SL
+                                        // НЕ го взимат предвид — нивата са спрямо пазарната цена.
                                         const shift = spreadCost > 0 ? spreadCost / (finalUnits * fx) : 0;
                                         const fill = dir === 'BUY' ? entry + shift : entry - shift;
                                         const t = candles[i].time;
@@ -1823,8 +1825,8 @@
                                             lots,
                                             contract: spec.contract,
                                             units: finalUnits,
-                                            tp: dir === 'BUY' ? fill + tpDist : fill - tpDist,
-                                            sl: dir === 'BUY' ? fill - slDist : fill + slDist,
+                                            tp: dir === 'BUY' ? entry + tpDist : entry - tpDist,
+                                            sl: dir === 'BUY' ? entry - slDist : entry + slDist,
                                             atr,
                                             openIdx: i,
                                             prob: (dir === 'BUY' ? pRise : pFall) * 100,
@@ -1832,6 +1834,7 @@
                                             openTime: t,
                                             alpha,
                                             spread: spreadCost,
+                                            fillShift: shift,
                                             fx
                                         }];
                                         tradeMarkers.push({

@@ -99,11 +99,13 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn) {
   // Отмества реалния вход (BUY нагоре, SELL надолу) и влиза веднага в рисковите
   // изчисления (плаваща загуба, свободен маржин).
   // Отместване = спред(€) / (units × fx)  →  плаваща = отместване × units × fx = спред.
+  // Спредът се пази в състоянието на позицията (fillShift/spreadCost), но TP и SL
+  // НЕ го взимат предвид — нивата са спрямо пазарната цена при отваряне.
   const shift = spreadCost > 0 ? spreadCost / (finalUnits * fx) : 0;
   const fill = dir === 'BUY' ? entry + shift : entry - shift;
 
-  const tp = dir === 'BUY' ? fill + tpDist : fill - tpDist;
-  const sl = dir === 'BUY' ? fill - slDist : fill + slDist;
+  const tp = dir === 'BUY' ? entry + tpDist : entry - tpDist;
+  const sl = dir === 'BUY' ? entry - slDist : entry + slDist;
   const probPct = (dir === 'BUY' ? pRise : pFall) * 100;
 
   return {

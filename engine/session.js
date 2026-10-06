@@ -194,6 +194,7 @@ class PaperSession {
       atr: dec.atr,
       prob: dec.prob,
       spread: dec.spreadCost,
+      fillShift: dec.fillShift || 0,
       openTime: bar.time
     });
   }
