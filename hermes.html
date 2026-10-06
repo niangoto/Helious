@@ -1724,13 +1724,14 @@
                     for (const pos of legs) {
                         const held = i - pos.openIdx;
                         let exitPrice = null, reason = null;
+                        // Песимистично: ако барът покрие и TP, и SL, приемаме SL.
                         if (pos.dir === 'BUY') {
-                            if (c.high >= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
-                            else if (c.low <= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
+                            if (c.low <= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
+                            else if (c.high >= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
                             else if (held >= P.holdBars) { exitPrice = c.close; reason = 'Време'; }
                         } else {
-                            if (c.low <= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
-                            else if (c.high >= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
+                            if (c.high >= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
+                            else if (c.low <= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
                             else if (held >= P.holdBars) { exitPrice = c.close; reason = 'Време'; }
                         }
                         if (exitPrice !== null) {

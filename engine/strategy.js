@@ -132,13 +132,14 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn) {
 function exitDecision(pos, candle, heldBars, P) {
   const held = heldBars;
   let exitPrice = null, reason = null;
+  // Песимистично: ако барът покрие и TP, и SL, приемаме SL.
   if (pos.dir === 'BUY') {
-    if (candle.high >= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
-    else if (candle.low <= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
+    if (candle.low <= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
+    else if (candle.high >= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
     else if (held >= P.holdBars) { exitPrice = candle.close; reason = 'Време'; }
   } else {
-    if (candle.low <= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
-    else if (candle.high >= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
+    if (candle.high >= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
+    else if (candle.low <= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
     else if (held >= P.holdBars) { exitPrice = candle.close; reason = 'Време'; }
   }
   if (exitPrice === null) return null;
