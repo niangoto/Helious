@@ -749,8 +749,8 @@
             const el = document.getElementById('tradesList');
             if (!list.length) { el.innerHTML = '<div class="empty">Още няма сделки</div>'; return; }
             const rows = list.slice().reverse().slice(0, 50).map(t =>
-                `<tr><td>${new Date(t.openedAt * 1000).toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td><td>${t.symbol}</td><td class="${t.dir === 'BUY' ? 'pos' : 'neg'}">${t.dir}</td><td>${fmt(t.lots, 3)}</td><td>${fmt(t.entry, 5)}</td><td>${fmt(t.exit, 5)}</td><td>${t.reason}</td><td class="${cls(t.pnl)}">${euro(t.pnl)}</td></tr>`).join('');
-            el.innerHTML = `<table><thead><tr><th>Отваряне</th><th>Символ</th><th>Вид</th><th>Обем (лот)</th><th>Вход</th><th>Изход</th><th>Причина</th><th>P/L</th></tr></thead><tbody>${rows}</tbody></table>`;
+                `<tr><td>${new Date(t.openedAt * 1000).toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td><td>${t.symbol}</td><td class="${t.dir === 'BUY' ? 'pos' : 'neg'}">${t.dir}</td><td>${fmt(t.lots, 3)}</td><td>${fmt(t.entry, 5)}</td><td>${fmt(t.exit, 5)}</td><td>${t.reason}</td><td class="${cls(t.pnl)}">${euro(t.pnl)}</td><td class="neg">${t.spread ? '-' + fmt(t.spread, 2) + ' €' : '—'}</td></tr>`).join('');
+            el.innerHTML = `<table><thead><tr><th>Отваряне</th><th>Символ</th><th>Вид</th><th>Обем (лот)</th><th>Вход</th><th>Изход</th><th>Причина</th><th>P/L</th><th>Спред</th></tr></thead><tbody>${rows}</tbody></table>`;
         }
 
         // Паралелна графика: промяната на капитала в % спрямо началото.

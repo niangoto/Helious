@@ -605,7 +605,7 @@
 
         .orders-head {
             display: grid;
-            grid-template-columns: 44px 130px 64px 90px 90px 140px 100px 110px 120px;
+            grid-template-columns: 44px 130px 64px 90px 90px 140px 100px 110px 90px 120px;
             gap: 8px;
             padding: 8px 10px;
             border-bottom: 1px solid var(--panel-border);
@@ -625,7 +625,7 @@
 
         .order-row {
             display: grid;
-            grid-template-columns: 44px 130px 64px 90px 90px 140px 100px 110px 120px;
+            grid-template-columns: 44px 130px 64px 90px 90px 140px 100px 110px 90px 120px;
             gap: 8px;
             align-items: center;
             padding: 7px 10px;
@@ -687,6 +687,10 @@
 
         .order-row .c-eq {
             color: var(--accent-cyan);
+        }
+
+        .order-row .c-spread {
+            color: #ffb37a;
         }
 
         .pos {
@@ -815,7 +819,7 @@
         @media (max-width: 900px) {
             .orders-head,
             .order-row {
-                grid-template-columns: 44px 120px 56px 80px 80px 120px 90px 100px 110px;
+                grid-template-columns: 44px 120px 56px 80px 80px 120px 90px 100px 80px 110px;
                 font-size: 10px;
             }
             .controls input,
@@ -969,6 +973,7 @@
             <span>TP / SL</span>
             <span>Изход</span>
             <span>P/L</span>
+            <span>Спред</span>
             <span>Баланс</span>
         </div>
         <div class="orders-list" id="ordersList">
@@ -1614,6 +1619,7 @@
                 <span class="c-tpsl">${fmt(pos.tp)} / ${fmt(pos.sl)}</span>
                 <span class="c-exit">${fmt(exitPrice)} <small>${reason}</small></span>
                 <span class="c-pnl ${pnl >= 0 ? 'pos' : 'neg'}">${(pnl >= 0 ? '+' : '') + pnl.toFixed(2)} €</span>
+                <span class="c-spread">${(pos.spread || 0) > 0 ? '-' + pos.spread.toFixed(2) + ' €' : '—'}</span>
                 <span class="c-eq">${equity.toFixed(2)} €</span>
             `;
             listEl.prepend(row);
