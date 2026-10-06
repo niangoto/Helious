@@ -68,13 +68,12 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn) {
   // € риск за 1 единица при движение loss в цена = loss × fx.
   const spec = specFor(symbol);
   const minLot = P.minLot || spec.min;
-  const minSpread = Math.max(0, P.minLotSpread || 0);
-  // Разход за 1 единица = маржин + начален спред (за 1 единица спредът е
-  // minSpread / (minLot × contract)). Свободният маржин трябва да покрие и двете.
-  const perUnitSpread = minSpread / (minLot * spec.contract);
-  // Разход за 1 единица = маржин + начален спред. Свободният маржин трябва да
-  // покрие и двете. Лимвъриджът се отчита чрез маржина (entry×fx/leverage), а не
-  // чрез нотионала — както при реален брокер.
+  // Спредът е процент от цената (пропорционален на нея и на обема).
+  const minSpreadPct = Math.max(0, P.minLotSpread || 0);
+  // Разход за 1 единица = маржин + начален спред (€). Свободният маржин трябва
+  // да покрие и двете. Лимвъриджът се отчита чрез маржина (entry×fx/leverage), а
+  // не чрез нотионала — както при реален брокер.
+  const perUnitSpread = (minSpreadPct / 100) * entry * fx;
   const perUnitMargin = (entry * fx) / P.leverage;
   const perUnitCost = perUnitMargin + perUnitSpread;
   const riskAmount = f * equity;
@@ -93,35 +92,30 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn) {
 
   if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
 
-  // Спред на минимален обем: `minLotSpread` (€) е за ЕДИН минимален обем и е
-  // пропорционален на броя минимални обеми. Отмества реалния вход (BUY нагоре,
-  // SELL надолу): отместване = спред(€) / (units × fx).
-  const spreadCost = minSpread * (lots / minLot);
-  const shift = spreadCost > 0 ? spreadCost / (finalUnits * fx) : 0;
-  const fill = dir === 'BUY' ? entry + shift : entry - shift;
+  // Спредът е % от цената → € разход, който се взима ДИРЕКТНО от сметката при
+  // отваряне. Входът остава реалната пазарна цена (без отместване).
+  const spreadCost = (minSpreadPct / 100) * entry * finalUnits * fx;
 
-  // Състоянието на сметката и маржинът се смятат по ЦЕНАТА ЗА ОТВАРЯНЕ `fill`
-  // (пазарната цена след обема и спреда).
-  const notionalQuote = finalUnits * fill;       // в котираната валута
+  // Състоянието на сметката и маржинът се смятат по пазарната цена `entry`.
+  const notionalQuote = finalUnits * entry;      // в котираната валута
   const notional = notionalQuote * fx;           // в EUR
   const margin = notional / P.leverage;          // в EUR
   // Нивата (TP/SL) се смятат по ПАЗАРНАТА цена при отваряне.
   const tp = dir === 'BUY' ? entry + tpDist : entry - tpDist;
   const sl = dir === 'BUY' ? entry - slDist : entry + slDist;
-  // Загубата до SL от реалния вход (fill) включва и началния спред.
-  const riskCost = slDist * finalUnits * fx + spreadCost;
-  // Отваряме само ако свободният маржин покрива маржина, началния спред и
-  // потенциалната загуба до SL (както при реален брокер — не се изисква
-  // нотионалът да е под свободния маржин).
+  // Потенциална загуба до SL (спредът вече е отделен разход от сметката).
+  const riskCost = slDist * finalUnits * fx;
+  // Отваряме само ако свободният маржин покрива маржина + спреда, и загубата до
+  // SL (както при реален брокер — не се изисква нотионалът да е под свободния).
   if (!(lots >= minLot && margin > 0
         && margin + spreadCost <= freeMargin + 1e-9 && riskCost <= freeMargin + 1e-9 && notional >= 1)) return null;
 
   const probPct = (dir === 'BUY' ? pRise : pFall) * 100;
 
   return {
-    dir, entry: fill, lots, contract: spec.contract, units: finalUnits,
+    dir, entry, lots, contract: spec.contract, units: finalUnits,
     notional, notionalQuote, margin, tp, sl, atr, tpDist, slDist, prob: probPct,
-    spreadCost, fillShift: shift, fx
+    spreadCost, fillShift: 0, fx
   };
 }
 

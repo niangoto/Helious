@@ -62,6 +62,14 @@ class PaperAccount {
 
   open(pos) {
     this.positions.set(pos.symbol, pos);
+    // Спредът се взима ДИРЕКТНО от сметката при отваряне (входът е реалната
+    // пазарна цена, без отместване).
+    const cost = Math.abs(pos.spread || 0);
+    if (cost > 0) {
+      this.balance -= cost;
+      const dd = this.peak > 0 ? (this.peak - this.balance) / this.peak * 100 : 0;
+      if (dd > this.maxDD) this.maxDD = dd;
+    }
     this.markers.push({
       symbol: pos.symbol,
       time: pos.openTime,
