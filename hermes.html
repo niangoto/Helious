@@ -841,6 +841,7 @@
                 </div>
             </div>
             <span class="badge" id="hModelBadge">---</span>
+            <span class="badge" id="hVersion" title="Версия на приложението (за проверка при кеш)">v—</span>
         </div>
         <div class="hdr-actions">
             <button class="btn start" id="btnStart" onclick="runSimulation()">▶ Стартирай</button>
@@ -2157,6 +2158,12 @@
 
         function initUI() {
             document.getElementById('hSymbol').textContent = currentSymbol;
+
+            // Версия (package + git комит) — за проверка коя версия е заредена.
+            fetch('/version').then(r => r.json()).then(j => {
+                const el = document.getElementById('hVersion');
+                if (el && j) el.textContent = 'v' + (j.version || '?') + (j.commit ? ' · ' + j.commit : '') + (j.date ? ' · ' + j.date : '');
+            }).catch(() => {});
 
             // Интервал на свещта (таймфрейм). Началната стойност идва от периода в URL.
             const iSel = document.getElementById('inpInterval');

@@ -5,6 +5,25 @@ const path = require('path');
 
 const PORT = process.env.PORT || 3001;
 
+// Версия на приложението: package.json + текущия git комит (за проверка при кеш).
+let _buildInfo = null;
+function buildInfo() {
+  if (_buildInfo) return _buildInfo;
+  let version = '?';
+  try { version = require('./package.json').version || '?'; } catch (e) {}
+  const sh = (cmd) => {
+    try { return require('child_process').execSync(cmd, { cwd: __dirname, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim(); }
+    catch (e) { return ''; }
+  };
+  _buildInfo = {
+    version,
+    commit: sh('git rev-parse --short HEAD'),
+    date: sh('git log -1 --format=%cd --date=short'),
+    startedAt: new Date().toISOString()
+  };
+  return _buildInfo;
+}
+
 // Simple in-memory cache for Yahoo responses
 const yahooCache = {};
 
@@ -167,6 +186,11 @@ const server = http.createServer(async (req, res) => {
     } catch (e) {
       return sendJson(res, 200, { ok: false, rates: { EUR: 1 } });
     }
+  }
+
+  // Версия (за проверка коя версия/комит е заредена — особено при кеш).
+  if (url.pathname === '/version' && req.method === 'GET') {
+    return sendJson(res, 200, buildInfo());
   }
 
   // Health check (за Docker healthcheck и мониторинг)
