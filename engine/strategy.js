@@ -71,8 +71,11 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn) {
   const minSpread = Math.max(0, P.minLotSpread || 0);
   // Разход за 1 единица = маржин + начален спред (за 1 единица спредът е
   // minSpread / (minLot × contract)). Свободният маржин трябва да покрие и двете.
-  const perUnitCost = (entry * fx) / P.leverage + minSpread / (minLot * spec.contract);
-  const perUnitNotional = entry * fx;
+  const perUnitSpread = minSpread / (minLot * spec.contract);
+  const perUnitCost = (entry * fx) / P.leverage + perUnitSpread;
+  // Нотионалът се смята по цената за отваряне (fill = entry ± спред), затова
+  // за 1 единица той е entry×fx + спред/единица.
+  const perUnitNotional = entry * fx + perUnitSpread;
   const riskAmount = f * equity;
   let units = riskAmount / (loss * fx);
   // Размерът се ограничава и от свободния маржин (маржин + спред за 1 единица),
