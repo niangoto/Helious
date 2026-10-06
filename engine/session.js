@@ -37,6 +37,8 @@ class PaperSession {
     this.model = Number.isInteger(config.model) ? config.model : 0;
     this.contra = Array.isArray(config.contra) ? config.contra.slice(0, 6) : [];
     this.P = normalizeParams(config.params || config);
+    // Референтна цена per символ за спреда (€ при тази цена; мащабира се после).
+    this.refPrices = (config.refPrices && typeof config.refPrices === 'object') ? Object.assign({}, config.refPrices) : {};
     this.account = new PaperAccount(this.P.budget);
     this.status = 'running';
     this.error = null;
@@ -70,6 +72,8 @@ class PaperSession {
           const last = arr[arr.length - 1];
           const closed = (last.time + iv) <= nowSec() ? last : (arr[arr.length - 2] || last);
           st.lastBarTime = closed ? closed.time : 0;
+          // Референтната цена за спреда се заковава при първото зареждане.
+          if (!(this.refPrices[s] > 0) && last.close > 0) this.refPrices[s] = last.close;
         }
       } catch (e) {
         this.state[s].error = e.message;
@@ -189,7 +193,9 @@ class PaperSession {
     for (const p of this.account.positions.values()) usedMargin += p.margin || 0;
     const freeMargin = Math.max(0, equity - usedMargin);
     const fxr = fx.eurRateForSymbol(symbol);
-    const dec = entryDecision(prob, atr, bar.close, equity, freeMargin, this.P, symbol, fxr);
+    // Спредът е валиден при референтната цена на символа, после се мащабира.
+    const Psym = (this.refPrices[symbol] > 0) ? Object.assign({}, this.P, { refPrice: this.refPrices[symbol] }) : this.P;
+    const dec = entryDecision(prob, atr, bar.close, equity, freeMargin, Psym, symbol, fxr);
     if (!dec) return;
     this.account.open({
       symbol,
@@ -314,6 +320,7 @@ class PaperSession {
       model: this.model,
       contra: this.contra,
       P: this.P,
+      refPrices: this.refPrices,
       status: this.status,
       createdAt: this.createdAt,
       startedAt: this.startedAt,
@@ -369,7 +376,7 @@ function saveAll() {
 
 function restoreSession(obj) {
   const s = new PaperSession(obj.id, {
-    ownerId: obj.ownerId, symbols: obj.symbols, interval: obj.interval, model: obj.model, contra: obj.contra, params: obj.P
+    ownerId: obj.ownerId, symbols: obj.symbols, interval: obj.interval, model: obj.model, contra: obj.contra, params: obj.P, refPrices: obj.refPrices
   });
   s.status = obj.status || 'running';
   s.createdAt = obj.createdAt || Date.now();

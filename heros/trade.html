@@ -261,7 +261,7 @@
                     <label class="f">Кели (част)<input id="inpKelly" type="number" value="0.25" min="0.01" step="0.05"></label>
                     <label class="f">Кели макс.<input id="inpMaxKelly" type="number" value="0.05" min="0.01" max="1" step="0.05"></label>
                     <label class="f">Мин. обем (лот)<input id="inpMinLot" type="number" value="0.01" min="0.01" step="0.01"></label>
-                    <label class="f" title="Спред в € за ЕДИН минимален обем (полето „Мин. обем (лот)“). Пропорционален е на броя минимални обеми (3× мин. обем = 3× сумата). Взима се директно от сметката при отваряне.">Спред на мин. обем (€)<input id="inpMinLotSpread" type="number" value="0" min="0" step="0.01"></label>
+                    <label class="f" title="Спред в € за ЕДИН минимален обем, валиден при ТЕКУЩАТА цена (полето „Мин. обем (лот)“). Мащабира се линейно с цената (по-висока цена → по-голям €) и е пропорционален на броя минимални обеми (3× мин. обем = 3× сумата). Взима се директно от сметката при отваряне.">Спред на мин. обем (€)<input id="inpMinLotSpread" type="number" value="0" min="0" step="0.01"></label>
                 </div>
                 <div class="note" id="minLotSpreadHint" style="color:var(--text-dim)"></div>
                 <div class="row"><input type="checkbox" id="inpReverse"> Обърната посока (контра със същия обем)</div>
@@ -451,8 +451,8 @@
             const alpha = Math.min(10, Math.max(0.1, parseFloat(document.getElementById('inpAlpha').value) || 1));
             const slDist = (parseFloat(document.getElementById('inpSl').value) || 1) * alpha * atr;
             const tpDist = (parseFloat(document.getElementById('inpTp').value) || 1.5) * alpha * atr;
-            // Спредът е € за 1 минимален обем и се взима директно от сметката.
-            txt += ' Спред ' + spread.toFixed(2) + ' € на мин. обем (' + minLot.toFixed(2) + ' лот), взима се от сметката при отваряне (за N мин. обема сумата е N×).';
+            // Спредът е € при текущата цена; мащабира се с цената и се взима от сметката.
+            txt += ' Спред ' + spread.toFixed(2) + ' € на мин. обем (' + minLot.toFixed(2) + ' лот) при текущата цена — мащабира се с цената (по-висока цена → по-голям €) и се взима от сметката при отваряне (N мин. обема = N×).';
             if (atr > 0) {
                 const tpEur = tpDist * units * fx;          // потенциална печалба до TP за мин. обем
                 if (spread >= tpEur) {

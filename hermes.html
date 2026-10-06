@@ -924,7 +924,7 @@
                 <label>Кели (дробна част) <input type="number" id="inpKelly" value="0.25" min="0.01" step="0.05"></label>
                 <label>Кели (макс. фракция) <input type="number" id="inpMaxKelly" value="0.05" min="0.01" max="1" step="0.05"></label>
                 <label>Мин. обем (лот) <input type="number" id="inpMinLot" value="0.01" min="0.01" step="0.01"></label>
-                <label title="Спред в € за ЕДИН минимален обем (полето „Мин. обем (лот)“). Пропорционален е на броя минимални обеми (3× мин. обем = 3× сумата). Взима се директно от сметката при отваряне.">Спред на мин. обем (€) <input type="number" id="inpMinLotSpread" value="0" min="0" step="0.01"></label>
+                <label title="Спред в € за ЕДИН минимален обем, валиден при ТЕКУЩАТА цена (полето „Мин. обем (лот)“). Мащабира се линейно с цената (по-висока цена → по-голям €) и е пропорционален на броя минимални обеми (3× мин. обем = 3× сумата). Взима се директно от сметката при отваряне.">Спред на мин. обем (€) <input type="number" id="inpMinLotSpread" value="0" min="0" step="0.01"></label>
             </div>
         </details>
         <!-- Винаги видимо: колко струва минималният обем (маржин с левериджа). -->
@@ -1839,12 +1839,16 @@
                                     const freeMargin = Math.max(0, equity - usedMargin);
                                     const spec = specFor(currentSymbol);
                                     const minLot = P.minLot || spec.min;
-                                    // Спредът е в € за ЕДИН минимален обем (× брой мин. обеми).
+                                    // Спредът е в € за ЕДИН минимален обем, валиден при
+                                    // текущата цена `P.refPrice`; мащабира се линейно с цената
+                                    // на бара (по-висока цена → по-голям €).
                                     const minSpread = Math.max(0, P.minLotSpread || 0);
+                                    const refPrice = (P.refPrice > 0) ? P.refPrice : entry;
+                                    const priceK = refPrice > 0 ? entry / refPrice : 1;
                                     // Разход за 1 единица = маржин + начален спред; свободният
                                     // маржин трябва да покрие и двете. Лимвъриджът се отчита
                                     // чрез маржина (entry×fx/leverage), не чрез нотионала.
-                                    const perUnitSpread = minSpread / (minLot * spec.contract);
+                                    const perUnitSpread = (minSpread / (minLot * spec.contract)) * priceK;
                                     const perUnitMargin = (entry * fx) / P.leverage;
                                     const perUnitCost = perUnitMargin + perUnitSpread;
                                     const maxUnits = perUnitCost > 0 ? freeMargin / perUnitCost : 0;
@@ -1857,8 +1861,8 @@
                                     // Само обратната посока, ако е избрана (влиза в посоката на спреда).
                                     if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
                                     // Спредът (€) се взима ДИРЕКТНО от сметката при отваряне,
-                                    // пропорционален на обема. Входът е реалната пазарна цена.
-                                    const spreadCost = minSpread * (lots / minLot);
+                                    // пропорционален на обема и мащабиран спрямо текущата цена.
+                                    const spreadCost = minSpread * (lots / minLot) * priceK;
                                     const fill = entry;
                                     // Сметката/маржинът се смятат по пазарната цена (entry),
                                     // нивата TP/SL — също от нея.
@@ -2050,6 +2054,8 @@
                 setProgress(15, 'Стартиране на търговската симулация...');
                 await sleep(30);
                 if (getPlaybackCps() > 0) prepareSimChart(simCandles);
+                // Референтна цена за спреда = текущата (последна) цена на периода.
+                P.refPrice = simCandles[simCandles.length - 1].close;
                 await simulate(simCandles, atrSeries, probs, P);
                 if (!cancelFlag) {
                     renderSimChart(simCandles, tradeMarkers);
@@ -2140,8 +2146,8 @@
                 el.textContent = txt;
                 return;
             }
-            // Спредът е € за 1 минимален обем и се взима директно от сметката.
-            txt += ' Спред ' + spread.toFixed(2) + ' € на мин. обем (' + minLot.toFixed(2) + ' лот), взима се от сметката при отваряне (за N мин. обема сумата е N×).';
+            // Спредът е € при текущата цена; мащабира се с цената и се взима от сметката.
+            txt += ' Спред ' + spread.toFixed(2) + ' € на мин. обем (' + minLot.toFixed(2) + ' лот) при текущата цена — мащабира се с цената (по-висока цена → по-голям €) и се взима от сметката при отваряне (N мин. обема = N×).';
             if (atr > 0) {
                 const tpEur = tpDist * units * fx;          // потенциална печалба до TP за мин. обем
                 if (spread >= tpEur) {
