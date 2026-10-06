@@ -1904,8 +1904,15 @@
 
         async function runSimulation() {
             // Ако вече тече симулация — спираме я и пускаме нова (отначало, с новите
-            // настройки). Така смяната на параметър/интервал/модел рестартира.
-            if (running) { cancelFlag = true; runPending = true; return; }
+            // настройки). Веднага даваме индикация, че стартира наново.
+            if (running) {
+                cancelFlag = true;
+                runPending = true;
+                const b = document.getElementById('btnStart');
+                if (b) { b.disabled = false; b.textContent = '⏳ Спиране...'; }
+                setProgress(0, 'Спиране на текущата симулация...');
+                return;
+            }
             running = true;
             cancelFlag = false;
             runPending = false;
@@ -1938,7 +1945,7 @@
             // Бутонът остава активен и по време на симулация — натискането му
             // отменя текущата и пуска нова отначало с новите настройки.
             document.getElementById('btnStart').disabled = false;
-            document.getElementById('btnStart').textContent = '↻ Стартирай отново';
+            document.getElementById('btnStart').textContent = '⏳ Работи... (натисни за рестарт)';
             document.getElementById('progBar').classList.remove('err');
 
             try {
