@@ -19,7 +19,7 @@ function normalizeParams(p) {
     holdBars: Math.max(1, parseInt(p.holdBars, 10) || 50),
     kellyF: Math.min(1, Math.max(0.01, num(p.kellyF, 0.25))),
     maxKelly: Math.min(1, Math.max(0.01, num(p.maxKelly, 0.05))),
-    minLot: Math.max(0.001, num(p.minLot, 0.01)),
+    minLot: Math.max(0.00001, num(p.minLot, 0.01)),
     minLotSpread: Math.max(0, num(p.minLotSpread, 0)),
     spreadUnit: (p.spreadUnit === 'pct') ? 'pct' : 'eur', // 'eur' = € за мин. обем; 'pct' = % от сумата на мин. лот
     reverse: !!p.reverse

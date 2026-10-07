@@ -537,7 +537,7 @@ async function handleDataRequest(urlParams) {
 // ─── Информация за инструмента (мин. обем, спред) от Binance ─────
 // Само за крипто символи, листнати на Binance Futures. Ливъриджът НЕ е
 // публично достъпен (иска API key) — остава ръчна настройка.
-let binanceInfoCache = { at: 0, bySymbol: null };
+const binanceSpotCache = new Map();   // sym -> { at, data }
 
 function isBinanceCrypto(sym) {
   const s = String(sym || '').toUpperCase().trim();
@@ -545,14 +545,14 @@ function isBinanceCrypto(sym) {
   return /^(BTC|ETH|SOL)(USD)?$/.test(s);
 }
 
-async function binanceFuturesInfo() {
-  if (binanceInfoCache.bySymbol && Date.now() - binanceInfoCache.at < 3600000) return binanceInfoCache.bySymbol;
-  const raw = await fetchFromURL('https://fapi.binance.com/fapi/v1/exchangeInfo');
-  const j = JSON.parse(raw);
-  const map = {};
-  for (const s of (j.symbols || [])) map[s.symbol] = s;
-  binanceInfoCache = { at: Date.now(), bySymbol: map };
-  return map;
+// SPOT метаданни (същите, които показва binance.com). Кешира per символ.
+async function binanceSpotSymbol(sym) {
+  const c = binanceSpotCache.get(sym);
+  if (c && Date.now() - c.at < 3600000) return c.data;
+  const j = JSON.parse(await fetchFromURL(`https://api.binance.com/api/v3/exchangeInfo?symbol=${sym}`));
+  const s = (j.symbols || [])[0];
+  if (s) binanceSpotCache.set(sym, { at: Date.now(), data: s });
+  return s;
 }
 
 // Връща { ok, minQty, stepSize, minNotional, tickSize, bid, ask, spread, spreadPct }
@@ -563,23 +563,32 @@ async function fetchInstrumentInfo(symbol) {
   let sym = canonical;
   if (!/USDT$/.test(sym) && /^(BTC|ETH|SOL)$/.test(sym)) sym = sym + 'USDT';
   try {
-    const info = await binanceFuturesInfo();
-    const s = info[sym];
+    const s = await binanceSpotSymbol(sym);
     if (!s) return { ok: false, reason: 'not_listed', symbol: sym };
     const lot = (s.filters || []).find(f => f.filterType === 'LOT_SIZE') || {};
-    const mn = (s.filters || []).find(f => f.filterType === 'MIN_NOTIONAL') || {};
+    const nt = (s.filters || []).find(f => f.filterType === 'MIN_NOTIONAL' || f.filterType === 'NOTIONAL') || {};
     const pf = (s.filters || []).find(f => f.filterType === 'PRICE_FILTER') || {};
     let bid = 0, ask = 0;
     try {
-      const b = JSON.parse(await fetchFromURL(`https://fapi.binance.com/fapi/v1/ticker/bookTicker?symbol=${sym}`));
+      const b = JSON.parse(await fetchFromURL(`https://api.binance.com/api/v3/ticker/bookTicker?symbol=${sym}`));
       bid = parseFloat(b.bidPrice) || 0; ask = parseFloat(b.askPrice) || 0;
     } catch (e) { /* ignore */ }
     const mid = (bid + ask) / 2;
     const spread = (bid > 0 && ask > 0) ? (ask - bid) : 0;
+    const minQty = parseFloat(lot.minQty) || 0;
+    const step = parseFloat(lot.stepSize) || 0;
+    const minNotional = parseFloat(nt.minNotional || nt.notional) || 0;
+    // Реалният минимум е по-голямото от minQty и minNotional/цена, закръглено
+    // НАГОРЕ към стъпката (иначе поръчката се отхвърля по MIN_NOTIONAL).
+    let effMinQty = minQty;
+    if (minNotional > 0 && mid > 0 && minNotional / mid > effMinQty) effMinQty = minNotional / mid;
+    if (step > 0) effMinQty = Math.ceil(effMinQty / step - 1e-9) * step;
+    // Стандартна spot taker комисиона на Binance (0.1%).
+    const takerFee = 0.001;
     return {
-      ok: true, source: 'binance', symbol: sym,
-      minQty: parseFloat(lot.minQty) || 0, stepSize: parseFloat(lot.stepSize) || 0,
-      minNotional: parseFloat(mn.notional) || 0, tickSize: parseFloat(pf.tickSize) || 0,
+      ok: true, source: 'binance', market: 'spot', symbol: sym,
+      minQty, stepSize: step, minNotional, tickSize: parseFloat(pf.tickSize) || 0,
+      effMinQty, takerFee,
       bid, ask, mid, spread, spreadPct: mid > 0 ? (spread / mid) * 100 : 0
     };
   } catch (e) {

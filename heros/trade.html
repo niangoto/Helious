@@ -260,8 +260,8 @@
                     <label class="f">Затв. (барове)<input id="inpHold" type="number" value="50" min="1"></label>
                     <label class="f">Кели (част)<input id="inpKelly" type="number" value="0.25" min="0.01" step="0.05"></label>
                     <label class="f">Кели макс.<input id="inpMaxKelly" type="number" value="0.05" min="0.01" max="1" step="0.05"></label>
-                    <label class="f">Мин. обем<select id="inpMinLotUnit" style="width:auto"><option value="lot">лот</option><option value="value">цена (€)</option></select><input id="inpMinLot" type="number" value="0.01" min="0.001" step="0.001"></label>
-                    <label class="f" title="Спред за ЕДИН минимален обем. Единицата се избира: € (валидна при ТЕКУЩАТА цена, мащабира се с нея) или % от сумата, нужна за отваряне на минималната позиция (маржина = нотионал/ливъридж). Пропорционален на броя минимални обеми. Взима се директно от сметката при отваряне.">Спред на мин. обем<select id="inpSpreadUnit" style="width:auto"><option value="eur">€</option><option value="pct">%</option></select><input id="inpMinLotSpread" type="number" value="0" min="0" step="any"></label>
+                    <label class="f">Мин. обем<select id="inpMinLotUnit" style="width:auto"><option value="lot">лот</option><option value="value">цена (€)</option></select><input id="inpMinLot" type="number" value="0.01" min="0.00001" step="any"></label>
+                    <label class="f" title="Разход за ЕДИН минимален обем (спред + комисиона при авто-попълване от Binance). Единица: € (валидна при ТЕКУЩАТА цена, мащабира се с нея) или % от сумата, нужна за отваряне на мин. позиция (маржина = нотионал/ливъридж). Пропорционален на броя минимални обеми. Взима се директно от сметката при отваряне.">Спред/такса на мин. обем<select id="inpSpreadUnit" style="width:auto"><option value="eur">€</option><option value="pct">%</option></select><input id="inpMinLotSpread" type="number" value="0" min="0" step="any"></label>
                 </div>
                 <div class="note" id="minLotSpreadHint" style="color:var(--text-dim)"></div>
                 <div class="row"><input type="checkbox" id="inpReverse"> Обърната посока (контра със същия обем)</div>
@@ -425,12 +425,12 @@
         // Мин. обем в лотове: директно („лот“) или цената (€) на мин. позиция,
         // превърната в лотове по текущата цена.
         function minLotLots() {
-            const raw = Math.max(0.001, parseFloat((document.getElementById('inpMinLot') || {}).value) || 0.01);
+            const raw = Math.max(0.00001, parseFloat((document.getElementById('inpMinLot') || {}).value) || 0.01);
             const unit = ((document.getElementById('inpMinLotUnit') || {}).value === 'value') ? 'value' : 'lot';
             if (unit === 'lot') return raw;
             const sym = (document.getElementById('inpSymbols').value.split(',')[0] || '').trim().toUpperCase();
             const px = symHintPrice(sym);
-            return px > 0 ? Math.max(0.001, raw / (px * contractFor(sym) * fxFor(sym))) : raw;
+            return px > 0 ? Math.max(0.00001, raw / (px * contractFor(sym) * fxFor(sym))) : raw;
         }
 
         // Мин. обем: показва на колко € се равнява при последната (актуална) цена.
@@ -518,20 +518,20 @@
                 if (seq !== instrumentFetchSeq || !r || !r.ok) return;
                 const fx = fxFor(sym);
                 const unit = ((document.getElementById('inpMinLotUnit') || {}).value === 'value') ? 'value' : 'lot';
+                const effQty = (r.effMinQty > 0) ? r.effMinQty : r.minQty;   // реалният минимум (minQty и MIN_NOTIONAL)
+                const units = effQty * contractFor(sym);
                 const ml = document.getElementById('inpMinLot');
-                if (ml && r.minQty > 0) {
-                    // Единица „цена“: € стойността на мин. обем (= minQty × цена); иначе лотове.
-                    ml.value = (unit === 'value' && r.mid > 0)
-                        ? fmtAmt(r.minQty * r.mid * contractFor(sym) * fx)
-                        : r.minQty;
+                if (ml && effQty > 0) {
+                    // Единица „цена“: € стойността на мин. обем (= qty × цена); иначе лотове.
+                    ml.value = (unit === 'value' && r.mid > 0) ? fmtAmt(units * r.mid * fx) : effQty;
                 }
-                if (r.spread > 0) {
-                    // € за мин. обем = спред × мин. обем (units) × fx — с пълна точност.
-                    const spreadEur = r.spread * r.minQty * contractFor(sym) * fx;
+                if (units > 0 && (r.spread > 0 || r.takerFee > 0)) {
+                    // Реална такса: спред + taker комисиона (вход И изход).
+                    const costEur = units * fx * (r.spread + 2 * (r.takerFee || 0) * r.mid);
                     const su = document.getElementById('inpSpreadUnit');
                     if (su) su.value = 'eur';
                     const sp = document.getElementById('inpMinLotSpread');
-                    if (sp) sp.value = fmtAmt(spreadEur);
+                    if (sp) sp.value = fmtAmt(costEur);
                 }
                 updateMinLotSpreadHint();
             } catch (e) { /* не е Binance или мрежата е недостъпна */ }
