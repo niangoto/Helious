@@ -889,6 +889,13 @@
                 <span class="cal-sep" style="font-size:11px;text-transform:none;letter-spacing:0.3px">контра със същия обем</span>
             </span>
         </label>
+        <label class="cal-label">Процентно затваряне
+            <span class="cal-controls">
+                <input type="checkbox" id="inpPctClose" title="Вместо фиксиран SL: затваря, когато P(обратна посока) [0..1] × плаващата загуба достигне лимита">
+                <span class="cal-sep" style="font-size:11px;text-transform:none;letter-spacing:0.3px">вместо SL · лимит</span>
+                <input type="number" id="inpPctCloseLimit" value="0" min="0" step="1" style="width:90px" title="Лимит (€). 0 = авто: дължината до SL в €.">
+            </span>
+        </label>
         <label class="cal-label">Времеви период
             <span class="cal-controls">
                 <input type="checkbox" id="inpUseDates" checked onchange="toggleDates()">
@@ -1613,6 +1620,8 @@
                 minLotUnit: ((document.getElementById('inpMinLotUnit') || {}).value === 'value') ? 'value' : 'lot',
                 minLotSpread: Math.max(0, parseFloat((document.getElementById('inpMinLotSpread') || {}).value) || 0),
                 spreadUnit: ((document.getElementById('inpSpreadUnit') || {}).value === 'pct') ? 'pct' : 'eur',
+                pctClose: !!((document.getElementById('inpPctClose') || {}).checked),
+                pctCloseLimit: Math.max(0, parseFloat((document.getElementById('inpPctCloseLimit') || {}).value) || 0),
                 reverse: document.getElementById('inpReverse').checked
             };
         }
@@ -1742,16 +1751,34 @@
                     for (const pos of legs) {
                         const held = i - pos.openIdx;
                         let exitPrice = null, reason = null;
-                        // Песимистично: ако барът покрие и TP, и SL, приемаме SL.
+                        // TP се проверява винаги (intrabar), песимистично.
                         if (pos.dir === 'BUY') {
-                            if (c.low <= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
-                            else if (c.high >= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
-                            else if (held >= P.holdBars) { exitPrice = c.close; reason = 'Време'; }
+                            if (c.high >= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
                         } else {
-                            if (c.high >= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
-                            else if (c.low <= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
-                            else if (held >= P.holdBars) { exitPrice = c.close; reason = 'Време'; }
+                            if (c.low <= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
                         }
+                        // SL се проверява само ако процентното затваряне е изключено.
+                        if (exitPrice === null && !P.pctClose) {
+                            if (pos.dir === 'BUY') {
+                                if (c.low <= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
+                            } else {
+                                if (c.high >= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
+                            }
+                        }
+                        // Процентно затваряне: P(обратна посока) [0..1] × плаващата загуба >= лимит.
+                        // P = шансът да стане обратното на позицията (BUY → sellPct, SELL → buyPct).
+                        if (exitPrice === null && P.pctClose) {
+                            const pr = probs[i];
+                            if (pr) {
+                                const pOpp = (pos.dir === 'BUY' ? pr.sellPct : pr.buyPct) / 100;
+                                const floatPnl = (pos.dir === 'BUY' ? (c.close - pos.entry) : (pos.entry - c.close)) * pos.units * (pos.fx || 1);
+                                const loss = Math.max(0, -floatPnl);
+                                const slLoss = Math.abs(pos.entry - pos.sl) * pos.units * (pos.fx || 1);
+                                const limit = (P.pctCloseLimit > 0) ? P.pctCloseLimit : slLoss;
+                                if (pOpp * loss >= limit - 1e-9) { exitPrice = c.close; reason = 'Процентно'; }
+                            }
+                        }
+                        if (exitPrice === null && held >= P.holdBars) { exitPrice = c.close; reason = 'Време'; }
                         if (exitPrice !== null) {
                             const pnl = (pos.dir === 'BUY'
                                 ? (exitPrice - pos.entry) * pos.units
