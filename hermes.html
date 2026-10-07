@@ -768,7 +768,10 @@
             flex-wrap: wrap;
             gap: 6px 16px;
             padding: 7px 12px;
-            border-bottom: 1px solid var(--panel-border);
+            margin: 0 18px 12px;
+            border: 1px solid var(--panel-border);
+            border-radius: 9px;
+            background: rgba(255, 255, 255, 0.02);
             font-family: 'JetBrains Mono', monospace;
             font-size: 11px;
             color: var(--text-dim);
@@ -859,7 +862,7 @@
             <input type="number" id="inpBudget" value="1000" min="10" step="100">
         </label>
         <label>Леверидж
-            <input type="number" id="inpLev" value="30" min="1" step="1">
+            <input type="number" id="inpLev" value="1" min="1" step="1">
         </label>
         <label>Риск (α)
             <input type="number" id="inpAlpha" value="1.0" min="0.1" step="0.1" title="Рисков апетит: 0.1–0.5 консервативен · 1.0 умерен · >1.0 агресивен">
@@ -869,12 +872,12 @@
         </label>
         <label>Скорост
             <select id="inpSpeed" title="Скорост на възпроизвеждане (свещи в секунда)">
-                <option value="0">Мгновено</option>
+                <option value="0" selected>Мигновено</option>
                 <option value="250">Много бързо</option>
                 <option value="100">Бързо</option>
                 <option value="50">Нормално</option>
                 <option value="25">Бавно</option>
-                <option value="10" selected>Много бавно</option>
+                <option value="10">Много бавно</option>
                 <option value="5">Много бавно+</option>
                 <option value="2">2/сек</option>
                 <option value="1">1/сек</option>
@@ -882,7 +885,7 @@
         </label>
         <label class="cal-label">Обърната посока
             <span class="cal-controls">
-                <input type="checkbox" id="inpReverse" checked title="Отваря се само обратната поръчка (контра) вместо определената, със същия обем">
+                <input type="checkbox" id="inpReverse" title="Отваря се само обратната поръчка (контра) вместо определената, със същия обем">
                 <span class="cal-sep" style="font-size:11px;text-transform:none;letter-spacing:0.3px">контра със същия обем</span>
             </span>
         </label>
@@ -919,10 +922,10 @@
         <details class="adv">
             <summary>Разширени настройки (EV / Кели / TP-SL)</summary>
             <div class="adv-grid">
-                <label>Buy праг (%) при α=1 <input type="number" id="inpBuyTh" value="65" min="1" max="99" step="1"></label>
-                <label>Sell праг (%) при α=1 <input type="number" id="inpSellTh" value="65" min="1" max="99" step="1"></label>
+                <label>Buy праг (%) при α=1 <input type="number" id="inpBuyTh" value="75" min="1" max="99" step="1"></label>
+                <label>Sell праг (%) при α=1 <input type="number" id="inpSellTh" value="75" min="1" max="99" step="1"></label>
                 <label>Мин. EV (цена) <input type="number" id="inpMinEv" value="0" step="any"></label>
-                <label>TP = ×ATR (α=1) <input type="number" id="inpTp" value="1.5" min="0.1" step="0.1"></label>
+                <label>TP = ×ATR (α=1) <input type="number" id="inpTp" value="2" min="0.1" step="0.1"></label>
                 <label>SL = ×ATR (α=1) <input type="number" id="inpSl" value="1.0" min="0.1" step="0.1"></label>
                 <label>Времево затваряне (барове) <input type="number" id="inpHold" value="50" min="1" step="1"></label>
                 <label>Кели (дробна част) <input type="number" id="inpKelly" value="0.25" min="0.01" step="0.05"></label>
@@ -939,6 +942,8 @@
 
     <section class="current" id="currentPos" style="display:none"></section>
 
+    <div class="live-stats" id="liveStats" style="display:none"></div>
+
     <section class="chart-section" id="chartSection">
         <div class="chart-head">
             <span>Графика на периода — позиции и затваряния</span>
@@ -948,7 +953,6 @@
                 <span><i class="legend-dot" style="background:var(--accent-cyan)"></i>● затваряне (печалба/загуба)</span>
             </span>
         </div>
-        <div class="live-stats" id="liveStats"></div>
         <div id="simChart"></div>
         <div class="pnl-wrap" id="simPnlWrap">
             <canvas id="simPnlCanvas"></canvas>
@@ -992,9 +996,10 @@
     <script>
         const params = new URLSearchParams(location.search);
         let currentSymbol = params.get('symbol') || 'BTCUSDT';
-        let activePeriod = params.get('period') || '24h';
-        let currentModel = parseInt(params.get('model') || '0', 10);
-        if (isNaN(currentModel) || currentModel < 0 || currentModel > 5) currentModel = 0;
+        // По подразбиране: интервал 1ч (период '7d' → интервал '1h'), модел „Логистична“ (1).
+        let activePeriod = params.get('period') || '7d';
+        let currentModel = parseInt(params.get('model') || '1', 10);
+        if (isNaN(currentModel) || currentModel < 0 || currentModel > 5) currentModel = 1;
 
         const periodConfigs = {
             '5m': { interval: '1m', limit: 500 },
@@ -1365,17 +1370,12 @@
             return el ? (parseInt(el.value, 10) || 0) : 0;
         }
 
-        // Един кадър на живо: мести изгледа, рисува новите маркери и обновява статистиките.
-        function liveTick(i, equity, legs, tradeCount) {
-            const n = simChartCandles.length;
+        // Обновява лентата с баланса/статистиките (без да пипа графиката).
+        function updateLiveStats(i, equity, legs, tradeCount) {
             const c = simChartCandles[i];
             let floatPnl = 0;
             if (c) for (const p of (legs || [])) {
                 floatPnl += (p.dir === 'BUY' ? (c.close - p.entry) * p.units : (p.entry - c.close) * p.units) * (p.fx || 1);
-            }
-            if (simChart) {
-                simChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, i - 140), to: i + 3 });
-                if (markersDirty) { simCandleSeries.setMarkers(sortedMarkers()); markersDirty = false; }
             }
             const el = document.getElementById('liveStats');
             if (el) {
@@ -1394,6 +1394,16 @@
                     (hasOpen ? `<span>Обем: <b>${lots.toFixed(2)} лот</b></span><span>Маржин: <b>${margin.toFixed(2)} €</b></span><span>Нотионал: <b>${notional.toFixed(2)} €</b></span>` : `<span>Обем: <b>—</b></span><span>Маржин: <b>—</b></span><span>Нотионал: <b>—</b></span>`) +
                     (c ? `<span>${fmtTime(c.time)} · <b>${fmt(c.close)}</b></span>` : '');
             }
+        }
+
+        // Един кадър на живо: мести изгледа, рисува новите маркери и обновява статистиките.
+        function liveTick(i, equity, legs, tradeCount) {
+            const n = simChartCandles.length;
+            if (simChart) {
+                simChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, i - 140), to: i + 3 });
+                if (markersDirty) { simCandleSeries.setMarkers(sortedMarkers()); markersDirty = false; }
+            }
+            updateLiveStats(i, equity, legs, tradeCount);
             setProgress(Math.round(((i - 30) / Math.max(1, n - 30)) * 100), `Свещ ${i}/${n} — ${tradeCount} сделки`);
             drawPnlChart(i);
         }
@@ -1589,12 +1599,12 @@
         function readParams() {
             return {
                 budget: Math.max(1, parseFloat(document.getElementById('inpBudget').value) || 1000),
-                leverage: Math.max(1, parseFloat(document.getElementById('inpLev').value) || 30),
+                leverage: Math.max(1, parseFloat(document.getElementById('inpLev').value) || 1),
                 alpha: Math.min(10, Math.max(0.1, parseFloat(document.getElementById('inpAlpha').value) || 1.0)),
-                buyTh: parseFloat(document.getElementById('inpBuyTh').value) || 65,
-                sellTh: parseFloat(document.getElementById('inpSellTh').value) || 65,
+                buyTh: parseFloat(document.getElementById('inpBuyTh').value) || 75,
+                sellTh: parseFloat(document.getElementById('inpSellTh').value) || 75,
                 minEv: parseFloat(document.getElementById('inpMinEv').value) || 0,
-                tpMult: parseFloat(document.getElementById('inpTp').value) || 1.5,
+                tpMult: parseFloat(document.getElementById('inpTp').value) || 2,
                 slMult: parseFloat(document.getElementById('inpSl').value) || 1.0,
                 holdBars: Math.max(1, parseInt(document.getElementById('inpHold').value) || 50),
                 kellyF: Math.min(1, Math.max(0.01, parseFloat(document.getElementById('inpKelly').value) || 0.25)),
@@ -1947,7 +1957,9 @@
                         const wait = delay * paintEvery;
                         if (wait > 0) await sleep(wait);
                     }
-                } else if (i % 50 === 0) {
+                } else if (i % 50 === 0 || i === n - 1) {
+                    // „Мгновено“: показваме само баланса/статистиките (с +/–), без графика.
+                    updateLiveStats(i, equity, legs, tradeCount);
                     setProgress(Math.round(((i - 30) / (n - 30)) * 100), `Обработка на свещ ${i}/${n} — ${tradeCount} сделки`);
                     await sleep(0);
                 }
@@ -2025,6 +2037,9 @@
             posPanelKey = null;
             updatePositionsPanel([], null, parseFloat((document.getElementById('inpBudget') || {}).value) || 1000);
             document.getElementById('chartSection').style.display = 'none';
+            // Лентата с баланса се показва още от началото (и при „Мгновено“, без графика).
+            const liveEl = document.getElementById('liveStats');
+            if (liveEl) { liveEl.style.display = 'flex'; liveEl.innerHTML = ''; }
             // Бутонът остава активен и по време на симулация — натискането му
             // отменя текущата и пуска нова отначало с новите настройки.
             document.getElementById('btnStart').disabled = false;

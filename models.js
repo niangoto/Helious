@@ -96,14 +96,31 @@ function signalMask(i, rsi, ema20, ema50, ema200, macdLine, macdSig, macdHist, a
   return mask;
 }
 
+// Причинна (causal) средна: out[i] = средно на arr[0..i] (без бъдеще).
+function expandingMean(arr) {
+  const out = new Array(arr.length);
+  let s = 0;
+  for (let i = 0; i < arr.length; i++) { s += (arr[i] || 0); out[i] = s / (i + 1); }
+  return out;
+}
+
+// RSI масивът от computeRSI() е изместен: rsi[k] отговаря на свещ k+period.
+// Затова RSI за свещ i се чете от rsiV[i - period], а не rsiV[i] (последното
+// четеше RSI от БЪДЕЩЕТО с period свещи напред).
+function rsiAt(rsiV, i, period) {
+  const k = i - (period || 14);
+  return (rsiV && k >= 0 && k < rsiV.length && rsiV[k] != null) ? rsiV[k] : 50;
+}
+
 function simulateTrade(candles, i, atrVal, maxBars) {
   const entry = candles[i].close;
   const tp = entry + 1.5 * atrVal;
   const sl = entry - 1.0 * atrVal;
   const limit = Math.min(i + maxBars, candles.length);
   for (let j = i + 1; j < limit; j++) {
-    if (candles[j].high >= tp) return 1;
+    // Песимистично при same-bar TP+SL: приемаме SL.
     if (candles[j].low <= sl) return 0;
+    if (candles[j].high >= tp) return 1;
   }
   return -1;
 }
@@ -131,8 +148,8 @@ function buildStats(candles) {
   const atrV = computeATR(candles, 14);
   const adxR = computeADX(candles, 14);
   const volV = candles.map(c => c.volume || 0);
-  const meanAtr = atrV.reduce((s, v) => s + v, 0) / atrV.length;
-  const meanVol = volV.reduce((s, v) => s + v, 0) / volV.length;
+  const meanAtrV = expandingMean(atrV);
+  const meanVolV = expandingMean(volV);
   const maxBars = Math.min(50, n);
   const combos = new Map();
   let totalWins = 0, totalTrades = 0;
@@ -143,7 +160,7 @@ function buildStats(candles) {
     if (result < 0) continue;
     totalTrades++;
     if (result === 1) totalWins++;
-    const mask = signalMask(i, rsiV[i] || 50, ema20[i], ema50[i], ema200[i], macd.macdLine[i], macd.signal[i], macd.histogram[i], atrV[i], adxR.adx[i], volV[i], meanAtr, meanVol);
+    const mask = signalMask(i, rsiAt(rsiV, i, 14), ema20[i], ema50[i], ema200[i], macd.macdLine[i], macd.signal[i], macd.histogram[i], atrV[i], adxR.adx[i], volV[i], meanAtrV[i], meanVolV[i]);
     if (!combos.has(mask)) combos.set(mask, { total: 0, wins: 0 });
     const c = combos.get(mask); c.total++;
     if (result === 1) c.wins++;
@@ -468,10 +485,10 @@ function computeCombinationProbability(candles) {
   const atrV = computeATR(candles, 14);
   const adxR = computeADX(candles, 14);
   const volV = candles.map(c => c.volume || 0);
-  const meanAtr = atrV.reduce((s, v) => s + v, 0) / atrV.length;
-  const meanVol = volV.reduce((s, v) => s + v, 0) / volV.length;
+  const meanAtrV = expandingMean(atrV);
+  const meanVolV = expandingMean(volV);
   const last = candles.length - 1;
-  const mask = signalMask(last, rsiV[last] || 50, ema20[last], ema50[last], ema200[last], macd.macdLine[last], macd.signal[last], macd.histogram[last], atrV[last], adxR.adx[last], volV[last], meanAtr, meanVol);
+  const mask = signalMask(last, rsiAt(rsiV, last, 14), ema20[last], ema50[last], ema200[last], macd.macdLine[last], macd.signal[last], macd.histogram[last], atrV[last], adxR.adx[last], volV[last], meanAtrV[last], meanVolV[last]);
   if (s.combos.has(mask)) { const c = s.combos.get(mask); if (c.total > 0) return { buyPct: Math.max(1, Math.min(99, (c.wins / c.total) * 100)), sellPct: Math.max(1, Math.min(99, 100 - (c.wins / c.total) * 100)) }; }
   return { buyPct: s.histBuyPct, sellPct: 100 - s.histBuyPct };
 }
@@ -524,83 +541,17 @@ function computeModelProbSequence(candles, modelIndex) {
   const cacheHash = candlesHash(candles);
   const cached = modelSeqCache.get(modelIndex);
   if (cached && cached.hash === cacheHash) return cached.data;
-  const result = []; const n = candles.length;
+  const n = candles.length;
+  const vals = computeModelProbCore(candles, modelIndex, null);
+  if (!vals) return [];
   const step = Math.max(1, Math.floor(n / 200));
-  const prices = candles.map(c => c.close);
-  const rsiV = typeof computeRSI === 'function' ? computeRSI(candles, 14) : prices.map(() => 50);
-  const ema20 = computeEMA(prices, 20);
-  const ema50 = computeEMA(prices, 50);
-  const ema200 = computeEMA(prices, 200);
-  const macd = computeMACD(prices);
-  const atrV = computeATR(candles, 14);
-  const adxR = computeADX(candles, 14);
-  const volV = candles.map(c => c.volume || 0);
-  const meanAtr = atrV.reduce((s, v) => s + v, 0) / atrV.length;
-  const meanVol = volV.reduce((s, v) => s + v, 0) / volV.length;
-  const maxBars = Math.min(50, n);
-  const combos = new Map();
-  let totalWins = 0, totalTrades = 0;
-  const recentTrades = [];
-  const dirs = [];
-
-  const maskAt = (i) => signalMask(i, rsiV[i] || 50, ema20[i], ema50[i], ema200[i], macd.macdLine[i], macd.signal[i], macd.histogram[i], atrV[i], adxR.adx[i], volV[i], meanAtr, meanVol);
-  const combosVal = (i, fallback) => { const m = maskAt(i); if (combos.has(m)) { const cc = combos.get(m); if (cc.total > 0) return (cc.wins / cc.total) * 100; } return fallback; };
-
-  const evStats = () => {
-    let wins = 0, tpSum = 0, slSum = 0;
-    for (const t of recentTrades) { if (t.win === 1) { wins++; tpSum += t.atr * 1.5; } else slSum += t.atr * 1.0; }
-    const total = recentTrades.length;
-    const winRate = total > 0 ? (wins / total) * 100 : 50;
-    const avgProfit = wins > 0 ? tpSum / wins : 0;
-    const avgLoss = total > wins ? slSum / (total - wins) : 0;
-    return { winRate, ev: (winRate / 100) * avgProfit - (1 - winRate / 100) * avgLoss };
-  };
-  const evVal = () => 50 + (evStats().winRate - breakevenWinRate(1.5, 1.0)) * 1.5;
-
-  const sampleVal = (i, hPct) => {
-    const histVal = amplify(directionalProb(dirs));
-    if (modelIndex === 0) return histVal;
-    if (modelIndex === 1) return combosVal(i, hPct);
-    if (modelIndex === 2) return amplify(markovProb(dirs));
-    if (modelIndex === 3) return evVal();
-    if (modelIndex === 4) return computeWaveletProbability(prices.slice(0, i + 1)).buyPct;
-    return (histVal + combosVal(i, hPct) + amplify(markovProb(dirs)) + evVal() + computeWaveletProbability(prices.slice(0, i + 1)).buyPct) / 5;
-  };
-
-  const pushDir = (i) => {
-    const d = candles[i].close >= candles[i - 1].close ? 1 : 0;
-    dirs.push(d);
-    if (dirs.length > MODEL_WINDOW) dirs.shift();
-  };
-
-  for (let i = 30; i < n - 1; i++) {
-    // Насочена статистика в плъзгащ прозорец — винаги се обновява
-    pushDir(i);
-
-    const atr = atrV[i] || 1;
-    const tradeResult = simulateTrade(candles, i, atr, maxBars);
-    if (tradeResult >= 0) {
-      totalTrades++; if (tradeResult === 1) totalWins++;
-      const mask = maskAt(i);
-      if (!combos.has(mask)) combos.set(mask, { total: 0, wins: 0 });
-      const c = combos.get(mask); c.total++; if (tradeResult === 1) c.wins++;
-      recentTrades.push({ win: tradeResult, atr });
-      if (recentTrades.length > 100) recentTrades.shift();
-    }
-
-    if (i % step === 0 || i === n - 2) {
-      const t = candles[i].time;
-      const hPct = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
-      result.push({ time: t, value: Math.max(1, Math.min(99, sampleVal(i, hPct))) });
+  const result = [];
+  for (let i = 30; i < n; i++) {
+    if (i % step === 0 || i === n - 1) {
+      if (vals[i] == null) continue;
+      result.push({ time: candles[i].time, value: vals[i] });
     }
   }
-
-  // Добавяне на вероятността за последната свещ (без бъдещ изход)
-  const lastIdx = n - 1;
-  pushDir(lastIdx);
-  const hPctLast = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
-  result.push({ time: candles[lastIdx].time, value: Math.max(1, Math.min(99, sampleVal(lastIdx, hPctLast))) });
-
   modelSeqCache.set(modelIndex, { hash: cacheHash, data: result });
   return result;
 }
@@ -615,21 +566,23 @@ function resolveTrade(candles, j, atrVal, tpMult, slMult, maxBars) {
   const sl = entry - slMult * atrVal;
   const limit = Math.min(j + maxBars, candles.length);
   for (let k = j + 1; k < limit; k++) {
-    if (candles[k].high >= tp) return { win: 1, closeIdx: k };
+    // Песимистично при same-bar TP+SL: приемаме SL.
     if (candles[k].low <= sl) return { win: 0, closeIdx: k };
+    if (candles[k].high >= tp) return { win: 1, closeIdx: k };
   }
   return null;
 }
 
-// Compute the model buy/sell probability at every candle index in a strictly
-// causal (walk-forward) way: at index i the statistics only include trades
-// entered before i whose outcome was already known by time i.
+// Causal (walk-forward) core shared by the bot series and the chart sequence.
+// At index i the statistics only include trades entered before i whose outcome
+// was already known by time i, and every baseline (ATR/volume mean, RSI) is
+// taken only from data up to i — so NO model sees the future.
 // modelIndex: 0=historical, 1=logistic, 2=markov, 3=EV,
 //             4=wavelet, 5=average of 0..4
 // Returns an array aligned with `candles` (null for the warm-up window).
-function computeModelProbSeries(candles, modelIndex, opts) {
+function computeModelProbCore(candles, modelIndex, opts) {
   const n = candles.length;
-  if (n < 30) return [];
+  if (n < 30) return null;
   const invert = (opts && Array.isArray(opts.invert)) ? opts.invert : [];
   const inv = (v, m) => invert[m] ? (100 - v) : v;
   const result = new Array(n).fill(null);
@@ -642,8 +595,9 @@ function computeModelProbSeries(candles, modelIndex, opts) {
   const atrV = computeATR(candles, 14);
   const adxR = computeADX(candles, 14);
   const volV = candles.map(c => c.volume || 0);
-  const meanAtr = atrV.reduce((s, v) => s + v, 0) / atrV.length;
-  const meanVol = volV.reduce((s, v) => s + v, 0) / volV.length;
+  // Причинна базова линия (средно само до i) — без бъдещи ATR/обем.
+  const meanAtrV = expandingMean(atrV);
+  const meanVolV = expandingMean(volV);
   const maxBars = Math.min(50, n);
 
   // Pre-resolve every historical trade outcome and bucket by resolution index.
@@ -652,7 +606,7 @@ function computeModelProbSeries(candles, modelIndex, opts) {
   for (let j = 30; j < n - 1; j++) {
     const r = resolveTrade(candles, j, atrV[j] || 1, 1.5, 1.0, maxBars);
     if (r) {
-      const mask = signalMask(j, rsiV[j] || 50, ema20[j], ema50[j], ema200[j], macd.macdLine[j], macd.signal[j], macd.histogram[j], atrV[j], adxR.adx[j], volV[j], meanAtr, meanVol);
+      const mask = signalMask(j, rsiAt(rsiV, j, 14), ema20[j], ema50[j], ema200[j], macd.macdLine[j], macd.signal[j], macd.histogram[j], atrV[j], adxR.adx[j], volV[j], meanAtrV[j], meanVolV[j]);
       entries[j] = { mask, win: r.win };
       resolvedAt[r.closeIdx].push(j);
     }
@@ -663,7 +617,7 @@ function computeModelProbSeries(candles, modelIndex, opts) {
   const recentTrades = [];
   const dirs = [];
 
-  const maskAt = (i) => signalMask(i, rsiV[i] || 50, ema20[i], ema50[i], ema200[i], macd.macdLine[i], macd.signal[i], macd.histogram[i], atrV[i], adxR.adx[i], volV[i], meanAtr, meanVol);
+  const maskAt = (i) => signalMask(i, rsiAt(rsiV, i, 14), ema20[i], ema50[i], ema200[i], macd.macdLine[i], macd.signal[i], macd.histogram[i], atrV[i], adxR.adx[i], volV[i], meanAtrV[i], meanVolV[i]);
 
   const evStats = () => {
     let wins = 0, tpSum = 0, slSum = 0;
@@ -726,7 +680,21 @@ function computeModelProbSeries(candles, modelIndex, opts) {
       const v4 = inv(computeWaveletProbability(prices.slice(win, i + 1)).buyPct, 4); sum += v4; cnt++;
       val = cnt > 0 ? sum / cnt : 50;
     }
-    result[i] = { time: candles[i].time, buyPct: Math.max(1, Math.min(99, val)), sellPct: Math.max(1, Math.min(99, 100 - val)) };
+    result[i] = Math.max(1, Math.min(99, val));
+  }
+  return result;
+}
+
+// Връща масив, подравнен с `candles` (null за загряващия прозорец), всеки
+// елемент { time, buyPct, sellPct } — строго причинен (без бъдеще).
+function computeModelProbSeries(candles, modelIndex, opts) {
+  const vals = computeModelProbCore(candles, modelIndex, opts);
+  if (!vals) return [];
+  const n = candles.length;
+  const result = new Array(n).fill(null);
+  for (let i = 0; i < n; i++) {
+    if (vals[i] == null) continue;
+    result[i] = { time: candles[i].time, buyPct: vals[i], sellPct: 100 - vals[i] };
   }
   return result;
 }
