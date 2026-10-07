@@ -394,7 +394,7 @@ async function fetchTwelvedata(symbol, interval, limit) {
 
 // Negative cache — remember symbols that failed to avoid hitting APIs repeatedly
 const failCache = {};
-const FAIL_TTL = 300000; // 5 минути
+const FAIL_TTL = 60000; // 1 минута (транзиентните грешки да се възстановяват бързо)
 
 async function fetchData(symbol, interval, limit) {
   const canonical = resolveSymbol(symbol);

@@ -410,7 +410,9 @@ const server = http.createServer(async (req, res) => {
   if (url.pathname === '/data' && req.method === 'GET') {
     const dp = require('./data-provider');
     dp.handleDataRequest(url.searchParams).then(result => {
-      res.writeHead(result.ok ? 200 : 400, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
+      // Няма данни не е „лоша заявка“ — връщаме 200 с ok:false (клиентът чете полето ok),
+      // за да не се логва шумно 400 при транзиентни проблеми с източника.
+      res.writeHead(200, { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*' });
       res.end(JSON.stringify(result));
     });
     return;
