@@ -19,8 +19,9 @@ function normalizeParams(p) {
     holdBars: Math.max(1, parseInt(p.holdBars, 10) || 50),
     kellyF: Math.min(1, Math.max(0.01, num(p.kellyF, 0.25))),
     maxKelly: Math.min(1, Math.max(0.01, num(p.maxKelly, 0.05))),
-    minLot: Math.max(0.01, num(p.minLot, 0.01)),
+    minLot: Math.max(0.001, num(p.minLot, 0.01)),
     minLotSpread: Math.max(0, num(p.minLotSpread, 0)),
+    spreadUnit: (p.spreadUnit === 'pct') ? 'pct' : 'eur', // 'eur' = € за мин. обем; 'pct' = % от сумата на мин. лот
     reverse: !!p.reverse
   };
 }
@@ -68,16 +69,22 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn) {
   // € риск за 1 единица при движение loss в цена = loss × fx.
   const spec = specFor(symbol);
   const minLot = P.minLot || spec.min;
-  // Спредът е в € за ЕДИН минимален обем, валиден при референтната (текущата)
-  // цена `refPrice`; мащабира се линейно с цената на сделката (по-висока цена →
-  // по-голям €) и е пропорционален на броя минимални обеми.
+  // Спредът може да е в € за ЕДИН минимален обем (валиден при референтната
+  // текуща цена и мащабиран с цената) или в % от сумата (нотионала) на мин. лот.
   const minSpread = Math.max(0, P.minLotSpread || 0);
-  const refPrice = (P.refPrice > 0) ? P.refPrice : entry;
-  const priceK = refPrice > 0 ? entry / refPrice : 1;
+  const spreadUnit = (P.spreadUnit === 'pct') ? 'pct' : 'eur';
   // Разход за 1 единица = маржин + начален спред (€). Свободният маржин трябва
   // да покрие и двете. Лимвъриджът се отчита чрез маржина (entry×fx/leverage), а
   // не чрез нотионала — както при реален брокер.
-  const perUnitSpread = (minSpread / (minLot * spec.contract)) * priceK;
+  let perUnitSpread;
+  if (spreadUnit === 'pct') {
+    // % от сумата, нужна за отваряне на минималната позиция (маржина).
+    perUnitSpread = (minSpread / 100) * (entry * fx) / P.leverage;
+  } else {
+    const refPrice = (P.refPrice > 0) ? P.refPrice : entry;
+    const priceK = refPrice > 0 ? entry / refPrice : 1;
+    perUnitSpread = (minSpread / (minLot * spec.contract)) * priceK;
+  }
   const perUnitMargin = (entry * fx) / P.leverage;
   const perUnitCost = perUnitMargin + perUnitSpread;
   const riskAmount = f * equity;
@@ -96,10 +103,9 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn) {
 
   if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
 
-  // Спредът (€) се взима ДИРЕКТНО от сметката при отваряне — пропорционален на
-  // обема (N × мин. обем = N × сумата) и мащабиран спрямо текущата цена. Входът
-  // остава реалната пазарна цена.
-  const spreadCost = minSpread * (lots / minLot) * priceK;
+  // Спредът (€) се взима ДИРЕКТНО от сметката при отваряне (пропорционален на
+  // обема). Входът остава реалната пазарна цена.
+  const spreadCost = perUnitSpread * finalUnits;
 
   // Състоянието на сметката и маржинът се смятат по пазарната цена `entry`.
   const notionalQuote = finalUnits * entry;      // в котираната валута

@@ -534,4 +534,57 @@ async function handleDataRequest(urlParams) {
   }
 }
 
-module.exports = { resolveSymbol, getCanonicalName, getAllCanonicalSymbols, searchSymbols, fetchData, fetchEurRates, handleDataRequest, checkMT5, log };
+// ─── Информация за инструмента (мин. обем, спред) от Binance ─────
+// Само за крипто символи, листнати на Binance Futures. Ливъриджът НЕ е
+// публично достъпен (иска API key) — остава ръчна настройка.
+let binanceInfoCache = { at: 0, bySymbol: null };
+
+function isBinanceCrypto(sym) {
+  const s = String(sym || '').toUpperCase().trim();
+  if (/(USDT|USDC|BUSD|FDUSD|TUSD)$/.test(s)) return true;
+  return /^(BTC|ETH|SOL)(USD)?$/.test(s);
+}
+
+async function binanceFuturesInfo() {
+  if (binanceInfoCache.bySymbol && Date.now() - binanceInfoCache.at < 3600000) return binanceInfoCache.bySymbol;
+  const raw = await fetchFromURL('https://fapi.binance.com/fapi/v1/exchangeInfo');
+  const j = JSON.parse(raw);
+  const map = {};
+  for (const s of (j.symbols || [])) map[s.symbol] = s;
+  binanceInfoCache = { at: Date.now(), bySymbol: map };
+  return map;
+}
+
+// Връща { ok, minQty, stepSize, minNotional, tickSize, bid, ask, spread, spreadPct }
+// за крипто символ, или { ok:false, reason } за не-крипто/нелистнато.
+async function fetchInstrumentInfo(symbol) {
+  const canonical = resolveSymbol(symbol) || String(symbol || '').toUpperCase().trim();
+  if (!isBinanceCrypto(canonical)) return { ok: false, reason: 'not_binance' };
+  let sym = canonical;
+  if (!/USDT$/.test(sym) && /^(BTC|ETH|SOL)$/.test(sym)) sym = sym + 'USDT';
+  try {
+    const info = await binanceFuturesInfo();
+    const s = info[sym];
+    if (!s) return { ok: false, reason: 'not_listed', symbol: sym };
+    const lot = (s.filters || []).find(f => f.filterType === 'LOT_SIZE') || {};
+    const mn = (s.filters || []).find(f => f.filterType === 'MIN_NOTIONAL') || {};
+    const pf = (s.filters || []).find(f => f.filterType === 'PRICE_FILTER') || {};
+    let bid = 0, ask = 0;
+    try {
+      const b = JSON.parse(await fetchFromURL(`https://fapi.binance.com/fapi/v1/ticker/bookTicker?symbol=${sym}`));
+      bid = parseFloat(b.bidPrice) || 0; ask = parseFloat(b.askPrice) || 0;
+    } catch (e) { /* ignore */ }
+    const mid = (bid + ask) / 2;
+    const spread = (bid > 0 && ask > 0) ? (ask - bid) : 0;
+    return {
+      ok: true, source: 'binance', symbol: sym,
+      minQty: parseFloat(lot.minQty) || 0, stepSize: parseFloat(lot.stepSize) || 0,
+      minNotional: parseFloat(mn.notional) || 0, tickSize: parseFloat(pf.tickSize) || 0,
+      bid, ask, mid, spread, spreadPct: mid > 0 ? (spread / mid) * 100 : 0
+    };
+  } catch (e) {
+    return { ok: false, reason: e.message };
+  }
+}
+
+module.exports = { resolveSymbol, getCanonicalName, getAllCanonicalSymbols, searchSymbols, fetchData, fetchEurRates, handleDataRequest, checkMT5, fetchInstrumentInfo, log };

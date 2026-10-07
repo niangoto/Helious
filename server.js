@@ -188,6 +188,15 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // Информация за инструмента (мин. обем, спред) — от Binance за крипто.
+  if (url.pathname === '/instrument' && req.method === 'GET') {
+    const dpi = require('./data-provider');
+    dpi.fetchInstrumentInfo(url.searchParams.get('symbol'))
+      .then(r => sendJson(res, 200, r))
+      .catch(e => sendJson(res, 200, { ok: false, reason: e.message }));
+    return;
+  }
+
   // Версия (за проверка коя версия/комит е заредена — особено при кеш).
   if (url.pathname === '/version' && req.method === 'GET') {
     return sendJson(res, 200, buildInfo());

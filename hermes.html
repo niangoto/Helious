@@ -927,8 +927,8 @@
                 <label>Времево затваряне (барове) <input type="number" id="inpHold" value="50" min="1" step="1"></label>
                 <label>Кели (дробна част) <input type="number" id="inpKelly" value="0.25" min="0.01" step="0.05"></label>
                 <label>Кели (макс. фракция) <input type="number" id="inpMaxKelly" value="0.05" min="0.01" max="1" step="0.05"></label>
-                <label>Мин. обем (лот) <input type="number" id="inpMinLot" value="0.01" min="0.01" step="0.01"></label>
-                <label title="Спред в € за ЕДИН минимален обем, валиден при ТЕКУЩАТА цена (полето „Мин. обем (лот)“). Мащабира се линейно с цената (по-висока цена → по-голям €) и е пропорционален на броя минимални обеми (3× мин. обем = 3× сумата). Взима се директно от сметката при отваряне.">Спред на мин. обем (€) <input type="number" id="inpMinLotSpread" value="0" min="0" step="0.01"></label>
+                <label>Мин. обем <select id="inpMinLotUnit" style="width:auto"><option value="lot">лот</option><option value="value">цена (€)</option></select> <input type="number" id="inpMinLot" value="0.01" min="0.001" step="0.001"></label>
+                <label title="Спред за ЕДИН минимален обем. Единицата се избира: € (валидна при ТЕКУЩАТА цена, мащабира се с нея) или % от сумата, нужна за отваряне на минималната позиция (маржина = нотионал/ливъридж). Пропорционален на броя минимални обеми. Взима се директно от сметката при отваряне.">Спред на мин. обем <select id="inpSpreadUnit" style="width:auto"><option value="eur">€</option><option value="pct">% от сумата</option></select> <input type="number" id="inpMinLotSpread" value="0" min="0" step="any"></label>
             </div>
         </details>
         <!-- Винаги видимо: колко струва минималният обем (маржин с левериджа). -->
@@ -1259,14 +1259,15 @@
             if (v) selectHermesSymbol(v);
         }
 
-        function selectHermesSymbol(sym) {
+        async function selectHermesSymbol(sym) {
             if (!sym) return;
             currentSymbol = sym;
             const badge = document.getElementById('hSymbol');
             if (badge) badge.textContent = sym;
             updateMinLotSpreadHint();
             toggleSymbolSearch(false);
-            // Пуска нова симулация за новия актив (runSimulation сам спира текущата).
+            // Взема мин. обем/спред от Binance (ако има), после пуска симулацията.
+            await autoFillInstrument();
             runSimulation();
         }
 
@@ -1598,8 +1599,10 @@
                 holdBars: Math.max(1, parseInt(document.getElementById('inpHold').value) || 50),
                 kellyF: Math.min(1, Math.max(0.01, parseFloat(document.getElementById('inpKelly').value) || 0.25)),
                 maxKelly: Math.min(1, Math.max(0.01, parseFloat(document.getElementById('inpMaxKelly').value) || 0.05)),
-                minLot: Math.max(0.01, parseFloat((document.getElementById('inpMinLot') || {}).value) || 0.01),
+                minLot: Math.max(0.001, parseFloat((document.getElementById('inpMinLot') || {}).value) || 0.01),
+                minLotUnit: ((document.getElementById('inpMinLotUnit') || {}).value === 'value') ? 'value' : 'lot',
                 minLotSpread: Math.max(0, parseFloat((document.getElementById('inpMinLotSpread') || {}).value) || 0),
+                spreadUnit: ((document.getElementById('inpSpreadUnit') || {}).value === 'pct') ? 'pct' : 'eur',
                 reverse: document.getElementById('inpReverse').checked
             };
         }
@@ -1845,16 +1848,22 @@
                                     const freeMargin = Math.max(0, equity - usedMargin);
                                     const spec = specFor(currentSymbol);
                                     const minLot = P.minLot || spec.min;
-                                    // Спредът е в € за ЕДИН минимален обем, валиден при
-                                    // текущата цена `P.refPrice`; мащабира се линейно с цената
-                                    // на бара (по-висока цена → по-голям €).
+                                    // Спредът: € за мин. обем (при текущата цена P.refPrice,
+                                    // мащабиран с цената) или % от сумата (нотионала) на мин. лот.
                                     const minSpread = Math.max(0, P.minLotSpread || 0);
-                                    const refPrice = (P.refPrice > 0) ? P.refPrice : entry;
-                                    const priceK = refPrice > 0 ? entry / refPrice : 1;
+                                    const spreadUnit = (P.spreadUnit === 'pct') ? 'pct' : 'eur';
                                     // Разход за 1 единица = маржин + начален спред; свободният
                                     // маржин трябва да покрие и двете. Лимвъриджът се отчита
                                     // чрез маржина (entry×fx/leverage), не чрез нотионала.
-                                    const perUnitSpread = (minSpread / (minLot * spec.contract)) * priceK;
+                                    let perUnitSpread;
+                                    if (spreadUnit === 'pct') {
+                                        // % от сумата, нужна за отваряне на мин. позиция (маржина).
+                                        perUnitSpread = (minSpread / 100) * (entry * fx) / P.leverage;
+                                    } else {
+                                        const refPrice = (P.refPrice > 0) ? P.refPrice : entry;
+                                        const priceK = refPrice > 0 ? entry / refPrice : 1;
+                                        perUnitSpread = (minSpread / (minLot * spec.contract)) * priceK;
+                                    }
                                     const perUnitMargin = (entry * fx) / P.leverage;
                                     const perUnitCost = perUnitMargin + perUnitSpread;
                                     const maxUnits = perUnitCost > 0 ? freeMargin / perUnitCost : 0;
@@ -1866,9 +1875,8 @@
                                     const finalUnits = lots * spec.contract;
                                     // Само обратната посока, ако е избрана (влиза в посоката на спреда).
                                     if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
-                                    // Спредът (€) се взима ДИРЕКТНО от сметката при отваряне,
-                                    // пропорционален на обема и мащабиран спрямо текущата цена.
-                                    const spreadCost = minSpread * (lots / minLot) * priceK;
+                                    // Спредът (€) се взима ДИРЕКТНО от сметката при отваряне.
+                                    const spreadCost = perUnitSpread * finalUnits;
                                     const fill = entry;
                                     // Сметката/маржинът се смятат по пазарната цена (entry),
                                     // нивата TP/SL — също от нея.
@@ -2062,6 +2070,11 @@
                 if (getPlaybackCps() > 0) prepareSimChart(simCandles);
                 // Референтна цена за спреда = текущата (последна) цена на периода.
                 P.refPrice = simCandles[simCandles.length - 1].close;
+                // Ако мин. обем е зададен като „цена“ (€), превръщаме в лотове по тази цена.
+                if (P.minLotUnit === 'value' && P.refPrice > 0) {
+                    const spec = specFor(currentSymbol), fx = fxFor(currentSymbol);
+                    P.minLot = Math.max(0.001, P.minLot / (P.refPrice * spec.contract * fx));
+                }
                 await simulate(simCandles, atrSeries, probs, P);
                 if (!cancelFlag) {
                     renderSimChart(simCandles, tradeMarkers);
@@ -2115,11 +2128,43 @@
             return cnt ? sum / cnt : 0;
         }
 
+        // Форматиране на сума с достатъчна точност (малките стойности не стават 0.00).
+        function fmtAmt(v) {
+            if (!isFinite(v)) return '—';
+            const a = Math.abs(v);
+            if (a === 0) return '0';
+            if (a < 0.000001) return v.toExponential(2);
+            if (a < 0.001) return v.toFixed(6);
+            if (a < 0.01) return v.toFixed(5);
+            if (a < 0.1) return v.toFixed(4);
+            if (a < 1) return v.toFixed(3);
+            return v.toFixed(2);
+        }
+
+        // Текуща (последна) цена за hint-а.
+        function hintPrice() {
+            const iv = (document.getElementById('inpInterval') || {}).value || '5m';
+            const key = currentSymbol + '|' + iv;
+            const c = (lastCandles && lastCandles.length && lastCandlesKey === key) ? lastCandles : hintCandles[key];
+            return (c && c.length) ? c[c.length - 1].close : 0;
+        }
+
+        // Мин. обем в лотове: или директно (единица „лот“), или от цената (€) на
+        // минималната позиция, превърната в лотове по текущата цена.
+        function minLotLots() {
+            const raw = Math.max(0.001, parseFloat((document.getElementById('inpMinLot') || {}).value) || 0.01);
+            const unit = ((document.getElementById('inpMinLotUnit') || {}).value === 'value') ? 'value' : 'lot';
+            if (unit === 'lot') return raw;
+            const px = hintPrice();
+            const spec = specFor(currentSymbol), fx = fxFor(currentSymbol);
+            return px > 0 ? Math.max(0.001, raw / (px * spec.contract * fx)) : raw;
+        }
+
         function updateMinLotSpreadHint() {
             const el = document.getElementById('minLotSpreadHint');
             if (!el) return;
             const spread = Math.max(0, parseFloat((document.getElementById('inpMinLotSpread') || {}).value) || 0);
-            const minLot = Math.max(0.01, parseFloat((document.getElementById('inpMinLot') || {}).value) || 0.01);
+            const minLot = minLotLots();
             const spec = specFor(currentSymbol);
             const units = minLot * spec.contract;
             // Последна (актуална) цена — по нея се пресмятат маржинът и спредът.
@@ -2152,11 +2197,18 @@
                 el.textContent = txt;
                 return;
             }
-            // Спредът е € при текущата цена; мащабира се с цената и се взима от сметката.
-            txt += ' Спред ' + spread.toFixed(2) + ' € на мин. обем (' + minLot.toFixed(2) + ' лот) при текущата цена — мащабира се с цената (по-висока цена → по-голям €) и се взима от сметката при отваряне (N мин. обема = N×).';
+            // € стойност за 1 мин. обем: при '€' е въведената сума (валидна при текущата
+            // цена и мащабирана с нея), при '%' е процент от сумата (нотионала) на мин. лот.
+            const spreadUnit = ((document.getElementById('inpSpreadUnit') || {}).value === 'pct') ? 'pct' : 'eur';
+            // При '%' базата е сумата, нужна за отваряне на мин. позиция (маржина).
+            const spreadEur = (spreadUnit === 'pct') ? (spread / 100) * (units * price * fx / lev) : spread;
+            const spreadTxt = (spreadUnit === 'pct')
+                ? 'Спред ' + spread + '% от сумата за отваряне = ' + fmtAmt(spreadEur) + ' €'
+                : 'Спред ' + fmtAmt(spreadEur) + ' € (при текущата цена)';
+            txt += ' ' + spreadTxt + ' на мин. обем (' + minLot.toFixed(2) + ' лот), взима се от сметката при отваряне (N мин. обема = N×).';
             if (atr > 0) {
                 const tpEur = tpDist * units * fx;          // потенциална печалба до TP за мин. обем
-                if (spread >= tpEur) {
+                if (spreadEur >= tpEur) {
                     el.classList.add('warn');
                     txt += ' ⚠ Спредът е ≥ печалбата до TP (' + tpEur.toFixed(2) + ' €) — сделката не може да е на печалба.';
                 } else {
@@ -2164,6 +2216,36 @@
                 }
             }
             el.textContent = txt;
+        }
+
+        // Автоматично попълване от Binance (ако символът е листнат там):
+        // минимален обем (лот) и спред (€ за мин. обем). Ливъридж не се дава.
+        let instrumentFetchSeq = 0;
+        async function autoFillInstrument() {
+            const seq = ++instrumentFetchSeq;
+            try {
+                const r = await fetch('/instrument?symbol=' + encodeURIComponent(currentSymbol)).then(x => x.json());
+                if (seq !== instrumentFetchSeq || !r || !r.ok) return;
+                const spec = specFor(currentSymbol);
+                const fx = fxFor(currentSymbol);
+                const unit = ((document.getElementById('inpMinLotUnit') || {}).value === 'value') ? 'value' : 'lot';
+                const ml = document.getElementById('inpMinLot');
+                if (ml && r.minQty > 0) {
+                    // Единица „цена“: € стойността на минималния обем (= minQty × цена); иначе лотове.
+                    ml.value = (unit === 'value' && r.mid > 0)
+                        ? fmtAmt(r.minQty * r.mid * spec.contract * fx)
+                        : r.minQty;
+                }
+                if (r.spread > 0) {
+                    // € за мин. обем = спред × мин. обем (units) × fx — с пълна точност.
+                    const spreadEur = r.spread * r.minQty * spec.contract * fx;
+                    const su = document.getElementById('inpSpreadUnit');
+                    if (su) su.value = 'eur';
+                    const sp = document.getElementById('inpMinLotSpread');
+                    if (sp) sp.value = fmtAmt(spreadEur);
+                }
+                updateMinLotSpreadHint();
+            } catch (e) { /* не е Binance или мрежата е недостъпна */ }
         }
 
         function initUI() {
@@ -2214,13 +2296,19 @@
                 const el = document.getElementById(id);
                 if (el) el.addEventListener('input', updateMinLotSpreadHint);
             });
+            const unitSel = document.getElementById('inpSpreadUnit');
+            if (unitSel) unitSel.addEventListener('change', updateMinLotSpreadHint);
+            // Смяна на единицата на мин. обем → преизчислява от Binance (лот/цена).
+            const mlUnitSel = document.getElementById('inpMinLotUnit');
+            if (mlUnitSel) mlUnitSel.addEventListener('change', () => autoFillInstrument());
             // Смяната на времевата рамка трябва да преизчисли симулацията с новия
             // интервал (иначе остава на предния). runSimulation сам спира текущата.
             iSel.addEventListener('change', () => { updateMinLotSpreadHint(); runSimulation(); });
             ensureFxRates();
             updateMinLotSpreadHint();
 
-            runSimulation();
+            // Попълва от Binance (ако има) и тогава пуска симулацията.
+            autoFillInstrument().then(() => runSimulation());
         }
 
         initUI();
