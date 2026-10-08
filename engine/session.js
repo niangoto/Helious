@@ -15,7 +15,6 @@ const { PaperAccount } = require('./paperBroker');
 const IV_SEC = { '1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400 };
 const WINDOW = 1000;      // свещи за модела/ATR
 const POLL_MS = 5000;     // период на проверка
-const MAX_NEW_BARS = 20;  // колко изпуснати бара да навакса наведнъж
 const MAX_EQ = 4000;      // горна граница на точките в equitySeries (разреждане)
 const MARGIN_LEVEL_MIN = 50; // под това ниво (капитал/нотионал) затваряме на загуба
 const DATA_DIR = path.join(__dirname, '..', 'data');
@@ -121,12 +120,15 @@ class PaperSession {
         const closed = (last.time + iv) <= nowSec() ? last : (arr[arr.length - 2] || null);
         if (!closed || closed.time <= st.lastBarTime) continue;
 
-        const newBars = arr.filter(c => c.time > st.lastBarTime && c.time + iv <= nowSec()).slice(-MAX_NEW_BARS);
-        for (const bar of newBars) {
-          const idx = arr.indexOf(bar);
-          if (idx >= 0) this.processBar(s, arr, idx, bar);
+        // БЕЗ наваксване: обработваме само НАЙ-НОВИЯ затворен бар, а изпуснатите
+        // (докато сървърът/сесията е била спряна) се прескачат.
+        const missed = arr.filter(c => c.time > st.lastBarTime && c.time + iv <= nowSec());
+        const latest = missed.length ? missed[missed.length - 1] : null;
+        if (latest) {
+          const idx = arr.indexOf(latest);
+          if (idx >= 0) this.processBar(s, arr, idx, latest);
         }
-        st.lastBarTime = newBars.length ? newBars[newBars.length - 1].time : closed.time;
+        st.lastBarTime = latest ? latest.time : closed.time;
       }
 
       // Маржин ниво = капитал / зает маржин на отворените позиции.
