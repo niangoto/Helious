@@ -2109,7 +2109,9 @@
                 const atrSeries = computeATR(simCandles, 14);
                 setProgress(15, 'Стартиране на търговската симулация...');
                 await sleep(30);
-                if (getPlaybackCps() > 0) prepareSimChart(simCandles);
+                // Показва графиката отначало (и при „Мгновено“). През симулацията не се
+                // прерисува всеки бар (само балансът), за да не се бави; накрая се побира.
+                prepareSimChart(simCandles);
                 // Референтна цена за спреда = текущата (последна) цена на периода.
                 P.refPrice = simCandles[simCandles.length - 1].close;
                 // Ако мин. обем е зададен като „цена“ (€), превръщаме в лотове по тази цена.
