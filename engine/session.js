@@ -34,7 +34,7 @@ class PaperSession {
     this.symbols = (Array.isArray(config.symbols) && config.symbols.length ? config.symbols : ['BTCUSDT'])
       .map(s => String(s).toUpperCase().trim()).filter(Boolean).slice(0, 10);
     this.interval = IV_SEC[config.interval] ? config.interval : '1h';
-    this.model = Number.isInteger(config.model) ? config.model : 0;
+    this.model = Number.isInteger(config.model) ? config.model : 1;
     this.contra = Array.isArray(config.contra) ? config.contra.slice(0, 6) : [];
     this.P = normalizeParams(config.params || config);
     // Референтна цена per символ за спреда (€ при тази цена; мащабира се после).

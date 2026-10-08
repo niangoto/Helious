@@ -229,11 +229,11 @@
                     <label class="f">Модел
                         <select id="inpModel">
                             <option value="0">Историческа</option>
-                            <option value="1">Логистична</option>
+                            <option value="1" selected>Логистична</option>
                             <option value="2">Марковска</option>
                             <option value="3">Очаквана стойност</option>
                             <option value="4">Уейвлет</option>
-                            <option value="5" selected>Средна вероятност</option>
+                            <option value="5">Средна вероятност</option>
                         </select>
                     </label>
                 </div>
@@ -250,14 +250,14 @@
                 <div class="gtitle">Параметри (както в HERMES)</div>
                 <div class="grid2">
                     <label class="f">Бюджет (€)<input id="inpBudget" type="number" value="1000" min="10" step="100"></label>
-                    <label class="f">Леверидж<input id="inpLev" type="number" value="30" min="1" step="1"></label>
+                    <label class="f">Леверидж<input id="inpLev" type="number" value="1" min="1" step="1"></label>
                     <label class="f">Риск (α)<input id="inpAlpha" type="number" value="1.0" min="0.1" step="0.1"></label>
-                    <label class="f">Buy праг (%)<input id="inpBuyTh" type="number" value="65" min="1" max="99"></label>
-                    <label class="f">Sell праг (%)<input id="inpSellTh" type="number" value="65" min="1" max="99"></label>
+                    <label class="f">Buy праг (%)<input id="inpBuyTh" type="number" value="75" min="1" max="99"></label>
+                    <label class="f">Sell праг (%)<input id="inpSellTh" type="number" value="75" min="1" max="99"></label>
                     <label class="f">Мин. EV<input id="inpMinEv" type="number" value="0" step="any"></label>
-                    <label class="f">TP = ×ATR<input id="inpTp" type="number" value="1.5" min="0.1" step="0.1"></label>
+                    <label class="f">TP = ×ATR<input id="inpTp" type="number" value="2" min="0.1" step="0.1"></label>
                     <label class="f">SL = ×ATR<input id="inpSl" type="number" value="1.0" min="0.1" step="0.1"></label>
-                    <label class="f">Затв. (барове)<input id="inpHold" type="number" value="50" min="1"></label>
+                    <label class="f">Затв. (барове)<input id="inpHold" type="number" value="200" min="1"></label>
                     <label class="f">Кели (част)<input id="inpKelly" type="number" value="0.25" min="0.01" step="0.05"></label>
                     <label class="f">Кели макс.<input id="inpMaxKelly" type="number" value="0.05" min="0.01" max="1" step="0.05"></label>
                     <label class="f">Мин. обем<select id="inpMinLotUnit" style="width:auto"><option value="lot">лот</option><option value="value">цена (€)</option></select><input id="inpMinLot" type="number" value="0.01" min="0.00001" step="any"></label>
