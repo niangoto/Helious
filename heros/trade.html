@@ -269,6 +269,27 @@
             </div>
 
             <div class="group">
+                <div class="gtitle">Демо сметка (Binance Testnet)</div>
+                <label class="f">Пазар
+                    <select id="inpBrokerMarket">
+                        <option value="spot">Спот — testnet.binance.vision</option>
+                        <option value="futures">Фючърси — testnet.binancefuture.com</option>
+                    </select>
+                </label>
+                <label class="f">API Key<input id="inpBrokerKey" placeholder="testnet API key" autocomplete="off"></label>
+                <label class="f">API Secret<input id="inpBrokerSecret" type="password" placeholder="testnet secret" autocomplete="off"></label>
+                <div class="row"><input type="checkbox" id="inpBrokerRemember" checked onchange="saveBrokerKeys()"> Запомни ключовете (само в този браузър)</div>
+                <button class="btn" id="btnBrokerTest" onclick="testBroker()">Провери връзката</button>
+                <div class="row" style="display:flex;gap:8px;flex-wrap:wrap">
+                    <button class="btn" id="btnBrokerSave" onclick="saveBrokerServer()">Запази в акаунта (криптирано)</button>
+                    <button class="btn danger" id="btnBrokerDel" onclick="deleteBrokerServer()">Изтрий</button>
+                </div>
+                <div class="note" id="brokerStatus" style="color:var(--text-dim)"></div>
+                <div class="note" id="brokerResult" style="color:var(--text-dim)"></div>
+                <div class="note">Ключовете са за Binance Testnet (демо, фалшиви пари). „Запомни“ ги пази в браузъра (localStorage); „Запази в акаунта“ — криптирано на сървъра (за автоматичната търговия, достъпна и без браузър).</div>
+            </div>
+
+            <div class="group">
                 <div class="gtitle">Моите сесии <span id="sessNote" style="color:var(--text-dim);letter-spacing:0;text-transform:none"></span></div>
                 <div id="sessionList"><div class="empty">Няма сесии</div></div>
                 <div class="note">Сессията върви на сървъра — работи и когато затвориш таба или излезеш от профила. При следващ вход виждаш до къде е стигнала.</div>
@@ -538,6 +559,102 @@
         }
         updateMinLotSpreadHint();
         autoFillInstrument();
+
+        // Запазване/зареждане на testnet ключовете локално в браузъра.
+        const BROKER_LS_KEY = 'heros_broker_keys';
+        function saveBrokerKeys() {
+            try {
+                const remember = document.getElementById('inpBrokerRemember');
+                if (!remember || !remember.checked) { localStorage.removeItem(BROKER_LS_KEY); return; }
+                localStorage.setItem(BROKER_LS_KEY, JSON.stringify({
+                    market: document.getElementById('inpBrokerMarket').value,
+                    apiKey: document.getElementById('inpBrokerKey').value.trim(),
+                    apiSecret: document.getElementById('inpBrokerSecret').value.trim()
+                }));
+            } catch (e) { /* ignore */ }
+        }
+        function loadBrokerKeys() {
+            try {
+                const raw = localStorage.getItem(BROKER_LS_KEY);
+                if (!raw) return;
+                const o = JSON.parse(raw);
+                if (o.market) document.getElementById('inpBrokerMarket').value = o.market;
+                if (o.apiKey) document.getElementById('inpBrokerKey').value = o.apiKey;
+                if (o.apiSecret) document.getElementById('inpBrokerSecret').value = o.apiSecret;
+            } catch (e) { /* ignore */ }
+        }
+        ['inpBrokerKey', 'inpBrokerSecret', 'inpBrokerMarket', 'inpBrokerRemember'].forEach(id => {
+            const el = document.getElementById(id);
+            if (el) { el.addEventListener('input', saveBrokerKeys); el.addEventListener('change', saveBrokerKeys); }
+        });
+        loadBrokerKeys();
+
+        // Проверка на връзката към Binance Testnet (демо).
+        async function testBroker() {
+            saveBrokerKeys();
+            const el = document.getElementById('brokerResult');
+            if (!el) return;
+            el.style.color = 'var(--text-dim)';
+            el.textContent = 'Проверка...';
+            try {
+                const r = await fetch('/api/broker/test', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        market: document.getElementById('inpBrokerMarket').value,
+                        apiKey: document.getElementById('inpBrokerKey').value.trim(),
+                        apiSecret: document.getElementById('inpBrokerSecret').value.trim()
+                    })
+                }).then(x => x.json());
+                if (r && r.ok) {
+                    const bals = (r.balances || []).map(b => b.asset + ' ' + (b.free != null ? b.free : b.total)).join(' · ');
+                    el.textContent = '✓ Връзката е OK (' + r.market + (r.canTrade ? ', търговия разрешена' : '') + ')' + (bals ? ' — ' + bals : '');
+                    el.style.color = 'var(--accent-green)';
+                } else {
+                    el.textContent = '✗ ' + ((r && r.error) || 'грешка') + (r && r.code ? ' (' + r.code + ')' : '');
+                    el.style.color = 'var(--accent-red)';
+                }
+            } catch (e) {
+                el.textContent = '✗ ' + e.message;
+                el.style.color = 'var(--accent-red)';
+            }
+        }
+
+        // Запазване на ключовете криптирано на сървъра (за автоматичната търговия).
+        async function saveBrokerServer() {
+            const el = document.getElementById('brokerStatus');
+            el.style.color = 'var(--text-dim)';
+            el.textContent = 'Запазване...';
+            try {
+                const r = await fetch('/api/broker/save', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        market: document.getElementById('inpBrokerMarket').value,
+                        apiKey: document.getElementById('inpBrokerKey').value.trim(),
+                        apiSecret: document.getElementById('inpBrokerSecret').value.trim()
+                    })
+                }).then(x => x.json());
+                if (r && r.ok) { el.style.color = 'var(--accent-green)'; el.textContent = '✓ Запазени (' + r.market + ' · ' + r.apiKey + ')'; }
+                else { el.style.color = 'var(--accent-red)'; el.textContent = '✗ ' + ((r && r.error) || 'грешка'); }
+            } catch (e) { el.style.color = 'var(--accent-red)'; el.textContent = '✗ ' + e.message; }
+        }
+        async function deleteBrokerServer() {
+            const el = document.getElementById('brokerStatus');
+            try {
+                await fetch('/api/broker', { method: 'DELETE' }).then(x => x.json());
+                el.style.color = 'var(--text-dim)'; el.textContent = 'Изтрити от сървъра.';
+            } catch (e) { el.style.color = 'var(--accent-red)'; el.textContent = '✗ ' + e.message; }
+        }
+        async function loadBrokerStatus() {
+            const el = document.getElementById('brokerStatus');
+            if (!el) return;
+            try {
+                const r = await fetch('/api/broker/status').then(x => x.json());
+                if (r && r.saved) { el.style.color = 'var(--accent-green)'; el.textContent = 'Записани на сървъра: ' + r.market + ' · ' + r.apiKey; }
+                else { el.style.color = 'var(--text-dim)'; el.textContent = 'Няма записани ключове на сървъра.'; }
+            } catch (e) { /* ignore */ }
+        }
+        loadBrokerStatus();
 
         function readConfig() {
             const symbols = document.getElementById('inpSymbols').value.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);

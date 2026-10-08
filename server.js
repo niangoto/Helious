@@ -129,6 +129,36 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  // ─── Брокер (Binance Testnet демо) — изисква вход ────────────────
+  if (url.pathname === '/api/broker' || url.pathname.startsWith('/api/broker/')) {
+    const user = authUser(req);
+    if (!user) return sendJson(res, 401, { ok: false, error: 'Изисква вход' });
+    const binance = require('./engine/binance');
+    const store = require('./engine/brokerStore');
+    try {
+      if (url.pathname === '/api/broker/test' && req.method === 'POST') {
+        const body = await readJson(req);
+        const r = await binance.testConnection(body.market, body.apiKey, body.apiSecret);
+        return sendJson(res, 200, r);
+      }
+      if (url.pathname === '/api/broker/status' && req.method === 'GET') {
+        return sendJson(res, 200, store.statusFor(user.id));
+      }
+      if (url.pathname === '/api/broker/save' && req.method === 'POST') {
+        const body = await readJson(req);
+        const r = await binance.testConnection(body.market, body.apiKey, body.apiSecret);
+        if (!r.ok) return sendJson(res, 200, r);
+        return sendJson(res, 200, Object.assign({ ok: true, verified: true }, store.setCredentials(user.id, body)));
+      }
+      if (url.pathname === '/api/broker' && req.method === 'DELETE') {
+        return sendJson(res, 200, store.removeCredentials(user.id));
+      }
+      return sendJson(res, 404, { ok: false, error: 'Неизвестен API път' });
+    } catch (e) {
+      return sendJson(res, 200, { ok: false, error: e.message, code: e.code || null });
+    }
+  }
+
   // ─── Paper търговия API (изисква вход) ───────────────────────────
   if (url.pathname.startsWith('/api/paper/')) {
     const user = authUser(req);
