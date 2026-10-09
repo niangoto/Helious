@@ -298,6 +298,7 @@
 
         <main>
             <div class="stats" id="stats"></div>
+            <div class="panel" id="accountPanel" style="margin-bottom:12px"></div>
 
             <div class="chart-wrap">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">
@@ -869,6 +870,8 @@
             document.getElementById('stats').innerHTML = cards.map(c =>
                 `<div class="card-stat"><div class="k">${c[0]}</div><div class="v ${c[2]}">${c[1]}</div></div>`).join('');
 
+            renderAccount(state.account);
+
             const keys = Object.keys(state.symbols || {});
             if (!activeSymbol || !keys.includes(activeSymbol)) activeSymbol = keys[0];
             renderTabs(keys);
@@ -940,8 +943,34 @@
                 `</tbody></table>`;
         }
 
-        function renderTrades(list) {
-            const el = document.getElementById('tradesList');
+        // Панел с данните на демо сметката (Binance Testnet или виртуална).
+        function renderAccount(acc) {
+            const el = document.getElementById('accountPanel');
+            if (!el) return;
+            if (!acc) { el.innerHTML = ''; return; }
+            if (acc.mode === 'live') {
+                const cur = acc.currency || 'USDT';
+                const rows = (acc.positions || []).map(p =>
+                    `<tr><td>${p.symbol}</td><td class="${p.dir === 'BUY' ? 'pos' : 'neg'}">${p.dir}</td><td>${fmt(p.qty, 4)}</td><td>${fmt(p.entry, 5)}</td><td class="${cls(p.unrealized)}">${fmt(p.unrealized, 2)} ${cur}</td><td>${p.leverage || ''}</td></tr>`).join('');
+                el.innerHTML = `<h3>Демо сметка — ${acc.broker || 'Binance Testnet'}${acc.market ? ' · ' + acc.market : ''}</h3>
+                    <div style="display:flex;gap:16px;flex-wrap:wrap;margin:6px 0">
+                        <span>Баланс: <b>${fmt(acc.balance, 2)} ${cur}</b></span>
+                        <span>Свободни: <b>${fmt(acc.available, 2)} ${cur}</b></span>
+                        <span>Капитал: <b>${fmt(acc.equity, 2)} ${cur}</b></span>
+                        <span>Плаваща: <b class="${cls(acc.unrealized)}">${fmt(acc.unrealized, 2)} ${cur}</b></span>
+                    </div>
+                    ${rows ? `<table><thead><tr><th>Символ</th><th>Вид</th><th>Количество</th><th>Вход</th><th>Плаваща</th><th>Лив.</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">Няма отворени позиции в Binance Testnet</div>'}`;
+            } else {
+                el.innerHTML = `<h3>Демо сметка — виртуална (paper)</h3>
+                    <div style="display:flex;gap:16px;flex-wrap:wrap;margin:6px 0">
+                        <span>Баланс: <b>${fmt(acc.balance, 2)} €</b></span>
+                        <span>Капитал: <b>${fmt(acc.equity, 2)} €</b></span>
+                    </div>
+                    <div class="note" style="color:var(--text-dim)">Няма записани Binance Testnet ключове — търговията е виртуална. Добави ключове по-долу, за да търгува реално на Testnet.</div>`;
+            }
+        }
+
+        function renderTrades(list) {            const el = document.getElementById('tradesList');
             if (!list.length) { el.innerHTML = '<div class="empty">Още няма сделки</div>'; return; }
             const rows = list.slice().reverse().slice(0, 50).map(t =>
                 `<tr><td>${new Date(t.openedAt * 1000).toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td><td>${t.symbol}</td><td class="${t.dir === 'BUY' ? 'pos' : 'neg'}">${t.dir}</td><td>${fmt(t.lots, 3)}</td><td>${fmt(t.entry, 5)}</td><td>${fmt(t.exit, 5)}</td><td>${t.reason}</td><td class="${cls(t.pnl)}">${euro(t.pnl)}</td><td class="neg">${t.spread ? '-' + fmt(t.spread, 2) + ' €' : '—'}</td></tr>`).join('');

@@ -3,6 +3,10 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
+// HEROS работи в българско локално време — показване И изчисления (граници
+// ден/седмица/месец, пазарни часове). Задава се преди всяка употреба на Date.
+process.env.TZ = process.env.TZ || 'Europe/Sofia';
+
 const PORT = process.env.PORT || 3001;
 
 // Версия на приложението: package.json + текущия git комит (за проверка при кеш).
@@ -144,6 +148,12 @@ const server = http.createServer(async (req, res) => {
       if (url.pathname === '/api/broker/status' && req.method === 'GET') {
         return sendJson(res, 200, store.statusFor(user.id));
       }
+      if (url.pathname === '/api/broker/account' && req.method === 'GET') {
+        const creds = store.getCredentials(user.id);
+        if (!creds) return sendJson(res, 200, { ok: false, error: 'Няма записани Testnet ключове' });
+        const snap = await require('./engine/broker').account(creds);
+        return sendJson(res, 200, Object.assign({ ok: true, broker: 'Binance Testnet' }, snap));
+      }
       if (url.pathname === '/api/broker/save' && req.method === 'POST') {
         const body = await readJson(req);
         const r = await binance.testConnection(body.market, body.apiKey, body.apiSecret);
@@ -172,8 +182,12 @@ const server = http.createServer(async (req, res) => {
         if (method === 'GET') return sendJson(res, 200, { ok: true, sessions: engine.listSessions(user.id), active: engine.activeSessions(user.id).map(s => s.id) });
         if (method === 'POST') {
           const body = await readJson(req);
-          const s = await engine.createSession(Object.assign({}, body || {}, { ownerId: user.id }));
-          return sendJson(res, 201, { ok: true, id: s.id, state: s.getState() });
+          // Демо сметката: ако профилът има записани Testnet ключове — сесията
+          // търгува реално на Binance Testnet; иначе — виртуална paper сметка.
+          let brokerCreds = null;
+          try { brokerCreds = require('./engine/brokerStore').getCredentials(user.id); } catch (e) { brokerCreds = null; }
+          const s = await engine.createSession(Object.assign({}, body || {}, { ownerId: user.id, broker: brokerCreds }));
+          return sendJson(res, 201, { ok: true, id: s.id, mode: s.mode, state: s.getState() });
         }
       }
       if (parts.length >= 4 && parts[2] === 'sessions') {

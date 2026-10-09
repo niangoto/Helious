@@ -168,10 +168,11 @@ function isCrypto(symbol) {
 
 // Пазарът отворен ли е за нови поръчки: крипто — винаги; останалите (индекси,
 // форекс, метали, суровини) — само в делнични дни (без събота/неделя).
+// Ползва локално (българско) време — сървърът работи с TZ=Europe/Sofia.
 function marketOpen(symbol, timeSec) {
   if (isCrypto(symbol)) return true;
   const t = (timeSec && isFinite(timeSec)) ? timeSec : Math.floor(Date.now() / 1000);
-  const day = new Date(t * 1000).getUTCDay();   // 0 = неделя, 6 = събота
+  const day = new Date(t * 1000).getDay();   // 0 = неделя, 6 = събота (локално)
   return day !== 0 && day !== 6;
 }
 
