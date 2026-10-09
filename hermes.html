@@ -1596,6 +1596,48 @@
             }
         }
 
+        // ─── 1м разрез на бар (за same-bar TP+SL) ───────────────────────
+        // Кеш на 1м свещите за текущата симулация (по символ). Тегли се лениво —
+        // само когато някой бар покрие и TP, и SL.
+        let oneMin = { symbol: null, candles: [], limit: 0 };
+        function resetOneMinCache() { oneMin = { symbol: null, candles: [], limit: 0 }; }
+
+        async function getOneMinSeries(symbol, needLimit) {
+            if (oneMin.symbol === symbol && oneMin.limit >= needLimit) return oneMin.candles;
+            const prev = (oneMin.symbol === symbol) ? oneMin.limit : 0;
+            const limit = Math.min(MAX_FETCH, Math.max(needLimit, prev));
+            let arr = [];
+            try { arr = await fetchCandles(symbol, '1m', limit); } catch (e) { arr = []; }
+            arr = (arr || []).slice().sort((a, b) => a.time - b.time);
+            oneMin = { symbol, candles: arr, limit };
+            return arr;
+        }
+
+        // За бар, в който са засегнати и TP, и SL: обхожда 1м свещите в
+        // прозореца [t, t+ivSec) по ред и връща кое ниво е първо. Ако една 1м
+        // свещ покрие и двете → SL (песимистично). Няма ли 1м данни → SL.
+        async function resolveAmbiguousExit(symbol, candle, pos, ivSec) {
+            const from = candle.time, to = candle.time + ivSec;
+            const nowLocal = timeToLocal(Math.floor(Date.now() / 1000));
+            const need = Math.ceil((nowLocal - from) / 60) + Math.ceil(ivSec / 60) + 5;
+            if (!(need > 0) || need > MAX_FETCH) return { exitPrice: pos.sl, reason: 'SL' };
+            let arr;
+            try { arr = await getOneMinSeries(symbol, need); } catch (e) { arr = null; }
+            if (!arr || !arr.length) return { exitPrice: pos.sl, reason: 'SL' };
+            for (const m of arr) {
+                if (m.time < from) continue;
+                if (m.time >= to) break;
+                if (pos.dir === 'BUY') {
+                    if (m.low <= pos.sl) return { exitPrice: pos.sl, reason: 'SL' };
+                    if (m.high >= pos.tp) return { exitPrice: pos.tp, reason: 'TP' };
+                } else {
+                    if (m.high >= pos.sl) return { exitPrice: pos.sl, reason: 'SL' };
+                    if (m.low <= pos.tp) return { exitPrice: pos.tp, reason: 'TP' };
+                }
+            }
+            return { exitPrice: pos.sl, reason: 'SL' };
+        }
+
         function setProgress(pct, text) {
             const bar = document.getElementById('progBar');
             const txt = document.getElementById('progText');
@@ -1728,8 +1770,9 @@
             `;
         }
 
-        async function simulate(candles, atrSeries, probs, P) {
+        async function simulate(candles, atrSeries, probs, P, interval) {
             ensureFxRates();   // валутни курсове към EUR (кеширани; не блокира)
+            const ivSec = intervalSecs(interval || '5m');
             let equity = P.budget;
             let peak = equity;
             let maxDD = 0;
@@ -1751,19 +1794,18 @@
                     for (const pos of legs) {
                         const held = i - pos.openIdx;
                         let exitPrice = null, reason = null;
-                        // TP се проверява винаги (intrabar), песимистично.
-                        if (pos.dir === 'BUY') {
-                            if (c.high >= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
-                        } else {
-                            if (c.low <= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
-                        }
-                        // SL се проверява само ако процентното затваряне е изключено.
-                        if (exitPrice === null && !P.pctClose) {
-                            if (pos.dir === 'BUY') {
-                                if (c.low <= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
-                            } else {
-                                if (c.high >= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
-                            }
+                        // Кое ниво е засегнато в бара:
+                        const tpHit = pos.dir === 'BUY' ? (c.high >= pos.tp) : (c.low <= pos.tp);
+                        const slHit = !P.pctClose && (pos.dir === 'BUY' ? (c.low <= pos.sl) : (c.high >= pos.sl));
+                        if (tpHit && slHit) {
+                            // Бар с и TP, и SL → гледаме 1м кое е първо. Ако и на 1м
+                            // е една свещ (или няма данни) → песимистично SL.
+                            const r = await resolveAmbiguousExit(currentSymbol, c, pos, ivSec);
+                            exitPrice = r.exitPrice; reason = r.reason;
+                        } else if (tpHit) {
+                            exitPrice = pos.tp; reason = 'TP';
+                        } else if (slHit) {
+                            exitPrice = pos.sl; reason = 'SL';
                         }
                         // Процентно затваряне: P(обратна посока) [0..1] × плаващата загуба >= лимит.
                         // P = шансът да стане обратното на позицията (BUY → sellPct, SELL → buyPct).
@@ -2103,7 +2145,12 @@
                 showRealInterval(simCandles, interval);
                 setProgress(10, `Изчисляване на вероятностите по модела (${simCandles.length} свещи)...`);
                 await sleep(30);
-                const probs = computeModelProbSeries(simCandles, currentModel, { invert: contraFlags() });
+                // „Живото" изчисление: на всеки бар моделът вижда само последните
+                // 1000 свещи (както реалния paper двигател) — иначе при дълги серии
+                // моделът ползва цялата история и дава различни вероятности.
+                const probs = (typeof computeModelProbSeriesLive === 'function')
+                    ? computeModelProbSeriesLive(simCandles, currentModel, { invert: contraFlags() }, 1000)
+                    : computeModelProbSeries(simCandles, currentModel, { invert: contraFlags() });
                 if (cancelFlag) return;
 
                 const atrSeries = computeATR(simCandles, 14);
@@ -2119,7 +2166,8 @@
                     const spec = specFor(currentSymbol), fx = fxFor(currentSymbol);
                     P.minLot = Math.max(0.001, P.minLot / (P.refPrice * spec.contract * fx));
                 }
-                await simulate(simCandles, atrSeries, probs, P);
+                resetOneMinCache();
+                await simulate(simCandles, atrSeries, probs, P, interval);
                 if (!cancelFlag) {
                     renderSimChart(simCandles, tradeMarkers);
                     drawPnlChart();

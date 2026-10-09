@@ -104,6 +104,20 @@ function expandingMean(arr) {
   return out;
 }
 
+// Причинна (causal) плъзгаща средна: out[i] = средно на последните `win`
+// елемента (arr[max(0,i-win+1)..i]). Ползва се, за да съвпада базовата линия с
+// живата сесия, която смята модела върху подвижен прозорец от `win` свещи.
+function rollingMean(arr, win) {
+  const out = new Array(arr.length);
+  let s = 0;
+  for (let i = 0; i < arr.length; i++) {
+    s += (arr[i] || 0);
+    if (i >= win) s -= (arr[i - win] || 0);
+    out[i] = s / Math.min(i + 1, win);
+  }
+  return out;
+}
+
 // RSI масивът от computeRSI() е изместен: rsi[k] отговаря на свещ k+period.
 // Затова RSI за свещ i се чете от rsiV[i - period], а не rsiV[i] (последното
 // четеше RSI от БЪДЕЩЕТО с period свещи напред).
@@ -189,6 +203,12 @@ function getStats(candles) {
 // историческата и марковската вероятност се оценяват върху ПОСЛЕДНИТЕ N движения
 // (прозорец = текущият пазарен режим) — така реагират на актуалния тренд/застой.
 const MODEL_WINDOW = 40;
+// Прозорец на НАТРУПАНАТА статистика (combos/базова линия) — същият като на
+// живата сесия (`engine/session.js` WINDOW = 1000 свещи). Без него backtest-ът
+// (Hermes) трупа статистика от цялата история и дава РАЗЛИЧНИ вероятности от
+// реалното време (модели 1 и 5). Модели 0/2 (прозорец 40), 3 (последни 50
+// сделки) и 4 (срез 500) и без това съвпадат.
+const MODEL_STATS_WINDOW = 1000;
 
 // ─── Fast Fourier Transform (FFT) ───
 // Дискретно преобразувание на Фурие върху видимите свещи. Серията се
@@ -585,6 +605,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
   if (n < 30) return null;
   const invert = (opts && Array.isArray(opts.invert)) ? opts.invert : [];
   const inv = (v, m) => invert[m] ? (100 - v) : v;
+  const noClamp = !!(opts && opts.noClamp);
   const result = new Array(n).fill(null);
   const prices = candles.map(c => c.close);
   const rsiV = typeof computeRSI === 'function' ? computeRSI(candles, 14) : prices.map(() => 50);
@@ -680,7 +701,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
       const v4 = inv(computeWaveletProbability(prices.slice(win, i + 1)).buyPct, 4); sum += v4; cnt++;
       val = cnt > 0 ? sum / cnt : 50;
     }
-    result[i] = Math.max(1, Math.min(99, val));
+    result[i] = noClamp ? val : Math.max(1, Math.min(99, val));
   }
   return result;
 }
@@ -697,6 +718,68 @@ function computeModelProbSeries(candles, modelIndex, opts) {
     result[i] = { time: candles[i].time, buyPct: vals[i], sellPct: 100 - vals[i] };
   }
   return result;
+}
+
+// Точно „живото" (live) изчисление: живият двигател (engine/session.js) на всеки
+// затворен бар преизчислява модела върху ПОДВИЖЕН прозорец от последните `window`
+// свещи и взима последната стойност. При серии, по-дълги от `window`, това дава
+// различни резултати от еднократното изчисление върху цялата история, защото
+// seed-ът на индикаторите (EMA/RSI/ATR) зависи къде започва прозорецът. Засяга
+// само моделите, които ползват signalMask → 1 (логистична) и дела ѝ в 5 (средна).
+// Модели 0/2/3/4 са инвариантни на прозореца в бара на решението и се взимат от
+// бързото пълно изчисление. За серии <= `window` резултатът е идентичен с
+// computeModelProbSeries (прозорецът покрива всичко), затова бързата пътека се
+// ползва директно.
+function computeModelProbSeriesLive(candles, modelIndex, opts, window) {
+  const n = candles ? candles.length : 0;
+  if (n < 30) return [];
+  const W = window || MODEL_STATS_WINDOW;
+  if (modelIndex !== 1 && modelIndex !== 5) return computeModelProbSeries(candles, modelIndex, opts);
+  const invert = (opts && Array.isArray(opts.invert)) ? opts.invert : [];
+  const inv = (v, m) => invert[m] ? (100 - v) : v;
+  const clamp = (v) => Math.max(1, Math.min(99, v));
+
+  if (modelIndex === 1) {
+    const vals = computeModelProbCore(candles, 1, opts);
+    if (!vals) return [];
+    // Само за барове след първия пълен прозорец преизчисляваме наново.
+    for (let i = W; i < n; i++) {
+      const win = candles.slice(i - W + 1, i + 1);
+      const w = computeModelProbCore(win, 1, null);
+      if (w && w[w.length - 1] != null) vals[i] = w[w.length - 1];
+    }
+    const out = new Array(n).fill(null);
+    for (let i = 0; i < n; i++) if (vals[i] != null) out[i] = { time: candles[i].time, buyPct: vals[i], sellPct: 100 - vals[i] };
+    return out;
+  }
+
+  // modelIndex === 5: сглобяваме от компонентите; само модел 1 става прозоречен.
+  // noClamp: single-pass модел 5 усреднява СУРОВИ компоненти и ограничава чак
+  // накрая (v1/v3 могат да са извън [1,99]) — иначе средното се разминава.
+  const rawOpt = { noClamp: true };
+  const comp = [computeModelProbCore(candles, 0, rawOpt), computeModelProbCore(candles, 1, rawOpt),
+                computeModelProbCore(candles, 2, rawOpt), computeModelProbCore(candles, 3, rawOpt),
+                computeModelProbCore(candles, 4, rawOpt)];
+  const v1 = comp[1];
+  if (v1) {
+    for (let i = W; i < n; i++) {
+      const win = candles.slice(i - W + 1, i + 1);
+      const w = computeModelProbCore(win, 1, rawOpt);
+      if (w && w[w.length - 1] != null) v1[i] = w[w.length - 1];
+    }
+  }
+  const out = new Array(n).fill(null);
+  for (let i = 0; i < n; i++) {
+    let sum = 0, cnt = 0;
+    for (let m = 0; m < 5; m++) {
+      const raw = comp[m] ? comp[m][i] : null;
+      if (raw == null) continue;
+      sum += inv(raw, m); cnt++;
+    }
+    if (cnt === 0) continue;
+    out[i] = { time: candles[i].time, buyPct: clamp(sum / cnt), sellPct: 100 - clamp(sum / cnt) };
+  }
+  return out;
 }
 
 // ════════════════════════════════════════════════════════════════
@@ -912,6 +995,7 @@ if (typeof module !== 'undefined' && module.exports) {
     signalMask,
     resolveTrade,
     computeModelProbSeries,
+    computeModelProbSeriesLive,
     computeModelProbSequence,
     computeWaveletProbability,
     computeFourierProbSequence,
