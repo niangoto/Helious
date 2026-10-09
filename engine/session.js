@@ -273,6 +273,10 @@ class PaperSession {
       fillShift: dec.fillShift || 0, openTime: bar.time, openBarTime: bar.time
     };
     if (this.isLive) {
+      if (!(await broker.symbolTradable(this.broker, symbol))) {
+        this.state[symbol].error = symbol + ' не се търгува на Binance Testnet — само крипто.';
+        return;
+      }
       if (this.broker.market === 'spot' && dec.dir === 'SELL') {
         this.state[symbol].error = 'Спот демо сметката не позволява къси позиции (избери фючърси).';
         return;
