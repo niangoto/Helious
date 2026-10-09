@@ -979,21 +979,19 @@
             if (!el) return;
             if (!acc) { el.innerHTML = ''; return; }
             if (acc.mode === 'live') {
-                const cur = acc.currency || 'EUR';
-                const b = acc.binance;
-                const rows = b ? (b.positions || []).map(p =>
-                    `<tr><td>${p.symbol}</td><td class="${p.dir === 'BUY' ? 'pos' : 'neg'}">${p.dir}</td><td>${fmt(p.qty, 4)}</td><td>${fmt(p.entry, 5)}</td><td class="${cls(p.unrealized)}">${fmt(p.unrealized, 2)} ${b.currency}</td><td>${p.leverage || ''}</td></tr>`).join('') : '';
-                el.innerHTML = `<h3>Демо сметка (начален капитал от HEROS) — ${acc.broker || 'Binance Testnet'}${acc.market ? ' · ' + acc.market : ''}</h3>
+                const cur = acc.currency || 'USDT';
+                const rows = (acc.positions || []).map(p =>
+                    `<tr><td>${p.symbol}</td><td class="${p.dir === 'BUY' ? 'pos' : 'neg'}">${p.dir}</td><td>${fmt(p.qty, 4)}</td><td>${fmt(p.entry, 5)}</td><td class="${cls(p.unrealized)}">${fmt(p.unrealized, 2)} ${cur}</td><td>${p.leverage || ''}</td></tr>`).join('');
+                el.innerHTML = `<h3>Демо сметка — ${acc.broker || 'Binance Testnet'}${acc.market ? ' · ' + acc.market : ''}</h3>
                     <div style="display:flex;gap:16px;flex-wrap:wrap;margin:6px 0">
-                        <span>Начален: <b>${acc.initial != null ? fmt(acc.initial, 2) + ' ' + cur : '—'}</b></span>
-                        <span>Баланс: <b>${fmt(acc.balance, 2)} ${cur}</b></span>
-                        <span>Свободни: <b>${fmt(acc.available, 2)} ${cur}</b></span>
-                        <span>Капитал: <b>${fmt(acc.equity, 2)} ${cur}</b></span>
-                        <span>Плаваща: <b class="${cls(acc.unrealized)}">${fmt(acc.unrealized, 2)} ${cur}</b></span>
+                        <span>Начален капитал: <b>${acc.initial != null ? fmt(acc.initial, 2) + ' ' + cur : '—'}</b></span>
+                        <span>Баланс: <b>${acc.balance != null ? fmt(acc.balance, 2) + ' ' + cur : '—'}</b></span>
+                        <span>Свободни: <b>${acc.available != null ? fmt(acc.available, 2) + ' ' + cur : '—'}</b></span>
+                        <span>Капитал: <b>${acc.equity != null ? fmt(acc.equity, 2) + ' ' + cur : '—'}</b></span>
+                        <span>Плаваща: <b class="${cls(acc.unrealized)}">${acc.unrealized != null ? fmt(acc.unrealized, 2) + ' ' + cur : '—'}</b></span>
                     </div>
-                    <div class="note" style="color:var(--text-dim)">Binance Testnet (реален demo баланс): <b>${b ? fmt(b.balance, 2) + ' ' + b.currency + ' · капитал ' + fmt(b.equity, 2) + ' · плаваща ' + fmt(b.unrealized, 2) : '— няма връзка'}</b></div>
-                    ${!b ? '<div class="note neg">Няма връзка с Binance Testnet — поръчките не се изпълняват реално. Провери ключовете.</div>' : ''}
-                    ${rows ? `<table><thead><tr><th>Символ</th><th>Вид</th><th>Количество</th><th>Вход</th><th>Плаваща</th><th>Лив.</th></tr></thead><tbody>${rows}</tbody></table>` : (b ? '<div class="empty">Няма отворени позиции в Binance Testnet</div>' : '')}`;
+                    ${!acc.connected ? '<div class="note neg">Няма връзка с Binance Testnet — провери ключовете. Ако балансът е 0, захрани демо сметката от faucet-а (' + (acc.market === 'futures' ? 'testnet.binancefuture.com' : 'testnet.binance.vision') + '); Binance Testnet няма API за създаване на акаунт/баланс.</div>' : ''}
+                    ${rows ? `<table><thead><tr><th>Символ</th><th>Вид</th><th>Количество</th><th>Вход</th><th>Плаваща</th><th>Лив.</th></tr></thead><tbody>${rows}</tbody></table>` : (acc.connected ? '<div class="empty">Няма отворени позиции в Binance Testnet</div>' : '')}`;
             } else {
                 el.innerHTML = `<h3>Демо сметка — виртуална (paper)</h3>
                     <div style="display:flex;gap:16px;flex-wrap:wrap;margin:6px 0">
