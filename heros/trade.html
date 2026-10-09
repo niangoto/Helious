@@ -287,6 +287,12 @@
                 <div class="note" id="brokerStatus" style="color:var(--text-dim)"></div>
                 <div class="note" id="brokerResult" style="color:var(--text-dim)"></div>
                 <div class="note">Ключовете са за Binance Testnet (демо, фалшиви пари). „Запомни“ ги пази в браузъра (localStorage); „Запази в акаунта“ — криптирано на сървъра (за автоматичната търговия, достъпна и без браузър).</div>
+                <div class="note" style="border-left:2px solid var(--accent-cyan);padding-left:8px">
+                    <b>Откъде идва балансът:</b> начален капитал НЕ се въвежда — Binance Testnet зарежда демо сметката.
+                    <b>Фючърси</b> (<a href="https://testnet.binancefuture.com" target="_blank" rel="noopener">testnet.binancefuture.com</a>): новите акаунти имат подразбиращ се баланс; ако е 0 → бутон <b>Reset</b> в Wallet.
+                    <b>Спот</b> (<a href="https://testnet.binance.vision" target="_blank" rel="noopener">testnet.binance.vision</a>): зареди от <b>Faucet</b>.
+                    Балансът се вижда след „Провери връзката“ тук и в панела „Демо сметка“. (Binance Testnet няма API за създаване на акаунт/баланс.)
+                </div>
             </div>
 
             <div class="group">
@@ -608,8 +614,8 @@
                     })
                 }).then(x => x.json());
                 if (r && r.ok) {
-                    const bals = (r.balances || []).map(b => b.asset + ' ' + (b.free != null ? b.free : b.total)).join(' · ');
-                    el.textContent = '✓ Връзката е OK (' + r.market + (r.canTrade ? ', търговия разрешена' : '') + ')' + (bals ? ' — ' + bals : '');
+                    const bals = (r.balances || []).map(b => b.asset + ' ' + (b.total != null ? b.total : (b.free || 0) + (b.locked || 0))).join(' · ');
+                    el.textContent = '✓ Връзката е OK (' + r.market + (r.canTrade ? ', търговия разрешена' : '') + ') — баланс: ' + (bals || '0 (захрани от faucet/Reset)');
                     el.style.color = 'var(--accent-green)';
                 } else {
                     el.textContent = '✗ ' + ((r && r.error) || 'грешка') + (r && r.code ? ' (' + r.code + ')' : '');
