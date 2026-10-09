@@ -182,10 +182,11 @@ const server = http.createServer(async (req, res) => {
         if (method === 'GET') return sendJson(res, 200, { ok: true, sessions: engine.listSessions(user.id), active: engine.activeSessions(user.id).map(s => s.id) });
         if (method === 'POST') {
           const body = await readJson(req);
-          // Демо сметката: ако профилът има записани Testnet ключове — сесията
-          // търгува реално на Binance Testnet; иначе — виртуална paper сметка.
+          // Демо сметката: HEROS търгува САМО на Binance Testnet. Без ключове
+          // сесия не се създава (няма виртуален fallback).
           let brokerCreds = null;
           try { brokerCreds = require('./engine/brokerStore').getCredentials(user.id); } catch (e) { brokerCreds = null; }
+          if (!brokerCreds) return sendJson(res, 200, { ok: false, error: 'HEROS търгува само с демо сметка — запиши Binance Testnet ключове и опитай пак.' });
           const s = await engine.createSession(Object.assign({}, body || {}, { ownerId: user.id, broker: brokerCreds }));
           return sendJson(res, 201, { ok: true, id: s.id, mode: s.mode, state: s.getState() });
         }

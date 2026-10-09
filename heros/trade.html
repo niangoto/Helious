@@ -651,8 +651,25 @@
             if (!el) return;
             try {
                 const r = await fetch('/api/broker/status').then(x => x.json());
-                if (r && r.saved) { el.style.color = 'var(--accent-green)'; el.textContent = 'Записани на сървъра: ' + r.market + ' · ' + r.apiKey; }
-                else { el.style.color = 'var(--text-dim)'; el.textContent = 'Няма записани ключове на сървъра.'; }
+                if (r && r.saved) {
+                    el.style.color = 'var(--accent-green)';
+                    el.textContent = 'Записани на сървъра: ' + r.market + ' · ' + r.apiKey;
+                    showBrokerAccount(el);
+                } else { el.style.color = 'var(--text-dim)'; el.textContent = 'Няма записани ключове на сървъра.'; }
+            } catch (e) { /* ignore */ }
+        }
+        // Показва колко фалшиви пари има в демо сметката (Testnet), ако има ключове.
+        async function showBrokerAccount(el) {
+            try {
+                const a = await fetch('/api/broker/account').then(x => x.json());
+                if (!a || !a.ok) return;
+                if (a.market === 'futures') {
+                    el.textContent += ' · баланс ' + fmt(a.balance, 2) + ' ' + (a.currency || 'USDT') +
+                        ' (' + (a.positions || []).length + ' отв. позиции)';
+                } else {
+                    const bals = (a.balances || []).map(b => b.asset + ' ' + fmt(b.free, 2)).join(' · ');
+                    el.textContent += ' · ' + (bals || 'празен баланс');
+                }
             } catch (e) { /* ignore */ }
         }
         loadBrokerStatus();
