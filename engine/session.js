@@ -49,9 +49,12 @@ class PaperSession {
     this.broker = config.broker || null;                       // { market, apiKey, apiSecret }
     this.mode = this.broker ? 'live' : 'paper';                // 'live' = Binance Testnet
     this.account = new PaperAccount(this.P.budget);            // (paper режим)
+    // Демо сметката се води от СЪРВЪРА с начален капитал = „Бюджет“ от HEROS
+    // (не зависи от баланса в Binance). Поръчките се огледално пускат на Testnet,
+    // а реалният Binance snapshot се пази отделно за справка (`binance`).
     this.live = this.mode === 'live' ? {
-      startBalance: null, startBalanceRaw: null, equity: 0, balance: 0, available: 0, unrealized: 0,
-      snapshot: null, positions: new Map(), trades: [], markers: [], maxDD: 0, peak: 0
+      balance: this.P.budget, equity: this.P.budget, startBalance: this.P.budget,
+      snapshot: null, positions: new Map(), trades: [], markers: [], maxDD: 0, peak: this.P.budget
     } : null;
     this.status = 'running';
     this.error = null;
@@ -121,31 +124,36 @@ class PaperSession {
   }
 
   // ── Демо акаунт (Binance Testnet) ───────────────────────────────
+  // Реален snapshot от Binance Testnet — само за справка/показване. Сметката на
+  // стратегията се води локално от сървъра с начален капитал = „Бюджет“.
   async refreshLiveAccount(force) {
     if (!this.broker) return;
     if (!force && Date.now() - this._lastSnapshot < 2500) return;
     this._lastSnapshot = Date.now();
     try {
       const snap = await broker.account(this.broker);
-      const fxr = fx.eurRateForSymbol('BTCUSDT') || fx.eurRate('USD');
       this.live.snapshot = snap;
-      this.live.balance = (snap.balance || 0) * fxr;
-      this.live.available = (snap.available || 0) * fxr;
-      this.live.unrealized = (snap.unrealized || 0) * fxr;
-      this.live.equity = this.live.balance + this.live.unrealized;
-      // Началният капитал ИДВА от демо сметката в Binance (фауцет) — първият
-      // положителен баланс, който видим; пазим и суров (USDT) за показване.
-      if (this.live.startBalance == null && this.live.balance > 0) {
-        this.live.startBalance = this.live.balance;
-        this.live.startBalanceRaw = snap.balance;
-      }
-      if (this.live.equity > (this.live.peak || 0)) this.live.peak = this.live.equity;
-      const peak = this.live.peak || this.live.equity;
-      const dd = peak > 0 ? (peak - this.live.equity) / peak * 100 : 0;
-      if (dd > this.live.maxDD) this.live.maxDD = dd;
     } catch (e) {
+      this.live.snapshot = null;
       this.error = e.message;
     }
+  }
+
+  // Плаваща печалба на локалните live позиции по текущите цени (EUR).
+  liveFloating() {
+    if (!this.isLive) return 0;
+    const prices = this.prices();
+    let f = 0;
+    for (const [sym, p] of this.live.positions) {
+      if (prices[sym] != null) f += floatingPnl(p, prices[sym]);
+    }
+    return f;
+  }
+
+  liveUsedMargin() {
+    let m = 0;
+    if (this.isLive) for (const p of this.live.positions.values()) m += p.margin || 0;
+    return m;
   }
 
   // 1м first-touch за бар, покрил и TP, и SL (както в HERMES).
@@ -257,9 +265,9 @@ class PaperSession {
     this.state[symbol].prob = prob.buyPct; this.state[symbol].probTime = bar.time;
     const atrArr = models.computeATR(arr, 14);
     const atr = atrArr[atrArr.length - 1];
-    const equity = this.isLive ? (this.live.equity || 0) : this.account.equity(this.prices());
+    const equity = this.isLive ? (this.live.balance + this.liveFloating()) : this.account.equity(this.prices());
     let freeMargin;
-    if (this.isLive) freeMargin = this.live.available || 0;
+    if (this.isLive) freeMargin = Math.max(0, equity - this.liveUsedMargin());
     else {
       let used = 0; for (const p of this.account.positions.values()) used += p.margin || 0;
       freeMargin = Math.max(0, equity - used);
@@ -294,6 +302,8 @@ class PaperSession {
         pos.tp = dec.dir === 'BUY' ? fill + dec.tpDist : fill - dec.tpDist;
         pos.sl = dec.dir === 'BUY' ? fill - dec.slDist : fill + dec.slDist;
         this.live.positions.set(symbol, pos);
+        // Спредът се взима от демо сметката при отваряне (както в HERMES/paper).
+        if (pos.spread > 0) this.live.balance -= pos.spread;
         this.live.markers.push({ symbol, time: bar.time, position: dec.dir === 'BUY' ? 'belowBar' : 'aboveBar', color: dec.dir === 'BUY' ? '#00ff66' : '#ff0055', shape: dec.dir === 'BUY' ? 'arrowUp' : 'arrowDown', text: dec.dir + ' ' + dec.lots + 'л' });
         this.trimMarkers();
       } catch (e) {
@@ -313,6 +323,7 @@ class PaperSession {
         const order = await broker.marketOrder(this.broker, symbol, side, pos.lots, true);
         const fill = parseFloat(order.avgPrice || order.price) || exitPrice;
         const pnl = (pos.dir === 'BUY' ? (fill - pos.entry) : (pos.entry - fill)) * pos.units * (pos.fx || 1);
+        this.live.balance += pnl;
         this.live.trades.push({ id: this.live.trades.length + 1, symbol, dir: pos.dir, lots: pos.lots, contract: pos.contract, units: pos.units, entry: pos.entry, exit: fill, tp: pos.tp, sl: pos.sl, openedAt: pos.openTime, closedAt: barTime, pnl, reason, prob: pos.prob, spread: pos.spread || 0 });
         this.live.positions.delete(symbol);
         this.live.markers.push({ symbol, time: barTime, position: pos.dir === 'BUY' ? 'aboveBar' : 'belowBar', color: pnl >= 0 ? '#00ff66' : '#ff0055', shape: 'circle', text: reason + (pnl >= 0 ? ' +' : ' ') + pnl.toFixed(2) + '€' });
@@ -328,8 +339,8 @@ class PaperSession {
 
   async enforceMarginLevel() {
     if (this.isLive) {
-      const eq = this.live.equity || 0;
-      let used = 0; for (const p of this.live.positions.values()) used += p.margin || 0;
+      const eq = this.live.balance + this.liveFloating();
+      const used = this.liveUsedMargin();
       if (used > 0 && eq / used * 100 < MARGIN_LEVEL_MIN) {
         let worst = null, wl = Infinity;
         const prices = this.prices();
@@ -357,12 +368,18 @@ class PaperSession {
   }
 
   sampleEquity() {
-    const eq = this.isLive ? (this.live.equity || 0) : this.account.equity(this.prices());
-    const floating = this.isLive ? (this.live.unrealized || 0) : this.account.floating(this.prices());
-    const balance = this.isLive ? (this.live.balance || 0) : this.account.balance;
-    // Само живият режим може да няма още snapshot — не пишем нулеви точки.
-    if (this.isLive && !this.live.snapshot) return;
+    const floating = this.isLive ? this.liveFloating() : this.account.floating(this.prices());
+    const balance = this.isLive ? this.live.balance : this.account.balance;
+    const eq = balance + floating;
+    if (this.isLive) this.live.equity = eq;
     this.equitySeries.push({ t: nowSec(), equity: eq, balance, floating });
+    // Демо сметката води своя капитал (започва от „Бюджет“) — пазим пик/drawdown.
+    if (this.isLive) {
+      if (eq > (this.live.peak || 0)) this.live.peak = eq;
+      const peak = this.live.peak || eq;
+      const dd = peak > 0 ? (peak - eq) / peak * 100 : 0;
+      if (dd > this.live.maxDD) this.live.maxDD = dd;
+    }
     if (this.equitySeries.length > MAX_EQ) {
       const half = Math.floor(this.equitySeries.length / 2);
       const out = [];
@@ -407,10 +424,10 @@ class PaperSession {
 
   stats() {
     if (this.isLive) {
-      const equity = this.live.equity || 0;
-      const floating = this.live.unrealized || 0;
-      const balance = this.live.balance || 0;
-      const start = this.live.startBalance || balance;
+      const floating = this.liveFloating();
+      const balance = this.live.balance;
+      const equity = balance + floating;
+      const start = this.live.startBalance || this.P.budget;
       const wins = this.live.trades.filter(t => t.pnl > 0).length;
       return {
         initial: start, balance, equity, floating,
@@ -456,15 +473,20 @@ class PaperSession {
       floating: prices[pos.symbol] != null ? floatingPnl(pos, prices[pos.symbol]) : null
     }));
     const snap = this.live && this.live.snapshot;
+    const liveFloat = this.isLive ? this.liveFloating() : 0;
     const account = this.isLive ? {
       mode: 'live', broker: 'Binance Testnet', market: this.broker && this.broker.market,
-      currency: 'USDT',
-      balance: snap ? snap.balance : this.live.balance,
-      available: snap ? snap.available : this.live.available,
-      equity: snap ? snap.equity : this.live.equity,
-      unrealized: snap ? snap.unrealized : this.live.unrealized,
-      initial: this.live.startBalanceRaw != null ? this.live.startBalanceRaw : (snap ? snap.balance : null),
-      positions: (snap && snap.positions) || []
+      currency: 'EUR',
+      balance: this.live.balance,
+      available: Math.max(0, this.live.balance + liveFloat - this.liveUsedMargin()),
+      equity: this.live.balance + liveFloat,
+      unrealized: liveFloat,
+      initial: this.live.startBalance || this.P.budget,
+      // Реалният snapshot от Binance Testnet (за справка/показване).
+      binance: snap ? {
+        currency: 'USDT', balance: snap.balance, available: snap.available,
+        equity: snap.equity, unrealized: snap.unrealized, positions: snap.positions || []
+      } : null
     } : { mode: 'paper', currency: 'EUR', balance: this.account.balance, equity: this.account.equity(prices) };
     return {
       id: this.id, status: this.status, error: this.error, mode: this.mode,
@@ -488,7 +510,7 @@ class PaperSession {
         positions: [...this.account.positions.values()], markers: this.account.markers
       },
       live: this.live ? {
-        startBalance: this.live.startBalance, startBalanceRaw: this.live.startBalanceRaw,
+        balance: this.live.balance, startBalance: this.live.startBalance,
         peak: this.live.peak, maxDD: this.live.maxDD,
         trades: this.live.trades, positions: [...this.live.positions.values()], markers: this.live.markers
       } : null,
@@ -543,9 +565,9 @@ function restoreSession(obj) {
   s.updatedAt = obj.updatedAt || Date.now();
   if (s.isLive) {
     const L = obj.live || {};
-    s.live.startBalance = L.startBalance != null ? L.startBalance : null;
-    s.live.startBalanceRaw = L.startBalanceRaw != null ? L.startBalanceRaw : null;
-    s.live.peak = L.peak || 0;
+    s.live.startBalance = L.startBalance != null ? L.startBalance : s.P.budget;
+    s.live.balance = L.balance != null ? L.balance : s.P.budget;
+    s.live.peak = L.peak || s.live.balance;
     s.live.maxDD = L.maxDD || 0;
     s.live.trades = Array.isArray(L.trades) ? L.trades : [];
     s.live.markers = Array.isArray(L.markers) ? L.markers : [];
