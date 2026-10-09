@@ -50,7 +50,7 @@ class PaperSession {
     this.mode = this.broker ? 'live' : 'paper';                // 'live' = Binance Testnet
     this.account = new PaperAccount(this.P.budget);            // (paper режим)
     this.live = this.mode === 'live' ? {
-      startBalance: null, equity: 0, balance: 0, available: 0, unrealized: 0,
+      startBalance: null, startBalanceRaw: null, equity: 0, balance: 0, available: 0, unrealized: 0,
       snapshot: null, positions: new Map(), trades: [], markers: [], maxDD: 0, peak: 0
     } : null;
     this.status = 'running';
@@ -133,7 +133,12 @@ class PaperSession {
       this.live.available = (snap.available || 0) * fxr;
       this.live.unrealized = (snap.unrealized || 0) * fxr;
       this.live.equity = this.live.balance + this.live.unrealized;
-      if (this.live.startBalance == null && this.live.balance > 0) this.live.startBalance = this.live.balance;
+      // Началният капитал ИДВА от демо сметката в Binance (фауцет) — първият
+      // положителен баланс, който видим; пазим и суров (USDT) за показване.
+      if (this.live.startBalance == null && this.live.balance > 0) {
+        this.live.startBalance = this.live.balance;
+        this.live.startBalanceRaw = snap.balance;
+      }
       if (this.live.equity > (this.live.peak || 0)) this.live.peak = this.live.equity;
       const peak = this.live.peak || this.live.equity;
       const dd = peak > 0 ? (peak - this.live.equity) / peak * 100 : 0;
@@ -458,6 +463,7 @@ class PaperSession {
       available: snap ? snap.available : this.live.available,
       equity: snap ? snap.equity : this.live.equity,
       unrealized: snap ? snap.unrealized : this.live.unrealized,
+      initial: this.live.startBalanceRaw != null ? this.live.startBalanceRaw : (snap ? snap.balance : null),
       positions: (snap && snap.positions) || []
     } : { mode: 'paper', currency: 'EUR', balance: this.account.balance, equity: this.account.equity(prices) };
     return {
@@ -482,7 +488,8 @@ class PaperSession {
         positions: [...this.account.positions.values()], markers: this.account.markers
       },
       live: this.live ? {
-        startBalance: this.live.startBalance, peak: this.live.peak, maxDD: this.live.maxDD,
+        startBalance: this.live.startBalance, startBalanceRaw: this.live.startBalanceRaw,
+        peak: this.live.peak, maxDD: this.live.maxDD,
         trades: this.live.trades, positions: [...this.live.positions.values()], markers: this.live.markers
       } : null,
       equitySeries: this.equitySeries,
@@ -537,6 +544,7 @@ function restoreSession(obj) {
   if (s.isLive) {
     const L = obj.live || {};
     s.live.startBalance = L.startBalance != null ? L.startBalance : null;
+    s.live.startBalanceRaw = L.startBalanceRaw != null ? L.startBalanceRaw : null;
     s.live.peak = L.peak || 0;
     s.live.maxDD = L.maxDD || 0;
     s.live.trades = Array.isArray(L.trades) ? L.trades : [];

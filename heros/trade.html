@@ -954,11 +954,13 @@
                     `<tr><td>${p.symbol}</td><td class="${p.dir === 'BUY' ? 'pos' : 'neg'}">${p.dir}</td><td>${fmt(p.qty, 4)}</td><td>${fmt(p.entry, 5)}</td><td class="${cls(p.unrealized)}">${fmt(p.unrealized, 2)} ${cur}</td><td>${p.leverage || ''}</td></tr>`).join('');
                 el.innerHTML = `<h3>Демо сметка — ${acc.broker || 'Binance Testnet'}${acc.market ? ' · ' + acc.market : ''}</h3>
                     <div style="display:flex;gap:16px;flex-wrap:wrap;margin:6px 0">
+                        <span>Начален капитал: <b>${acc.initial != null ? fmt(acc.initial, 2) + ' ' + cur : '—'}</b></span>
                         <span>Баланс: <b>${fmt(acc.balance, 2)} ${cur}</b></span>
                         <span>Свободни: <b>${fmt(acc.available, 2)} ${cur}</b></span>
                         <span>Капитал: <b>${fmt(acc.equity, 2)} ${cur}</b></span>
                         <span>Плаваща: <b class="${cls(acc.unrealized)}">${fmt(acc.unrealized, 2)} ${cur}</b></span>
                     </div>
+                    ${(!acc.balance && !acc.equity) ? '<div class="note neg">Балансът на Testnet е 0 — захрани демо сметката от фауцета на Binance (' + (acc.market === 'futures' ? 'testnet.binancefuture.com' : 'testnet.binance.vision') + '), иначе няма с какво да се търгува.</div>' : ''}
                     ${rows ? `<table><thead><tr><th>Символ</th><th>Вид</th><th>Количество</th><th>Вход</th><th>Плаваща</th><th>Лив.</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">Няма отворени позиции в Binance Testnet</div>'}`;
             } else {
                 el.innerHTML = `<h3>Демо сметка — виртуална (paper)</h3>
