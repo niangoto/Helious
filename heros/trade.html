@@ -577,6 +577,21 @@
         loadBrokerKeys();
 
         // Проверка на връзката към Binance Testnet (демо).
+        // Кратко форматиране на балансите (спотът връща стотици активи — не ги изреждаме).
+        function fmtBalances(balances) {
+            const val = (b) => parseFloat(b.total != null ? b.total : ((b.free || 0) + (b.locked || 0))) || 0;
+            const list = (balances || []).filter(b => val(b) > 0);
+            if (!list.length) return '0 (захрани от faucet/Reset)';
+            const pref = ['USDT', 'USDC', 'FDUSD', 'BUSD', 'BTC', 'ETH', 'BNB', 'SOL'];
+            list.sort((a, b) => {
+                const pa = pref.indexOf(a.asset), pb = pref.indexOf(b.asset);
+                if (pa !== -1 || pb !== -1) return (pa === -1 ? 999 : pa) - (pb === -1 ? 999 : pb);
+                return val(b) - val(a);
+            });
+            const shown = list.slice(0, 6).map(b => b.asset + ' ' + fmt(val(b), 2)).join(' · ');
+            return shown + (list.length > 6 ? ' · +' + (list.length - 6) + ' актива' : '');
+        }
+
         async function testBroker() {
             saveBrokerKeys();
             const el = document.getElementById('brokerResult');
@@ -594,8 +609,7 @@
                     })
                 }).then(x => x.json());
                 if (r && r.ok) {
-                    const bals = (r.balances || []).map(b => b.asset + ' ' + (b.total != null ? b.total : (b.free || 0) + (b.locked || 0))).join(' · ');
-                    el.textContent = '✓ Връзката е OK (' + r.market + (r.canTrade ? ', търговия разрешена' : '') + ') — баланс: ' + (bals || '0 (захрани от faucet/Reset)');
+                    el.textContent = '✓ Връзката е OK (' + r.market + (r.canTrade ? ', търговия разрешена' : '') + ') — баланс: ' + fmtBalances(r.balances);
                     el.style.color = 'var(--accent-green)';
                 } else {
                     el.textContent = '✗ ' + ((r && r.error) || 'грешка') + (r && r.code ? ' (' + r.code + ')' : '');
@@ -653,8 +667,7 @@
                     el.textContent += ' · баланс ' + fmt(a.balance, 2) + ' ' + (a.currency || 'USDT') +
                         ' (' + (a.positions || []).length + ' отв. позиции)';
                 } else {
-                    const bals = (a.balances || []).map(b => b.asset + ' ' + fmt(b.free, 2)).join(' · ');
-                    el.textContent += ' · ' + (bals || 'празен баланс');
+                    el.textContent += ' · ' + fmtBalances(a.balances) + ' — спот (за стратегията трябват фючърси)';
                 }
             } catch (e) { /* ignore */ }
         }
