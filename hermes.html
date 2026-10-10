@@ -1617,9 +1617,7 @@
         // За бар, в който са засегнати и TP, и SL: обхожда 1м свещите в
         // прозореца [t, t+ivSec) по ред и връща кое ниво е първо. Ако една 1м
         // свещ покрие и двете → SL (песимистично). Няма ли 1м данни → SL.
-        // `effTp` = ефективното TP ниво (P + печалба/tpDist ≥ 1), не фиксираното.
-        async function resolveAmbiguousExit(symbol, candle, pos, ivSec, effTp) {
-            const tp = (effTp != null) ? effTp : pos.tp;
+        async function resolveAmbiguousExit(symbol, candle, pos, ivSec) {
             const from = candle.time, to = candle.time + ivSec;
             const key = symbol + '|' + from;
             let arr = oneMinCache.get(key);
@@ -1636,24 +1634,13 @@
                 if (m.time >= to) break;
                 if (pos.dir === 'BUY') {
                     if (m.low <= pos.sl) return { exitPrice: pos.sl, reason: 'SL' };
-                    if (m.high >= tp) return { exitPrice: tp, reason: 'TP' };
+                    if (m.high >= pos.tp) return { exitPrice: pos.tp, reason: 'TP' };
                 } else {
                     if (m.high >= pos.sl) return { exitPrice: pos.sl, reason: 'SL' };
-                    if (m.low <= tp) return { exitPrice: tp, reason: 'TP' };
+                    if (m.low <= pos.tp) return { exitPrice: pos.tp, reason: 'TP' };
                 }
             }
             return { exitPrice: pos.sl, reason: 'SL' };
-        }
-
-        // Ефективно TP ниво: P + (печалба/tpDist) ≥ 1  ⇔  цена ≥ вход + (1−P)·tpDist
-        // (за BUY; SELL — огледално). При P=0 е точно фиксираното TP, при по-висока
-        // обратна вероятност се прибира по-рано. P = вероятност за обратната посока.
-        function effectiveTp(pos, prob) {
-            if (!prob) return pos.tp;
-            const pOpp = (pos.dir === 'BUY' ? (prob.sellPct != null ? prob.sellPct : 100 - prob.buyPct) : (prob.buyPct != null ? prob.buyPct : 100 - prob.sellPct)) / 100;
-            const p = Math.max(0, Math.min(1, pOpp));
-            const tpDist = Math.abs(pos.tp - pos.entry);
-            return pos.dir === 'BUY' ? pos.entry + (1 - p) * tpDist : pos.entry - (1 - p) * tpDist;
         }
 
         function setProgress(pct, text) {
@@ -1812,19 +1799,16 @@
                     for (const pos of legs) {
                         const held = i - pos.openIdx;
                         let exitPrice = null, reason = null;
-                        // Ново TP условие: P + (печалба/tpDist) ≥ 1 → ефективно TP
-                        // ниво (по-близо до входа при по-висока обратна вероятност).
-                        const effTp = effectiveTp(pos, probs[i]);
                         // Кое ниво е засегнато в бара:
-                        const tpHit = pos.dir === 'BUY' ? (c.high >= effTp) : (c.low <= effTp);
+                        const tpHit = pos.dir === 'BUY' ? (c.high >= pos.tp) : (c.low <= pos.tp);
                         const slHit = !P.pctClose && (pos.dir === 'BUY' ? (c.low <= pos.sl) : (c.high >= pos.sl));
                         if (tpHit && slHit) {
                             // Бар с и TP, и SL → гледаме 1м кое е първо. Ако и на 1м
                             // е една свещ (или няма данни) → песимистично SL.
-                            const r = await resolveAmbiguousExit(currentSymbol, c, pos, ivSec, effTp);
+                            const r = await resolveAmbiguousExit(currentSymbol, c, pos, ivSec);
                             exitPrice = r.exitPrice; reason = r.reason;
                         } else if (tpHit) {
-                            exitPrice = effTp; reason = 'TP';
+                            exitPrice = pos.tp; reason = 'TP';
                         } else if (slHit) {
                             exitPrice = pos.sl; reason = 'SL';
                         }
