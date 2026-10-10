@@ -520,7 +520,9 @@ const server = http.createServer(async (req, res) => {
       res.end('Not found');
       return;
     }
-    res.writeHead(200, { 'Content-Type': mimeType(filePath) });
+    // Винаги ревалидирай статичните файлове — иначе браузърът може да сервира
+    // стар hermes.html/models.js и новите промени да не се виждат.
+    res.writeHead(200, { 'Content-Type': mimeType(filePath), 'Cache-Control': 'no-cache, no-store, must-revalidate' });
     res.end(data);
   });
 });
