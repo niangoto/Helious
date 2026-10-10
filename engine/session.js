@@ -156,25 +156,40 @@ class PaperSession {
     return m;
   }
 
-  // 1м first-touch за бар, покрил и TP, и SL (както в HERMES).
-  async resolve1m(symbol, barTime, ivSec, pos) {
+  // 1м first-touch за бар, покрил и TP, и SL (както в HERMES). `effTp` =
+  // ефективното TP ниво (P + печалба/tpDist ≥ 1), не фиксираното.
+  async resolve1m(symbol, barTime, ivSec, pos, effTp) {
+    const tp = (effTp != null) ? effTp : pos.tp;
     const need = Math.ceil((nowSec() - barTime) / 60) + Math.ceil(ivSec / 60) + 5;
     if (!(need > 0)) return { exitPrice: pos.sl, reason: 'SL' };
     let arr = [];
-    try { const r = await dp.fetchData(symbol, '1m', Math.min(need, 40000)); arr = (r && r.candles) || []; } catch (e) { arr = []; }
+    try { const r = await dp.fetchData(symbol, '1m', Math.min(need, 40000), { from: barTime - 120, to: barTime + ivSec + 120 }); arr = (r && r.candles) || []; } catch (e) { arr = []; }
     const from = barTime, to = barTime + ivSec;
     for (const m of arr) {
       if (m.time < from) continue;
       if (m.time >= to) break;
       if (pos.dir === 'BUY') {
         if (m.low <= pos.sl) return { exitPrice: pos.sl, reason: 'SL' };
-        if (m.high >= pos.tp) return { exitPrice: pos.tp, reason: 'TP' };
+        if (m.high >= tp) return { exitPrice: tp, reason: 'TP' };
       } else {
         if (m.high >= pos.sl) return { exitPrice: pos.sl, reason: 'SL' };
-        if (m.low <= pos.tp) return { exitPrice: pos.tp, reason: 'TP' };
+        if (m.low <= tp) return { exitPrice: tp, reason: 'TP' };
       }
     }
     return { exitPrice: pos.sl, reason: 'SL' };   // няма 1м данни → песимистично
+  }
+
+  // Ефективно TP ниво: P + (печалба/tpDist) ≥ 1  ⇔  цена ≥ вход + (1−P)·tpDist
+  // (BUY; SELL — огледално). При P=0 → фиксираното TP; по-висока обратна
+  // вероятност → прибира по-рано.
+  effectiveTp(pos, prob) {
+    if (!prob) return pos.tp;
+    const pOpp = (pos.dir === 'BUY'
+      ? (prob.sellPct != null ? prob.sellPct : 100 - prob.buyPct)
+      : (prob.buyPct != null ? prob.buyPct : 100 - prob.sellPct)) / 100;
+    const p = Math.max(0, Math.min(1, pOpp));
+    const tpDist = Math.abs(pos.tp - pos.entry);
+    return pos.dir === 'BUY' ? pos.entry + (1 - p) * tpDist : pos.entry - (1 - p) * tpDist;
   }
 
   async tick() {
@@ -212,41 +227,47 @@ class PaperSession {
     const fxr = fx.eurRateForSymbol(symbol);
     const spec = specFor(symbol);
 
-    // 1) Изход на отворена позиция
+    // 1) Вероятност за текущия момент — веднъж на tick (за изход и вход).
+    let prob = null;
+    if (arr.length >= 30) {
+      try {
+        const probs = models.computeModelProbSeriesLive(arr, this.model, { invert: this.contra }, WINDOW);
+        prob = probs[probs.length - 1] || null;
+      } catch (e) { prob = null; }
+    }
+
+    // 2) Изход на отворена позиция
     const pos = this.getPosition(symbol);
     if (pos) {
       let exitPrice = null, reason = null;
       const sameBar = (bar.time === pos.openBarTime);
+      // Ново TP условие: P + (печалба/tpDist) ≥ 1 → ефективно TP ниво.
+      const effTp = sameBar ? pos.tp : this.effectiveTp(pos, prob);
       if (sameBar) {
         // В бара на отваряне ползваме само текущата цена (без pre-entry екстремуми).
         if (pos.dir === 'BUY') {
-          if (bar.close >= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
+          if (bar.close >= effTp) { exitPrice = effTp; reason = 'TP'; }
           else if (bar.close <= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
         } else {
-          if (bar.close <= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
+          if (bar.close <= effTp) { exitPrice = effTp; reason = 'TP'; }
           else if (bar.close >= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
         }
       } else {
-        const tpHit = pos.dir === 'BUY' ? (bar.high >= pos.tp) : (bar.low <= pos.tp);
+        const tpHit = pos.dir === 'BUY' ? (bar.high >= effTp) : (bar.low <= effTp);
         const slHit = pos.dir === 'BUY' ? (bar.low <= pos.sl) : (bar.high >= pos.sl);
         if (tpHit && slHit) {
-          const r = await this.resolve1m(symbol, bar.time, iv, pos);
+          const r = await this.resolve1m(symbol, bar.time, iv, pos, effTp);
           exitPrice = r.exitPrice; reason = r.reason;
-        } else if (tpHit) { exitPrice = pos.tp; reason = 'TP'; }
+        } else if (tpHit) { exitPrice = effTp; reason = 'TP'; }
         else if (slHit) { exitPrice = pos.sl; reason = 'SL'; }
       }
-      if (exitPrice === null && this.isLive) {
-        // Процентно затваряне при live (моделна вероятност срещу позицията).
-        const probs = models.computeModelProbSeriesLive(arr, this.model, { invert: this.contra }, WINDOW);
-        const pr = probs[probs.length - 1];
-        if (pr && this.P.pctClose) {
-          const pOpp = (pos.dir === 'BUY' ? pr.sellPct : pr.buyPct) / 100;
-          const floatPnl = floatingPnl(pos, bar.close);
-          const loss = Math.max(0, -floatPnl);
-          const slLoss = Math.abs(pos.entry - pos.sl) * pos.units * (pos.fx || 1);
-          const limit = (this.P.pctCloseLimit > 0) ? this.P.pctCloseLimit : slLoss;
-          if (pOpp * loss >= limit - 1e-9) { exitPrice = bar.close; reason = 'Процентно'; }
-        }
+      if (exitPrice === null && this.P.pctClose && prob) {
+        const pOpp = (pos.dir === 'BUY' ? prob.sellPct : prob.buyPct) / 100;
+        const floatPnl = floatingPnl(pos, bar.close);
+        const loss = Math.max(0, -floatPnl);
+        const slLoss = Math.abs(pos.entry - pos.sl) * pos.units * (pos.fx || 1);
+        const limit = (this.P.pctCloseLimit > 0) ? this.P.pctCloseLimit : slLoss;
+        if (pOpp * loss >= limit - 1e-9) { exitPrice = bar.close; reason = 'Процентно'; }
       }
       if (exitPrice === null) {
         const held = Math.max(0, Math.round((bar.time - pos.openTime) / iv));
@@ -255,12 +276,9 @@ class PaperSession {
       if (exitPrice !== null) await this.closePosition(symbol, exitPrice, reason, bar.time);
     }
 
-    // 2) Вход (само running, без позиция, пазар отворен)
+    // 3) Вход (само running, без позиция, пазар отворен)
     if (this.status !== 'running' || this.getPosition(symbol)) return;
     if (!marketOpen(symbol, bar.time)) return;
-    if (arr.length < 30) return;
-    const probs = models.computeModelProbSeriesLive(arr, this.model, { invert: this.contra }, WINDOW);
-    const prob = probs[probs.length - 1];
     if (!prob || !prob.buyPct) return;
     this.state[symbol].prob = prob.buyPct; this.state[symbol].probTime = bar.time;
     const atrArr = models.computeATR(arr, 14);

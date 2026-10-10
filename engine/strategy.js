@@ -132,17 +132,31 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn) {
 
 // Решение за изход за текущата свещ (TP/SL/време), или null.
 // heldBars = брой изминали свещи от отварянето до тази свещ.
-function exitDecision(pos, candle, heldBars, P) {
+// prob (опц.) = текущата вероятност {buyPct,sellPct}; тогава TP нивото е
+// ефективното: P + (печалба/tpDist) ≥ 1 → по-близо до входа при висока обратна
+// вероятност (същото като в HERMES).
+function effectiveTp(pos, prob) {
+  if (!prob) return pos.tp;
+  const pOpp = (pos.dir === 'BUY'
+    ? (prob.sellPct != null ? prob.sellPct : 100 - prob.buyPct)
+    : (prob.buyPct != null ? prob.buyPct : 100 - prob.sellPct)) / 100;
+  const p = Math.max(0, Math.min(1, pOpp));
+  const tpDist = Math.abs(pos.tp - pos.entry);
+  return pos.dir === 'BUY' ? pos.entry + (1 - p) * tpDist : pos.entry - (1 - p) * tpDist;
+}
+
+function exitDecision(pos, candle, heldBars, P, prob) {
   const held = heldBars;
+  const tp = effectiveTp(pos, prob);
   let exitPrice = null, reason = null;
   // Песимистично: ако барът покрие и TP, и SL, приемаме SL.
   if (pos.dir === 'BUY') {
     if (candle.low <= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
-    else if (candle.high >= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
+    else if (candle.high >= tp) { exitPrice = tp; reason = 'TP'; }
     else if (held >= P.holdBars) { exitPrice = candle.close; reason = 'Време'; }
   } else {
     if (candle.high >= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
-    else if (candle.low <= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
+    else if (candle.low <= tp) { exitPrice = tp; reason = 'TP'; }
     else if (held >= P.holdBars) { exitPrice = candle.close; reason = 'Време'; }
   }
   if (exitPrice === null) return null;
@@ -176,4 +190,4 @@ function marketOpen(symbol, timeSec) {
   return day !== 0 && day !== 6;
 }
 
-module.exports = { normalizeParams, entryDecision, exitDecision, floatingPnl, isCrypto, marketOpen };
+module.exports = { normalizeParams, entryDecision, exitDecision, effectiveTp, floatingPnl, isCrypto, marketOpen };
