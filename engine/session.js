@@ -179,18 +179,17 @@ class PaperSession {
     return { exitPrice: pos.sl, reason: 'SL' };   // няма 1м данни → песимистично
   }
 
-  // Ново TP условие: цената е достигнала фиксираното TP И обратната вероятност
-  // надхвърля 1/2 от прага за отваряне на обратната посока (реалният P_min:
-  // 50 + (заложен праг − 50)/α). Потвърдено от потребителя като И-условие.
-  tpProbCondition(pos, prob) {
-    if (!prob) return false;
+  // Ефективно TP ниво: P + (печалба/tpDist) ≥ 1  ⇔  цена ≥ вход + (1−P)·tpDist
+  // (BUY; SELL — огледално). При P=0 → фиксираното TP; по-висока обратна
+  // вероятност → прибира по-рано.
+  effectiveTp(pos, prob) {
+    if (!prob) return pos.tp;
     const pOpp = (pos.dir === 'BUY'
       ? (prob.sellPct != null ? prob.sellPct : 100 - prob.buyPct)
-      : (prob.buyPct != null ? prob.buyPct : 100 - prob.sellPct));
-    const alpha = this.P.alpha || 1;
-    const th = (pos.dir === 'BUY') ? this.P.sellTh : this.P.buyTh;
-    const openTh = 50 + ((th == null ? 75 : th) - 50) / alpha;
-    return pOpp > openTh / 2;
+      : (prob.buyPct != null ? prob.buyPct : 100 - prob.sellPct)) / 100;
+    const p = Math.max(0, Math.min(1, pOpp));
+    const tpDist = Math.abs(pos.tp - pos.entry);
+    return pos.dir === 'BUY' ? pos.entry + (1 - p) * tpDist : pos.entry - (1 - p) * tpDist;
   }
 
   async tick() {
@@ -242,24 +241,24 @@ class PaperSession {
     if (pos) {
       let exitPrice = null, reason = null;
       const sameBar = (bar.time === pos.openBarTime);
-      const tpCond = this.tpProbCondition(pos, prob);
+      // Ново TP условие: P + (печалба/tpDist) ≥ 1 → ефективно TP ниво.
+      const effTp = sameBar ? pos.tp : this.effectiveTp(pos, prob);
       if (sameBar) {
         // В бара на отваряне ползваме само текущата цена (без pre-entry екстремуми).
         if (pos.dir === 'BUY') {
-          if (tpCond && bar.close >= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
+          if (bar.close >= effTp) { exitPrice = effTp; reason = 'TP'; }
           else if (bar.close <= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
         } else {
-          if (tpCond && bar.close <= pos.tp) { exitPrice = pos.tp; reason = 'TP'; }
+          if (bar.close <= effTp) { exitPrice = effTp; reason = 'TP'; }
           else if (bar.close >= pos.sl) { exitPrice = pos.sl; reason = 'SL'; }
         }
       } else {
-        const priceTp = pos.dir === 'BUY' ? (bar.high >= pos.tp) : (bar.low <= pos.tp);
-        const tpHit = priceTp && tpCond;
+        const tpHit = pos.dir === 'BUY' ? (bar.high >= effTp) : (bar.low <= effTp);
         const slHit = pos.dir === 'BUY' ? (bar.low <= pos.sl) : (bar.high >= pos.sl);
         if (tpHit && slHit) {
-          const r = await this.resolve1m(symbol, bar.time, iv, pos, pos.tp);
+          const r = await this.resolve1m(symbol, bar.time, iv, pos, effTp);
           exitPrice = r.exitPrice; reason = r.reason;
-        } else if (tpHit) { exitPrice = pos.tp; reason = 'TP'; }
+        } else if (tpHit) { exitPrice = effTp; reason = 'TP'; }
         else if (slHit) { exitPrice = pos.sl; reason = 'SL'; }
       }
       if (exitPrice === null && this.P.pctClose && prob) {
