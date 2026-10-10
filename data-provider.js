@@ -142,16 +142,17 @@ function searchSymbols(query) {
 // Извличане на свещи от Binance с пейджинг: Binance връща най-много 1000
 // свещи на заявка, затова при по-голям limit се теглят по-стари пакети
 // (endTime) докато не се съберат исканите свещи или свърши историята.
-async function fetchBinanceKlines(symbol, interval, limit, spot) {
+async function fetchBinanceKlines(symbol, interval, limit, spot, startSec, endSec) {
   const base = spot ? 'https://api.binance.com/api/v3/klines' : 'https://fapi.binance.com/fapi/v1/klines';
   const batchSize = 1000;
   const batches = [];
-  let endTime;
+  let endTime = endSec ? endSec * 1000 : undefined;
   let fetched = 0;
   limit = Math.max(limit || 1000, 1);
   while (fetched < limit) {
     const want = Math.min(batchSize, limit - fetched);
     let url = `${base}?symbol=${symbol}&interval=${interval}&limit=${want}`;
+    if (startSec) url += `&startTime=${startSec * 1000}`;
     if (endTime) url += `&endTime=${endTime}`;
     let batch;
     try {
@@ -167,6 +168,7 @@ async function fetchBinanceKlines(symbol, interval, limit, spot) {
     }));
     batches.push(data);
     fetched += data.length;
+    if (startSec && data[0].time <= startSec) break;   // стигнахме началото
     endTime = data[0].time * 1000 - 1;
     if (data.length < want) break;
   }
@@ -316,12 +318,20 @@ async function tdFetchPage(baseUrl, endDate) {
   return parsed.values || [];
 }
 
-async function fetchTwelvedata(symbol, interval, limit) {
+// Формат на дата/час за TwelveData `start_date`/`end_date` (UTC).
+function tdDateTime(sec) {
+  const d = new Date(sec * 1000);
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
+}
+
+async function fetchTwelvedata(symbol, interval, limit, startSec, endSec) {
   const want = Math.max(parseInt(limit, 10) || 500, 1);
   const maxAvailable = TD_PAGE * TD_MAX_PAGES;
-  const cacheKey = 'td_' + symbol + '_' + interval;
+  const ranged = !!(startSec || endSec);
+  const cacheKey = 'td_' + symbol + '_' + interval + (ranged ? ('_' + (startSec || '') + '_' + (endSec || '')) : '');
   const cached = tdCache[cacheKey];
-  if (cached && Date.now() - cached.time < 300000 && cached.data.length >= Math.min(want, maxAvailable)) {
+  if (!ranged && cached && Date.now() - cached.time < 300000 && cached.data.length >= Math.min(want, maxAvailable)) {
     return cached.data;
   }
   // TwelveData приема само: 1min, 5min, 15min, 30min, 1h, 2h, 4h, 6h, 8h, 12h, 1day, 3month.
@@ -357,7 +367,7 @@ async function fetchTwelvedata(symbol, interval, limit) {
     for (const base of bases) {
       try {
         const byTime = new Map();
-        let endDate = null;
+        let endDate = endSec ? tdDateTime(endSec) : null;
         let pages = 0;
         while (byTime.size < want && pages < TD_MAX_PAGES) {
           pages++;
@@ -373,9 +383,11 @@ async function fetchTwelvedata(symbol, interval, limit) {
             }
           }
           const oldest = values[values.length - 1].datetime;
-          if (endDate && oldest >= endDate) break;   // няма напредък във времето
+          const oldestSec = Math.floor(new Date(oldest).getTime() / 1000);
+          if (startSec && oldestSec <= startSec) break;   // стигнахме началото
+          if (endDate && oldest >= endDate) break;         // няма напредък във времето
           endDate = oldest;
-          if (values.length < TD_PAGE) break;        // стигнали сме началото на историята
+          if (values.length < TD_PAGE) break;              // стигнали сме началото на историята
         }
         if (byTime.size === 0) continue;
         const data = [...byTime.values()].sort((a, b) => a.time - b.time);
@@ -396,11 +408,14 @@ async function fetchTwelvedata(symbol, interval, limit) {
 const failCache = {};
 const FAIL_TTL = 60000; // 1 минута (транзиентните грешки да се възстановяват бързо)
 
-async function fetchData(symbol, interval, limit) {
+async function fetchData(symbol, interval, limit, opts) {
+  const sFrom = (opts && opts.from) ? opts.from : null;
+  const sTo = (opts && opts.to) ? opts.to : null;
+  // При поискан времеви диапазон не ползваме негативния кеш (той е за „няма данни“).
   const canonical = resolveSymbol(symbol);
   const cacheKey = canonical + '_' + interval;
   const failed = failCache[cacheKey];
-  if (failed && Date.now() - failed.time < FAIL_TTL) {
+  if (!sFrom && !sTo && failed && Date.now() - failed.time < FAIL_TTL) {
     throw { message: `Няма данни за ${canonical} (кеширана грешка)`, errors: failed.errors };
   }
   const sources = getSources(symbol);
@@ -420,11 +435,11 @@ async function fetchData(symbol, interval, limit) {
       }
       if (provider === 'twelvedata') {
         if (!KEYS.twelvedata) throw new Error('TwelveData key not set; use TWELVEDATA_KEY env var');
-        const data = await fetchTwelvedata(sym, interval, limit);
+        const data = await fetchTwelvedata(sym, interval, limit, sFrom, sTo);
         if (data.length > 10) return { symbol: canonical, interval, candles: data, source: 'twelvedata:' + sym };
       }
       if (provider === 'binance') {
-        const data = await fetchBinanceKlines(sym, interval, limit);
+        const data = await fetchBinanceKlines(sym, interval, limit, false, sFrom, sTo);
         if (data.length > 10) return { symbol: canonical, interval, candles: data, source: 'binance:' + sym };
       }
       if (provider === 'mt5') {
@@ -440,7 +455,7 @@ async function fetchData(symbol, interval, limit) {
   // Try Binance Spot as last resort for crypto
   if (!symbol.includes('USDT')) {
     try {
-      const data = await fetchBinanceKlines(symbol, interval, limit, true);
+      const data = await fetchBinanceKlines(symbol, interval, limit, true, sFrom, sTo);
       if (data.length > 10) return { symbol: canonical, interval, candles: data, source: 'binance:' + symbol };
     } catch (e) { errors.push(`binance:${symbol}: ${e.message}`); }
   }
@@ -506,22 +521,31 @@ function log(level, msg, data) {
 async function handleDataRequest(urlParams) {
   const symbol = (urlParams.get('symbol') || 'BTCUSDT').toUpperCase();
   const interval = urlParams.get('interval') || '1m';
-  const limit = parseInt(urlParams.get('limit')) || 500;
+  let limit = parseInt(urlParams.get('limit')) || 500;
+  const from = parseInt(urlParams.get('from'), 10) || null;
+  const to = parseInt(urlParams.get('to'), 10) || null;
 
-  log('INFO', `Fetching ${symbol} @ ${interval}`);
+  // Диапазон [from, to] (unix сек) — теглим само този прозорец (напр. 1м за
+  // конкретен бар), вместо „от сега назад N свещи“.
+  const IV = { '1m':60,'5m':300,'15m':900,'30m':1800,'1h':3600,'2h':7200,'4h':14400,'6h':21600,'8h':28800,'12h':43200,'1d':86400 };
+  if (from && to && to > from) limit = Math.min(50000, Math.ceil((to - from) / (IV[interval] || 60)) + 10);
+
+  log('INFO', `Fetching ${symbol} @ ${interval}${from && to ? ' [' + from + '..' + to + ']' : ''}`);
 
   try {
-    const result = await fetchData(symbol, interval, limit);
-    const sliced = result.candles.slice(-limit);
+    const result = await fetchData(symbol, interval, limit, { from, to });
+    const candles = (from && to)
+      ? result.candles.filter(c => c.time >= from && c.time <= to)
+      : result.candles.slice(-limit);
 
-    log('OK', `${symbol}: ${sliced.length} candles from ${result.source}`);
+    log('OK', `${symbol}: ${candles.length} candles from ${result.source}`);
 
     return {
       ok: true,
       symbol: result.symbol,
       interval: result.interval,
       source: result.source,
-      candles: sliced
+      candles
     };
   } catch (e) {
     log('ERROR', `${symbol}: ${e.message}`, e.errors);

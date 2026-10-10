@@ -1597,20 +1597,21 @@
         }
 
         // ─── 1м разрез на бар (за same-bar TP+SL) ───────────────────────
-        // Кеш на 1м свещите за текущата симулация (по символ). Тегли се лениво —
-        // само когато някой бар покрие и TP, и SL.
-        let oneMin = { symbol: null, candles: [], limit: 0 };
-        function resetOneMinCache() { oneMin = { symbol: null, candles: [], limit: 0 }; }
+        // Тегли само 1м свещите в точния прозорец на бара чрез from/to (малко и
+        // бързо), вместо „от сега назад“ (което при стар бар е хиляди свещи и
+        // блокира възпроизвеждането). Кешира по символ+начало на бара.
+        const oneMinCache = new Map();
+        function resetOneMinCache() { oneMinCache.clear(); }
 
-        async function getOneMinSeries(symbol, needLimit) {
-            if (oneMin.symbol === symbol && oneMin.limit >= needLimit) return oneMin.candles;
-            const prev = (oneMin.symbol === symbol) ? oneMin.limit : 0;
-            const limit = Math.min(MAX_FETCH, Math.max(needLimit, prev));
-            let arr = [];
-            try { arr = await fetchCandles(symbol, '1m', limit); } catch (e) { arr = []; }
-            arr = (arr || []).slice().sort((a, b) => a.time - b.time);
-            oneMin = { symbol, candles: arr, limit };
-            return arr;
+        async function fetchCandlesRange(symbol, interval, fromSec, toSec) {
+            try {
+                const url = `/data?symbol=${encodeURIComponent(symbol)}&interval=${encodeURIComponent(interval)}&from=${Math.floor(fromSec)}&to=${Math.ceil(toSec)}`;
+                const resp = await fetch(url).then(r => r.json());
+                if (!resp || !resp.ok || !Array.isArray(resp.candles)) return [];
+                return resp.candles.map(c => ({
+                    time: timeToLocal(c.time), open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume
+                }));
+            } catch (e) { return []; }
         }
 
         // За бар, в който са засегнати и TP, и SL: обхожда 1м свещите в
@@ -1618,11 +1619,15 @@
         // свещ покрие и двете → SL (песимистично). Няма ли 1м данни → SL.
         async function resolveAmbiguousExit(symbol, candle, pos, ivSec) {
             const from = candle.time, to = candle.time + ivSec;
-            const nowLocal = timeToLocal(Math.floor(Date.now() / 1000));
-            const need = Math.ceil((nowLocal - from) / 60) + Math.ceil(ivSec / 60) + 5;
-            if (!(need > 0) || need > MAX_FETCH) return { exitPrice: pos.sl, reason: 'SL' };
-            let arr;
-            try { arr = await getOneMinSeries(symbol, need); } catch (e) { arr = null; }
+            const key = symbol + '|' + from;
+            let arr = oneMinCache.get(key);
+            if (!arr) {
+                // Локалното време → реално (UTC): off = локално − UTC.
+                const off = timeToLocal(Math.floor(Date.now() / 1000)) - Math.floor(Date.now() / 1000);
+                arr = await fetchCandlesRange(symbol, '1m', from - off - 180, to - off + 180);
+                arr = (arr || []).slice().sort((a, b) => a.time - b.time);
+                oneMinCache.set(key, arr);
+            }
             if (!arr || !arr.length) return { exitPrice: pos.sl, reason: 'SL' };
             for (const m of arr) {
                 if (m.time < from) continue;
