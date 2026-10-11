@@ -222,8 +222,11 @@ class PaperSession {
         const probs = models.computeModelProbSeriesLive(arr, this.model, { invert: this.contra, intervalSec: IV_SEC[this.interval] }, WINDOW);
         prob = probs[probs.length - 1] || null;
       } catch (e) { prob = null; }
-      const scaler = this.probScalers[symbol] || (this.probScalers[symbol] = models.createProbScaler());
-      if (prob) prob = scaler.scale(prob);
+      // Адаптивно мащабиране — само за модели 6 (Фурие) и 7 (RSI).
+      if (prob && (this.model === 6 || this.model === 7)) {
+        const scaler = this.probScalers[symbol] || (this.probScalers[symbol] = models.createProbScaler());
+        prob = scaler.scale(prob);
+      }
     }
 
     // 1) Изход на отворена позиция

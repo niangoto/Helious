@@ -1792,12 +1792,13 @@
             simBudget = P.budget;
             simI0 = i0;
             equityPct = new Array(n).fill(null);
-            // Адаптивно мащабиране на вероятностите (за всички модели).
-            const probScaler = (typeof createProbScaler === 'function') ? createProbScaler() : { scale: p => p, onClose: () => {} };
+            // Адаптивно мащабиране на вероятностите — само за новите модели 6 (Фурие) и 7 (RSI).
+            const SCALE_MODEL = (currentModel === 6 || currentModel === 7);
+            const probScaler = (SCALE_MODEL && typeof createProbScaler === 'function') ? createProbScaler() : { scale: p => p, onClose: () => {} };
 
             for (let i = i0; i < n; i++) {
                 if (cancelFlag) return;
-                const prScaled = probScaler.scale(probs[i]);
+                const prScaled = SCALE_MODEL ? probScaler.scale(probs[i]) : probs[i];
 
                 if (legs.length) {
                     const c = candles[i];

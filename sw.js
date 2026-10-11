@@ -1,4 +1,4 @@
-const CACHE = 'helious-v29';
+const CACHE = 'helious-v31';
 const URLS = [
     '/index.html',
     '/manifest.json',
@@ -39,14 +39,23 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
-  // Network-first for index.html, cache-first for static assets
-  if (e.request.url.includes('index.html')) {
-    e.respondWith(
-      fetch(e.request).catch(() => caches.match(e.request))
-    );
-    return;
-  }
+  const req = e.request;
+  if (req.method !== 'GET') return;
+  // Network-first за всичко (за да не сервираме стари JS/HTML), с кеш само
+  // като offline fallback.
   e.respondWith(
-    caches.match(e.request).then(r => r || fetch(e.request))
+    fetch(req).then(res => {
+      try {
+        if (res && res.ok && new URL(req.url).origin === self.location.origin) {
+          const copy = res.clone();
+          caches.open(CACHE).then(c => c.put(req, copy)).catch(() => {});
+        }
+      } catch (err) { /* ignore */ }
+      return res;
+    }).catch(() =>
+      caches.match(req).then(r => r || new Response('Офлайн — опитай отново.', {
+        status: 503, headers: { 'Content-Type': 'text/plain; charset=utf-8' }
+      }))
+    )
   );
 });
