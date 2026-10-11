@@ -219,7 +219,7 @@ class PaperSession {
     let prob = null;
     if (arr.length >= 30) {
       try {
-        const probs = models.computeModelProbSeriesLive(arr, this.model, { invert: this.contra }, WINDOW);
+        const probs = models.computeModelProbSeriesLive(arr, this.model, { invert: this.contra, intervalSec: IV_SEC[this.interval] }, WINDOW);
         prob = probs[probs.length - 1] || null;
       } catch (e) { prob = null; }
       const scaler = this.probScalers[symbol] || (this.probScalers[symbol] = models.createProbScaler());

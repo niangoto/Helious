@@ -2178,7 +2178,7 @@
                 setProgress(10, `Изчисляване на вероятностите (прозоречно, ${simCandles.length} свещи)...`);
                 await sleep(30);
                 const probs = (typeof computeModelProbSeriesLive === 'function')
-                    ? computeModelProbSeriesLive(simCandles, currentModel, { invert: contraFlags() }, 2000)
+                    ? computeModelProbSeriesLive(simCandles, currentModel, { invert: contraFlags(), intervalSec: intervalSecs(interval) }, 2000)
                     : computeModelProbSeries(simCandles, currentModel, { invert: contraFlags() });
                 if (cancelFlag) return;
 

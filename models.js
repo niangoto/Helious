@@ -377,6 +377,30 @@ function computeRSIProbability(candles) {
   return { buyPct, sellPct: 100 - buyPct };
 }
 
+// Стандартни таймфреймове (сек) за RSI модела (1м,5м,15м,30м,1ч,4ч,1д,7д).
+const RSI_TIMEFRAMES = [60, 300, 900, 1800, 3600, 14400, 86400, 604800];
+
+// buyPct серия за RSI на по-висок таймфрейм, получен чрез групиране на k
+// последователни входни свещи (k = tf / избран интервал). За всеки бар b се
+// взима RSI(14) на последния ЗАВЪРШЕН висок таймфрейм бар. k<=1 → RSI направо.
+function rsiBuySeriesForTf(candles, k) {
+  const n = candles.length;
+  const out = new Array(n).fill(50);
+  if (k <= 1) {
+    const rsiV = computeRSI(candles, 14);
+    for (let i = 0; i < n; i++) out[i] = 100 - rsiAt(rsiV, i, 14);
+    return out;
+  }
+  const gc = [];
+  for (let i = k - 1; i < n; i += k) gc.push(candles[i].close);
+  const grsi = computeRSI(gc.map(c => ({ close: c })), 14);
+  for (let b = 0; b < n; b++) {
+    const g = Math.floor((b - (k - 1)) / k);
+    out[b] = (g < 0) ? 50 : (100 - rsiAt(grsi, g, 14));
+  }
+  return out;
+}
+
 // Плъзгаща FFT вероятност за всяка свещ (за probability canvas).
 // Кешира се по хеш на свещите (както statsCache) — преизчислява се само при смяна.
 let fourierSeqCache = { hash: 0, data: null };
@@ -635,6 +659,20 @@ function computeModelProbCore(candles, modelIndex, opts) {
   const meanVolV = rollingMean(volV, LOGISTIC_LOOKBACK);
   const maxBars = Math.min(50, n);
 
+  // RSI модел: усредняваме buyPct само за таймфреймове >= избрания период за
+  // свещ (по-големи или равни). Ресемплираме входните свещи (k = tf/интервал).
+  let rsiTfSeries = null;
+  if (modelIndex === 7) {
+    const iv = (opts && opts.intervalSec) || 0;
+    rsiTfSeries = [];
+    for (const tf of RSI_TIMEFRAMES) {
+      if (iv > 0 && tf < iv) continue;            // само >= избрания период
+      const k = iv > 0 ? Math.max(1, Math.round(tf / iv)) : 1;
+      rsiTfSeries.push(rsiBuySeriesForTf(candles, k));
+    }
+    if (!rsiTfSeries.length) rsiTfSeries = null;
+  }
+
   // Pre-resolve every historical trade outcome and bucket by resolution index.
   const entries = new Array(n).fill(null);
   const resolvedAt = new Array(n).fill(null).map(() => []);
@@ -738,9 +776,15 @@ function computeModelProbCore(candles, modelIndex, opts) {
       const f = computeFourierProbability(candles.slice(win, i + 1));
       val = f.buyPct;
     } else if (modelIndex === 7) {
-      // RSI анализ: RSI > 50 (overbought) → sell; < 50 (oversold) → buy.
-      // buyPct = 100 − RSI (0 = 100% sell, 100 = 100% buy).
-      val = 100 - rsiAt(rsiV, i, 14);
+      // RSI анализ: усреднено buyPct само за таймфреймове >= избрания период
+      // за свещ (по-големи или равни). 0 = 100% sell, 100 = 100% buy.
+      if (rsiTfSeries && rsiTfSeries.length) {
+        let sum = 0, cnt = 0;
+        for (const s of rsiTfSeries) { const v = s[i]; if (v != null) { sum += v; cnt++; } }
+        val = cnt ? sum / cnt : 50;
+      } else {
+        val = 100 - rsiAt(rsiV, i, 14);
+      }
     }
     result[i] = noClamp ? val : Math.max(1, Math.min(99, val));
   }
