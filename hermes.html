@@ -2165,15 +2165,12 @@
                 showRealInterval(simCandles, interval);
                 setProgress(10, `Изчисляване на вероятностите по модела (${simCandles.length} свещи)...`);
                 await sleep(30);
-                // Точното „живо" изчисление (моделът вижда само последните 1000 свещи)
-                // е ~100× по-бавно за дълги серии (18 000 бара ≈ 20 s → замразява
-                // браузъра и графиката не се показва). Затова го ползваме само за
-                // кратки серии (≤2000 бара, където е бързо), а за дълги — бързото
-                // причинно изчисление върху цялата история.
-                const LIVE_LIMIT = 2600;
-                const probs = (typeof computeModelProbSeriesLive === 'function' && simCandles.length <= LIVE_LIMIT)
-                    ? computeModelProbSeriesLive(simCandles, currentModel, { invert: contraFlags() }, 2000)
-                    : computeModelProbSeries(simCandles, currentModel, { invert: contraFlags() });
+                // ЕДНООБРАЗНО изчисление независимо от дължината на периода: всеки
+                // модел вече има ФИКСИРАН прозорец назад („Логистична“ 500, другите
+                // 2000), затова пълното причинно изчисление дава ЕДНАКВИ стойности
+                // за даден бар независимо колко е дълъг периодът (няма превключване
+                // на метод/праг, което да променя резултата според дължината).
+                const probs = computeModelProbSeries(simCandles, currentModel, { invert: contraFlags() });
                 if (cancelFlag) return;
 
                 const atrSeries = computeATR(simCandles, 14);
