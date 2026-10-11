@@ -2150,10 +2150,13 @@
                 showRealInterval(simCandles, interval);
                 setProgress(10, `Изчисляване на вероятностите по модела (${simCandles.length} свещи)...`);
                 await sleep(30);
-                // „Живото" изчисление: на всеки бар моделът вижда само последните
-                // 1000 свещи (както реалния paper двигател) — иначе при дълги серии
-                // моделът ползва цялата история и дава различни вероятности.
-                const probs = (typeof computeModelProbSeriesLive === 'function')
+                // Точното „живо" изчисление (моделът вижда само последните 1000 свещи)
+                // е ~100× по-бавно за дълги серии (18 000 бара ≈ 20 s → замразява
+                // браузъра и графиката не се показва). Затова го ползваме само за
+                // кратки серии (≤2000 бара, където е бързо), а за дълги — бързото
+                // причинно изчисление върху цялата история.
+                const LIVE_LIMIT = 2000;
+                const probs = (typeof computeModelProbSeriesLive === 'function' && simCandles.length <= LIVE_LIMIT)
                     ? computeModelProbSeriesLive(simCandles, currentModel, { invert: contraFlags() }, 1000)
                     : computeModelProbSeries(simCandles, currentModel, { invert: contraFlags() });
                 if (cancelFlag) return;
