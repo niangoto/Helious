@@ -186,6 +186,12 @@
             color: var(--accent-cyan);
         }
 
+        .btn.active {
+            border-color: var(--accent-cyan);
+            color: var(--accent-cyan);
+            box-shadow: 0 0 10px rgba(0, 240, 255, 0.35);
+        }
+
         .btn.start {
             background: linear-gradient(135deg, rgba(0, 240, 255, 0.2), rgba(138, 43, 226, 0.2));
             border-color: var(--accent-cyan);
@@ -853,9 +859,19 @@
         <div class="hdr-actions">
             <button class="btn start" id="btnStart" onclick="runSimulation()">▶ Стартирай</button>
             <button class="btn stop" id="btnStop" onclick="stopSimulation()">■ Стоп</button>
+            <button class="btn" id="btnSweep" onclick="toggleSweepPick()" title="Анализ на чувствителността: цъкни бутона, после цъкни върху настройка">📈 Чувствителност</button>
             <button class="btn close" onclick="window.close()">✕</button>
         </div>
     </header>
+
+    <div id="sweepPanel" style="display:none; position:fixed; right:12px; bottom:12px; width:470px; max-width:96vw; background:#0b0f18; border:1px solid var(--panel-border); border-radius:10px; padding:8px 10px; z-index:9999; box-shadow:0 10px 34px rgba(0,0,0,0.55)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <b id="sweepTitle" style="font-size:12px">Анализ на чувствителността</b>
+            <button class="btn close" onclick="closeSweepPanel()" style="padding:2px 8px">✕</button>
+        </div>
+        <canvas id="sweepCanvas" width="450" height="240" style="width:100%;height:240px"></canvas>
+        <div id="sweepInfo" style="font-size:10.5px;color:var(--text-dim);margin-top:4px"></div>
+    </div>
 
     <section class="controls">
         <label>Начален бюджет (€)
@@ -1619,6 +1635,7 @@
         // прозореца [t, t+ivSec) по ред и връща кое ниво е първо. Ако една 1м
         // свещ покрие и двете → SL (песимистично). Няма ли 1м данни → SL.
         async function resolveAmbiguousExit(symbol, candle, pos, ivSec) {
+            if (sweepMode) return { exitPrice: pos.sl, reason: 'SL' };   // при sweep: без мрежа, песимистично
             const from = candle.time, to = candle.time + ivSec;
             const key = symbol + '|' + from;
             let arr = oneMinCache.get(key);
@@ -1776,7 +1793,7 @@
             `;
         }
 
-        async function simulate(candles, atrSeries, probs, P, interval, startIdx) {
+        async function simulate(candles, atrSeries, probs, P, interval, startIdx, silent) {
             ensureFxRates();   // валутни курсове към EUR (кеширани; не блокира)
             const ivSec = intervalSecs(interval || '5m');
             const i0 = Math.max(30, startIdx | 0);   // първи търгуван бар (преди него — загряване)
@@ -1786,14 +1803,16 @@
             let tradeCount = 0, winsCount = 0;
             let legs = [];
             const n = candles.length;
-            tradeMarkers = [];
-            markersDirty = false;
-            simChartCandles = candles;
-            simBudget = P.budget;
-            simI0 = i0;
-            equityPct = new Array(n).fill(null);
+            if (!silent) {
+                tradeMarkers = [];
+                markersDirty = false;
+                simChartCandles = candles;
+                simBudget = P.budget;
+                simI0 = i0;
+                equityPct = new Array(n).fill(null);
+            }
             for (let i = i0; i < n; i++) {
-                if (cancelFlag) return;
+                if (cancelFlag) return silent ? { equity, tradeCount, winsCount, maxDD, cancelled: true } : undefined;
                 const prScaled = probs[i];
 
                 if (legs.length) {
@@ -1839,15 +1858,17 @@
                             if (equity > peak) peak = equity;
                             const dd = (peak - equity) / peak * 100;
                             if (dd > maxDD) maxDD = dd;
-                            prependOrder(pos, exitPrice, reason, pnl, equity, tradeCount);
-                            tradeMarkers.push({
-                                time: c.time,
-                                position: pos.dir === 'BUY' ? 'aboveBar' : 'belowBar',
-                                color: pnl >= 0 ? '#00ff66' : '#ff0055',
-                                shape: 'circle',
-                                text: reason + (pnl >= 0 ? ' +' : ' ') + pnl.toFixed(2) + '€'
-                            });
-                            markersDirty = true;
+                            if (!silent) {
+                                prependOrder(pos, exitPrice, reason, pnl, equity, tradeCount);
+                                tradeMarkers.push({
+                                    time: c.time,
+                                    position: pos.dir === 'BUY' ? 'aboveBar' : 'belowBar',
+                                    color: pnl >= 0 ? '#00ff66' : '#ff0055',
+                                    shape: 'circle',
+                                    text: reason + (pnl >= 0 ? ' +' : ' ') + pnl.toFixed(2) + '€'
+                                });
+                                markersDirty = true;
+                            }
                         } else {
                             stillOpen.push(pos);
                         }
@@ -1876,15 +1897,17 @@
                             equity += pnl; tradeCount++; if (pnl > 0) winsCount++;
                             if (equity > peak) peak = equity;
                             const dd = peak > 0 ? (peak - equity) / peak * 100 : 0; if (dd > maxDD) maxDD = dd;
-                            prependOrder(worst, c.close, 'Маржин', pnl, equity, tradeCount);
-                            tradeMarkers.push({
-                                time: c.time,
-                                position: worst.dir === 'BUY' ? 'aboveBar' : 'belowBar',
-                                color: '#ff0055',
-                                shape: 'circle',
-                                text: 'Маржин ' + pnl.toFixed(2) + '€'
-                            });
-                            markersDirty = true;
+                            if (!silent) {
+                                prependOrder(worst, c.close, 'Маржин', pnl, equity, tradeCount);
+                                tradeMarkers.push({
+                                    time: c.time,
+                                    position: worst.dir === 'BUY' ? 'aboveBar' : 'belowBar',
+                                    color: '#ff0055',
+                                    shape: 'circle',
+                                    text: 'Маржин ' + pnl.toFixed(2) + '€'
+                                });
+                                markersDirty = true;
+                            }
                             legs = legs.filter(p => p !== worst);
                         }
                     }
@@ -1999,14 +2022,16 @@
                                             const dd0 = peak > 0 ? (peak - equity) / peak * 100 : 0;
                                             if (dd0 > maxDD) maxDD = dd0;
                                         }
-                                        tradeMarkers.push({
-                                            time: t,
-                                            position: dir === 'BUY' ? 'belowBar' : 'aboveBar',
-                                            color: dir === 'BUY' ? '#00ff66' : '#ff0055',
-                                            shape: dir === 'BUY' ? 'arrowUp' : 'arrowDown',
-                                            text: dir + ' ' + lots + 'л'
-                                        });
-                                        markersDirty = true;
+                                        if (!silent) {
+                                            tradeMarkers.push({
+                                                time: t,
+                                                position: dir === 'BUY' ? 'belowBar' : 'aboveBar',
+                                                color: dir === 'BUY' ? '#00ff66' : '#ff0055',
+                                                shape: dir === 'BUY' ? 'arrowUp' : 'arrowDown',
+                                                text: dir + ' ' + lots + 'л'
+                                            });
+                                            markersDirty = true;
+                                        }
                                     }
                                 }
                             }
@@ -2014,10 +2039,9 @@
                     }
                 }
 
-                updatePositionsPanel(legs, candles[i], equity);
-
-                // Точка от кривата на сметката (% спрямо началото) за текущата свещ.
-                {
+                if (!silent) {
+                    updatePositionsPanel(legs, candles[i], equity);
+                    // Точка от кривата на сметката (% спрямо началото) за текущата свещ.
                     let fl = 0;
                     const cc = candles[i];
                     if (cc) for (const p of legs) fl += (p.dir === 'BUY' ? (cc.close - p.entry) * p.units : (p.entry - cc.close) * p.units) * (p.fx || 1);
@@ -2025,20 +2049,24 @@
                 }
 
                 // Възпроизвеждане на живо: мести графиката, рисува маркерите и обновява баланса.
-                const cps = getPlaybackCps();
-                if (cps > 0) {
-                    const delay = 1000 / cps;
-                    const paintEvery = delay >= 16 ? 1 : Math.max(1, Math.ceil(16 / delay));
-                    if (((i - 30) % paintEvery) === 0 || i === n - 1) {
-                        liveTick(i, equity, legs, tradeCount);
-                        const wait = delay * paintEvery;
-                        if (wait > 0) await sleep(wait);
+                if (!silent) {
+                    const cps = getPlaybackCps();
+                    if (cps > 0) {
+                        const delay = 1000 / cps;
+                        const paintEvery = delay >= 16 ? 1 : Math.max(1, Math.ceil(16 / delay));
+                        if (((i - 30) % paintEvery) === 0 || i === n - 1) {
+                            liveTick(i, equity, legs, tradeCount);
+                            const wait = delay * paintEvery;
+                            if (wait > 0) await sleep(wait);
+                        }
+                    } else if (i % 50 === 0 || i === n - 1) {
+                        // „Мгновено“: показваме само баланса/статистиките (с +/–), без графика.
+                        updateLiveStats(i, equity, legs, tradeCount);
+                        setProgress(Math.round(((i - i0) / Math.max(1, n - i0)) * 100), `Обработка на свещ ${i}/${n} — ${tradeCount} сделки`);
+                        await sleep(0);
                     }
-                } else if (i % 50 === 0 || i === n - 1) {
-                    // „Мгновено“: показваме само баланса/статистиките (с +/–), без графика.
-                    updateLiveStats(i, equity, legs, tradeCount);
-                    setProgress(Math.round(((i - i0) / Math.max(1, n - i0)) * 100), `Обработка на свещ ${i}/${n} — ${tradeCount} сделки`);
-                    await sleep(0);
+                } else if (i % 500 === 0) {
+                    await sleep(0);   // не блокираме UI при sweep
                 }
             }
 
@@ -2051,20 +2079,23 @@
                     equity += pnl;
                     tradeCount++;
                     if (pnl > 0) winsCount++;
-                    prependOrder(pos, c.close, 'Край', pnl, equity, tradeCount);
-                    tradeMarkers.push({
-                        time: c.time,
-                        position: pos.dir === 'BUY' ? 'aboveBar' : 'belowBar',
-                        color: pnl >= 0 ? '#00ff66' : '#ff0055',
-                        shape: 'circle',
-                        text: 'Край' + (pnl >= 0 ? ' +' : ' ') + pnl.toFixed(2) + '€'
-                    });
-                    markersDirty = true;
+                    if (!silent) {
+                        prependOrder(pos, c.close, 'Край', pnl, equity, tradeCount);
+                        tradeMarkers.push({
+                            time: c.time,
+                            position: pos.dir === 'BUY' ? 'aboveBar' : 'belowBar',
+                            color: pnl >= 0 ? '#00ff66' : '#ff0055',
+                            shape: 'circle',
+                            text: 'Край' + (pnl >= 0 ? ' +' : ' ') + pnl.toFixed(2) + '€'
+                        });
+                        markersDirty = true;
+                    }
                 }
                 legs = [];
-                updatePositionsPanel([], c, equity);
+                if (!silent) updatePositionsPanel([], c, equity);
             }
 
+            if (silent) return { equity, tradeCount, winsCount, maxDD };
             renderSummary(P, equity, tradeCount, winsCount, maxDD);
             if (tradeCount === 0) {
                 setProgress(100, '0 сделки — провери: „Мин. обем“ (твърде голям за бюджета → няма вход), праговете Buy/Sell, и че пазарът е отворен (не-крипто не търгува събота/неделя).');
@@ -2178,6 +2209,7 @@
                 if (cancelFlag) return;
 
                 const atrSeries = computeATR(simCandles, 14);
+                lastSim = { candles: simCandles, atrSeries, probs, interval, startIdx: simStartIdx };
                 setProgress(15, 'Стартиране на търговската симулация...');
                 await sleep(30);
                 // Показва графиката отначало (и при „Мгновено“). През симулацията не се
@@ -2211,6 +2243,152 @@
         function stopSimulation() {
             cancelFlag = true;
             setProgress(0, 'Спиране...');
+        }
+
+        // ── Анализ на чувствителността ──────────────────────────────
+        // Цъкни бутона „Чувствителност“, после цъкни настройка → варираме я от
+        // −100% до +100% през 1% (201 варианта, другите настройки непроменени) и
+        // чертаем относителната печалба (%). Точките се нанасят постепенно.
+        const SWEEP_KEYS = {
+            inpBudget: 'budget', inpLev: 'leverage', inpAlpha: 'alpha', inpBuyTh: 'buyTh',
+            inpSellTh: 'sellTh', inpMinEv: 'minEv', inpTp: 'tpMult', inpSl: 'slMult',
+            inpHold: 'holdBars', inpKelly: 'kellyF', inpMaxKelly: 'maxKelly',
+            inpMinLot: 'minLot', inpMinLotSpread: 'minLotSpread'
+        };
+        const SWEEP_LABELS = {
+            inpBudget: 'Бюджет', inpLev: 'Леверидж', inpAlpha: 'Риск (α)', inpBuyTh: 'Buy праг',
+            inpSellTh: 'Sell праг', inpMinEv: 'Мин. EV', inpTp: 'TP = ×ATR', inpSl: 'SL = ×ATR',
+            inpHold: 'Времево затваряне', inpKelly: 'Кели (част)', inpMaxKelly: 'Кели макс.',
+            inpMinLot: 'Мин. обем', inpMinLotSpread: 'Спред на мин. обем'
+        };
+        let pickingParam = false, sweepCancel = false, sweepMode = false, lastSim = null;
+
+        function toggleSweepPick() {
+            pickingParam = !pickingParam;
+            const b = document.getElementById('btnSweep');
+            if (b) b.classList.toggle('active', pickingParam);
+            if (pickingParam) {
+                document.body.style.cursor = 'crosshair';
+                showSweepPanel('Избери настройка: цъкни върху полето, което да варира');
+            } else {
+                document.body.style.cursor = '';
+            }
+        }
+        document.addEventListener('click', function (e) {
+            if (!pickingParam) return;
+            const el = e.target.closest('input,select');
+            if (!el || !el.id || !SWEEP_KEYS[el.id]) return;
+            e.preventDefault(); e.stopPropagation();
+            pickingParam = false;
+            document.body.style.cursor = '';
+            const b = document.getElementById('btnSweep'); if (b) b.classList.remove('active');
+            runSweep(el.id, SWEEP_KEYS[el.id]);
+        }, true);
+
+        function showSweepPanel(title) {
+            const p = document.getElementById('sweepPanel');
+            if (p) p.style.display = 'block';
+            if (title) document.getElementById('sweepTitle').textContent = title;
+        }
+        function closeSweepPanel() {
+            sweepCancel = true;
+            const p = document.getElementById('sweepPanel');
+            if (p) p.style.display = 'none';
+        }
+
+        async function runSweep(inputId, key) {
+            if (!lastSim || !lastSim.candles || !lastSim.candles.length) {
+                alert('Пусни първо една симулация (▶ Стартирай), за да има заредени данни.');
+                return;
+            }
+            sweepCancel = false; sweepMode = true;
+            const { candles, atrSeries, probs, interval, startIdx } = lastSim;
+            const baseP = readParams();
+            const baseVal = baseP[key];
+            const el = document.getElementById(inputId);
+            const minV = el && el.min !== '' ? parseFloat(el.min) : -Infinity;
+            const maxV = el && el.max !== '' ? parseFloat(el.max) : Infinity;
+            const label = SWEEP_LABELS[inputId] || key;
+            const info = document.getElementById('sweepInfo');
+            showSweepPanel('Чувствителност: ' + label + ' (база ' + baseVal + ')');
+            const results = [];
+            const N = 201;
+            const t0 = performance.now();
+            try {
+                for (let step = 0; step < N; step++) {
+                    if (sweepCancel) break;
+                    const pct = step - 100;   // −100..+100
+                    let val = (baseVal === 0) ? pct : baseVal * (1 + pct / 100);
+                    if (isFinite(minV)) val = Math.max(minV, val);
+                    if (isFinite(maxV)) val = Math.min(maxV, val);
+                    const P2 = Object.assign({}, baseP);
+                    P2[key] = val;
+                    let r = null;
+                    try { r = await simulate(candles, atrSeries, probs, P2, interval, startIdx, true); } catch (err) { r = null; }
+                    if (!r) continue;
+                    const profit = baseP.budget > 0 ? ((r.equity - baseP.budget) / baseP.budget) * 100 : 0;
+                    results.push({ x: val, y: profit, pct });
+                    if (step % 4 === 0 || step === N - 1) {
+                        drawSweep(results, baseVal, label);
+                        if (info) info.textContent = 'Точки: ' + results.length + '/' + N + ' · ' + label + ' = ' + fmtParam(val) + ' → ' + profit.toFixed(2) + '%';
+                        await sleep(0);
+                    }
+                }
+            } finally {
+                sweepMode = false;
+            }
+            const dt = ((performance.now() - t0) / 1000).toFixed(1);
+            if (info) info.textContent = 'Готово (' + results.length + ' точки, ' + dt + ' s) · база ' + label + ' = ' + baseVal;
+        }
+
+        function fmtParam(v) {
+            const a = Math.abs(v);
+            if (a >= 1000) return v.toFixed(0);
+            if (a >= 10) return v.toFixed(1);
+            if (a >= 1) return v.toFixed(2);
+            if (a >= 0.01) return v.toFixed(4);
+            return v.toFixed(6);
+        }
+
+        function drawSweep(points, baseVal, label) {
+            const cvs = document.getElementById('sweepCanvas');
+            if (!cvs || !points.length) return;
+            const w = cvs.width, h = cvs.height;
+            const ctx = cvs.getContext('2d');
+            ctx.clearRect(0, 0, w, h);
+            const padL = 46, padR = 12, padT = 12, padB = 26;
+            let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
+            for (const p of points) { xmin = Math.min(xmin, p.x); xmax = Math.max(xmax, p.x); ymin = Math.min(ymin, p.y); ymax = Math.max(ymax, p.y); }
+            if (!(xmax > xmin)) xmax = xmin + 1;
+            ymin = Math.min(ymin, 0); ymax = Math.max(ymax, 0);
+            if (!(ymax > ymin)) ymax = ymin + 1;
+            const X = v => padL + (v - xmin) / (xmax - xmin) * (w - padL - padR);
+            const Y = v => padT + (ymax - v) / (ymax - ymin) * (h - padT - padB);
+            ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+            ctx.beginPath(); ctx.moveTo(padL, padT); ctx.lineTo(padL, h - padB); ctx.lineTo(w - padR, h - padB); ctx.stroke();
+            if (ymin <= 0 && ymax >= 0) {
+                ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.setLineDash([3, 3]);
+                ctx.beginPath(); ctx.moveTo(padL, Y(0)); ctx.lineTo(w - padR, Y(0)); ctx.stroke(); ctx.setLineDash([]);
+            }
+            ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.font = '9px JetBrains Mono';
+            ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+            ctx.fillText(ymax.toFixed(1) + '%', padL - 4, padT + 6);
+            ctx.fillText(ymin.toFixed(1) + '%', padL - 4, h - padB - 6);
+            ctx.textAlign = 'center'; ctx.textBaseline = 'top';
+            ctx.fillText(fmtParam(xmin), padL + 2, h - padB + 5);
+            ctx.fillText(fmtParam(xmax), w - padR - 2, h - padB + 5);
+            // маркер на базовата стойност
+            const xb = X(baseVal);
+            if (xb >= padL && xb <= w - padR) {
+                ctx.strokeStyle = 'rgba(0,240,255,0.35)';
+                ctx.beginPath(); ctx.moveTo(xb, padT); ctx.lineTo(xb, h - padB); ctx.stroke();
+            }
+            for (const p of points) {
+                ctx.fillStyle = p.y >= 0 ? 'rgba(0,255,102,0.9)' : 'rgba(255,0,85,0.9)';
+                ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), 1.6, 0, Math.PI * 2); ctx.fill();
+            }
+            ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+            ctx.fillText(label + ' → печалба %', padL + 4, padT + 4);
         }
 
         // Мин. обем: показва на колко € се равнява при първата известна цена от периода.
