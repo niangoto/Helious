@@ -2089,7 +2089,7 @@
 
             const P = readParams();
             const interval = document.getElementById('inpInterval').value || '5m';
-            let limit = 1000;
+            let limit = 2000;
             // Ако е зададен точен период, теглим достатъчно свещи, за да го покрием на този интервал.
             {
                 const useDates = document.getElementById('inpUseDates').checked;
@@ -2159,9 +2159,9 @@
                 // браузъра и графиката не се показва). Затова го ползваме само за
                 // кратки серии (≤2000 бара, където е бързо), а за дълги — бързото
                 // причинно изчисление върху цялата история.
-                const LIVE_LIMIT = 2000;
+                const LIVE_LIMIT = 2600;
                 const probs = (typeof computeModelProbSeriesLive === 'function' && simCandles.length <= LIVE_LIMIT)
-                    ? computeModelProbSeriesLive(simCandles, currentModel, { invert: contraFlags() }, 1000)
+                    ? computeModelProbSeriesLive(simCandles, currentModel, { invert: contraFlags() }, 2000)
                     : computeModelProbSeries(simCandles, currentModel, { invert: contraFlags() });
                 if (cancelFlag) return;
 

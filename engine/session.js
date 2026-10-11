@@ -21,7 +21,7 @@ const { specFor } = require('./symbolSpec');
 const { PaperAccount } = require('./paperBroker');
 
 const IV_SEC = { '1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400 };
-const WINDOW = 1000;         // свещи за модела/ATR
+const WINDOW = 2000;         // свещи за модела/ATR (единен прозорец за всички модели)
 const TICK_MS = 3000;        // период на непрекъснатата проверка
 const MAX_EQ = 4000;         // горна граница на точките в equitySeries (разреждане)
 const MARGIN_LEVEL_MIN = 50; // под това ниво (капитал/нотионал) затваряме на загуба

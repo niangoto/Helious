@@ -162,8 +162,8 @@ function buildStats(candles) {
   const atrV = computeATR(candles, 14);
   const adxR = computeADX(candles, 14);
   const volV = candles.map(c => c.volume || 0);
-  const meanAtrV = expandingMean(atrV);
-  const meanVolV = expandingMean(volV);
+  const meanAtrV = rollingMean(atrV, MODEL_LOOKBACK);
+  const meanVolV = rollingMean(volV, MODEL_LOOKBACK);
   const maxBars = Math.min(50, n);
   const combos = new Map();
   let totalWins = 0, totalTrades = 0;
@@ -198,17 +198,14 @@ function getStats(candles) {
 }
 
 // ─── Модели ───
-// На ефективен пазар глобалната вероятност посоката на една свещ да е "нагоре"
-// е винаги ~50/50 — това не е грешка, а математическа реалност. Затова
-// историческата и марковската вероятност се оценяват върху ПОСЛЕДНИТЕ N движения
-// (прозорец = текущият пазарен режим) — така реагират на актуалния тренд/застой.
-const MODEL_WINDOW = 40;
-// Прозорец на НАТРУПАНАТА статистика (combos/базова линия) — същият като на
-// живата сесия (`engine/session.js` WINDOW = 1000 свещи). Без него backtest-ът
-// (Hermes) трупа статистика от цялата история и дава РАЗЛИЧНИ вероятности от
-// реалното време (модели 1 и 5). Модели 0/2 (прозорец 40), 3 (последни 50
-// сделки) и 4 (срез 500) и без това съвпадат.
-const MODEL_STATS_WINDOW = 1000;
+// ЕДИНЕН прозорец назад за ВСИЧКИ модели (≈2000 свещи): историческа, марковска,
+// логистична, очаквана стойност, уейвлет и средната им. Така всички гледат
+// еднакво количество история (и в Hermes, и в живата сесия `engine/session.js`
+// с WINDOW = 2000). Преди всеки модел имаше собствена дължина (40/50/500/1000).
+const MODEL_LOOKBACK = 2000;
+// За обратна съвместимост (същият прозорец).
+const MODEL_WINDOW = MODEL_LOOKBACK;
+const MODEL_STATS_WINDOW = MODEL_LOOKBACK;
 
 // ─── Fast Fourier Transform (FFT) ───
 // Дискретно преобразувание на Фурие върху видимите свещи. Серията се
@@ -505,8 +502,8 @@ function computeCombinationProbability(candles) {
   const atrV = computeATR(candles, 14);
   const adxR = computeADX(candles, 14);
   const volV = candles.map(c => c.volume || 0);
-  const meanAtrV = expandingMean(atrV);
-  const meanVolV = expandingMean(volV);
+  const meanAtrV = rollingMean(atrV, MODEL_LOOKBACK);
+  const meanVolV = rollingMean(volV, MODEL_LOOKBACK);
   const last = candles.length - 1;
   const mask = signalMask(last, rsiAt(rsiV, last, 14), ema20[last], ema50[last], ema200[last], macd.macdLine[last], macd.signal[last], macd.histogram[last], atrV[last], adxR.adx[last], volV[last], meanAtrV[last], meanVolV[last]);
   if (s.combos.has(mask)) { const c = s.combos.get(mask); if (c.total > 0) return { buyPct: Math.max(1, Math.min(99, (c.wins / c.total) * 100)), sellPct: Math.max(1, Math.min(99, 100 - (c.wins / c.total) * 100)) }; }
@@ -528,11 +525,11 @@ function computeExpectedValue(candles) {
   const atrV = computeATR(candles, 14);
   const maxBars = Math.min(50, n);
   const trades = [];
-  for (let i = Math.max(20, n - 150); i < n - 1; i++) {
+  for (let i = Math.max(20, n - MODEL_LOOKBACK); i < n - 1; i++) {
     const r = resolveTrade(candles, i, atrV[i] || 1, 1.5, 1.0, maxBars);
     if (r) {
       trades.push({ win: r.win, atr: atrV[i] || 1 });
-      if (trades.length > 50) trades.shift();
+      if (trades.length > MODEL_LOOKBACK) trades.shift();
     }
   }
   let wins = 0, tpSum = 0, slSum = 0;
@@ -617,8 +614,8 @@ function computeModelProbCore(candles, modelIndex, opts) {
   const adxR = computeADX(candles, 14);
   const volV = candles.map(c => c.volume || 0);
   // Причинна базова линия (средно само до i) — без бъдещи ATR/обем.
-  const meanAtrV = expandingMean(atrV);
-  const meanVolV = expandingMean(volV);
+  const meanAtrV = rollingMean(atrV, MODEL_LOOKBACK);
+  const meanVolV = rollingMean(volV, MODEL_LOOKBACK);
   const maxBars = Math.min(50, n);
 
   // Pre-resolve every historical trade outcome and bucket by resolution index.
@@ -668,7 +665,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
         const c = combos.get(e.mask); c.total++;
         if (e.win === 1) c.wins++;
         recentTrades.push({ win: e.win, atr: atrV[j] || 1 });
-        if (recentTrades.length > 50) recentTrades.shift();
+        if (recentTrades.length > MODEL_LOOKBACK) recentTrades.shift();
       }
     }
 
@@ -685,7 +682,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
       val = evVal();
     } else if (modelIndex === 4) {
       // Плъзгащ прозорец (последни 500 цени) — пази O(n) при големи серии
-      const win = Math.max(0, i - 499);
+      const win = Math.max(0, i - (MODEL_LOOKBACK - 1));
       const w = computeWaveletProbability(prices.slice(win, i + 1));
       val = w.buyPct;
     } else if (modelIndex === 5) {
@@ -697,7 +694,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
       v1 = inv(v1, 1); sum += v1; cnt++;
       const v2 = inv(amplify(markovProb(dirs)), 2); sum += v2; cnt++;
       const v3 = inv(evVal(), 3); sum += v3; cnt++;
-      const win = Math.max(0, i - 499);
+      const win = Math.max(0, i - (MODEL_LOOKBACK - 1));
       const v4 = inv(computeWaveletProbability(prices.slice(win, i + 1)).buyPct, 4); sum += v4; cnt++;
       val = cnt > 0 ? sum / cnt : 50;
     }
