@@ -168,7 +168,8 @@ function buildStats(candles) {
   const combos = new Map();
   let totalWins = 0, totalTrades = 0;
   let wins = 0, losses = 0, tpSum = 0, slSum = 0;
-  for (let i = 20; i < n - 1; i++) {
+  // Само последните MODEL_LOOKBACK бара (единен прозорец за всички модели).
+  for (let i = Math.max(20, n - MODEL_LOOKBACK - 1); i < n - 1; i++) {
     const atr = atrV[i] || atrV[atrV.length - 1] || 1;
     const result = simulateTrade(candles, i, atr, maxBars);
     if (result < 0) continue;
