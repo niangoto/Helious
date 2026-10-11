@@ -162,8 +162,8 @@ function buildStats(candles) {
   const atrV = computeATR(candles, 14);
   const adxR = computeADX(candles, 14);
   const volV = candles.map(c => c.volume || 0);
-  const meanAtrV = rollingMean(atrV, MODEL_LOOKBACK);
-  const meanVolV = rollingMean(volV, MODEL_LOOKBACK);
+  const meanAtrV = rollingMean(atrV, LOGISTIC_LOOKBACK);
+  const meanVolV = rollingMean(volV, LOGISTIC_LOOKBACK);
   const maxBars = Math.min(50, n);
   const combos = new Map();
   let totalWins = 0, totalTrades = 0;
@@ -207,6 +207,9 @@ const MODEL_LOOKBACK = 2000;
 // За обратна съвместимост (същият прозорец).
 const MODEL_WINDOW = MODEL_LOOKBACK;
 const MODEL_STATS_WINDOW = MODEL_LOOKBACK;
+// „Логистична“ гледа последните LOGISTIC_LOOKBACK бара (по-кратък, по-адаптивен
+// прозорец от останалите 2000).
+const LOGISTIC_LOOKBACK = 500;
 
 // ─── Fast Fourier Transform (FFT) ───
 // Дискретно преобразувание на Фурие върху видимите свещи. Серията се
@@ -503,8 +506,8 @@ function computeCombinationProbability(candles) {
   const atrV = computeATR(candles, 14);
   const adxR = computeADX(candles, 14);
   const volV = candles.map(c => c.volume || 0);
-  const meanAtrV = rollingMean(atrV, MODEL_LOOKBACK);
-  const meanVolV = rollingMean(volV, MODEL_LOOKBACK);
+  const meanAtrV = rollingMean(atrV, LOGISTIC_LOOKBACK);
+  const meanVolV = rollingMean(volV, LOGISTIC_LOOKBACK);
   const last = candles.length - 1;
   const mask = signalMask(last, rsiAt(rsiV, last, 14), ema20[last], ema50[last], ema200[last], macd.macdLine[last], macd.signal[last], macd.histogram[last], atrV[last], adxR.adx[last], volV[last], meanAtrV[last], meanVolV[last]);
   if (s.combos.has(mask)) { const c = s.combos.get(mask); if (c.total > 0) return { buyPct: Math.max(1, Math.min(99, (c.wins / c.total) * 100)), sellPct: Math.max(1, Math.min(99, 100 - (c.wins / c.total) * 100)) }; }
@@ -615,8 +618,8 @@ function computeModelProbCore(candles, modelIndex, opts) {
   const adxR = computeADX(candles, 14);
   const volV = candles.map(c => c.volume || 0);
   // Причинна базова линия (средно само до i) — без бъдещи ATR/обем.
-  const meanAtrV = rollingMean(atrV, MODEL_LOOKBACK);
-  const meanVolV = rollingMean(volV, MODEL_LOOKBACK);
+  const meanAtrV = rollingMean(atrV, LOGISTIC_LOOKBACK);
+  const meanVolV = rollingMean(volV, LOGISTIC_LOOKBACK);
   const maxBars = Math.min(50, n);
 
   // Pre-resolve every historical trade outcome and bucket by resolution index.
@@ -676,7 +679,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
     }
 
     // Изхвърляме статистиката по-стара от MODEL_LOOKBACK бара (плъзгащ прозорец).
-    while (resolvedQ.length && resolvedQ[0].closeIdx < i - (MODEL_LOOKBACK - 1)) {
+    while (resolvedQ.length && resolvedQ[0].closeIdx < i - (LOGISTIC_LOOKBACK - 1)) {
       const old = resolvedQ.shift();
       totalTrades--;
       if (old.win === 1) totalWins--;
@@ -749,7 +752,9 @@ function computeModelProbSeries(candles, modelIndex, opts) {
 function computeModelProbSeriesLive(candles, modelIndex, opts, window) {
   const n = candles ? candles.length : 0;
   if (n < 30) return [];
-  const W = window || MODEL_STATS_WINDOW;
+  // „Логистична“ = последните LOGISTIC_LOOKBACK бара (останалите модели са
+  // инвариантни на този прозорец в бара на решението).
+  const W = LOGISTIC_LOOKBACK;
   if (modelIndex !== 1 && modelIndex !== 5) return computeModelProbSeries(candles, modelIndex, opts);
   const invert = (opts && Array.isArray(opts.invert)) ? opts.invert : [];
   const inv = (v, m) => invert[m] ? (100 - v) : v;

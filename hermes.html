@@ -1296,6 +1296,7 @@
         let markersDirty = false;
         let simBudget = 1000;
         let equityPct = [];
+        let simI0 = 30;   // първи търгуван бар (за прогреса)
 
         function sortedMarkers() {
             return tradeMarkers.slice().sort((a, b) => a.time - b.time);
@@ -1411,7 +1412,7 @@
                 if (markersDirty) { simCandleSeries.setMarkers(sortedMarkers()); markersDirty = false; }
             }
             updateLiveStats(i, equity, legs, tradeCount);
-            setProgress(Math.round(((i - 30) / Math.max(1, n - 30)) * 100), `Свещ ${i}/${n} — ${tradeCount} сделки`);
+            setProgress(Math.round(((i - simI0) / Math.max(1, n - simI0)) * 100), `Свещ ${i}/${n} — ${tradeCount} сделки`);
             drawPnlChart(i);
         }
 
@@ -1775,9 +1776,10 @@
             `;
         }
 
-        async function simulate(candles, atrSeries, probs, P, interval) {
+        async function simulate(candles, atrSeries, probs, P, interval, startIdx) {
             ensureFxRates();   // валутни курсове към EUR (кеширани; не блокира)
             const ivSec = intervalSecs(interval || '5m');
+            const i0 = Math.max(30, startIdx | 0);   // първи търгуван бар (преди него — загряване)
             let equity = P.budget;
             let peak = equity;
             let maxDD = 0;
@@ -1788,9 +1790,10 @@
             markersDirty = false;
             simChartCandles = candles;
             simBudget = P.budget;
+            simI0 = i0;
             equityPct = new Array(n).fill(null);
 
-            for (let i = 30; i < n; i++) {
+            for (let i = i0; i < n; i++) {
                 if (cancelFlag) return;
 
                 if (legs.length) {
@@ -2034,7 +2037,7 @@
                 } else if (i % 50 === 0 || i === n - 1) {
                     // „Мгновено“: показваме само баланса/статистиките (с +/–), без графика.
                     updateLiveStats(i, equity, legs, tradeCount);
-                    setProgress(Math.round(((i - 30) / (n - 30)) * 100), `Обработка на свещ ${i}/${n} — ${tradeCount} сделки`);
+                    setProgress(Math.round(((i - i0) / Math.max(1, n - i0)) * 100), `Обработка на свещ ${i}/${n} — ${tradeCount} сделки`);
                     await sleep(0);
                 }
             }
@@ -2103,8 +2106,10 @@
                     // назад — иначе при минал toS периодът не се покрива.
                     const nowLocal = timeToLocal(Math.floor(Date.now() / 1000));
                     const endS = Math.max(toS, nowLocal);
+                    // + WARMUP_BARS предварителна история ПРЕДИ периода, за да имат
+                    // всички модели данни още от първия бар на зададения период.
                     const need = Math.ceil((endS - fromS) / intervalSecs(interval)) + 60;
-                    if (need > limit) limit = Math.min(MAX_FETCH, need);
+                    limit = Math.min(MAX_FETCH, Math.max(limit, need + 2000));
                 }
             }
 
@@ -2138,15 +2143,21 @@
                 }
 
                 let simCandles = candles;
+                let simStartIdx = 30;   // от кой бар започва търговията (преди него е загряващата история)
                 if (document.getElementById('inpUseDates').checked) {
                     const fromVal = document.getElementById('inpDateFrom').value;
                     const toVal = document.getElementById('inpDateTo').value;
                     if (fromVal && toVal) {
                         const fromSec = timeToLocal(new Date(fromVal + 'T00:00:00').getTime() / 1000);
                         const toSec = timeToLocal(new Date(toVal + 'T23:59:59').getTime() / 1000);
-                        simCandles = candles.filter(c => c.time >= fromSec && c.time <= toSec);
-                        if (simCandles.length < 30) {
-                            throw new Error(`Избраният период (${fromVal} → ${toVal}) покрива само ${simCandles.length} свещи (нужни са минимум 30). Удължете периода или изберете по-дребен времеви мащаб.`);
+                        // Пазим и историята ПРЕДИ периода (за моделите), но търгуваме
+                        // само от fromSec нататък (pre-history = загряване).
+                        simCandles = candles.filter(c => c.time <= toSec);
+                        const idx = simCandles.findIndex(c => c.time >= fromSec);
+                        simStartIdx = idx < 0 ? simCandles.length : idx;
+                        const periodBars = simCandles.length - simStartIdx;
+                        if (periodBars < 30) {
+                            throw new Error(`Избраният период (${fromVal} → ${toVal}) покрива само ${periodBars} свещи (нужни са минимум 30). Удължете периода или изберете по-дребен времеви мащаб.`);
                         }
                     }
                 }
@@ -2179,7 +2190,7 @@
                     P.minLot = Math.max(0.001, P.minLot / (P.refPrice * spec.contract * fx));
                 }
                 resetOneMinCache();
-                await simulate(simCandles, atrSeries, probs, P, interval);
+                await simulate(simCandles, atrSeries, probs, P, interval, simStartIdx);
                 if (!cancelFlag) {
                     renderSimChart(simCandles, tradeMarkers);
                     drawPnlChart();
