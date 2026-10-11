@@ -1031,13 +1031,16 @@ function getWaveletForecastData(prices, forecastSteps) {
 //  • след SCALE_WARMUP бара се запомня най-голямото отклонение от 50 (|p−50|);
 //  • коефициент k = 50 / maxDev → неутралното 50 остава 50, а най-силният
 //    сигнал стига 0/100 („100% да се дели на макса“, изразено около 50);
-//  • ако успеваемостта падне под 40% (неуспешни > 60%), k се умножава по
-//    (успешни / общо) → пропорционално намаляване.
-// maxDev е running max от началото; мащабирането започва след загряващия период.
+//  • ако успеваемостта върху ПОСЛЕДНИТЕ WIN_RECENT сделки падне под 40%
+//    (неуспешни > 60%), k се умножава по (успешни / общо) → пропорционално
+//    намаляване. Проверката е постоянна (rolling), затова при подобрение k се
+//    вдига отново (не остава „заклещен“ нисък).
 const SCALE_WARMUP = 100;
+const SCALE_WIN_RECENT = 50;   // сделки в плъзгащия прозорец за win-rate
+const SCALE_WIN_MIN = 10;      // минимум сделки преди да се прилага намаляване
 function createProbScaler() {
   return {
-    maxDev: 0, wins: 0, losses: 0, count: 0,
+    maxDev: 0, recent: [], count: 0,
     scale(prob) {
       if (!prob || prob.buyPct == null) return prob;
       this.count++;
@@ -1046,13 +1049,20 @@ function createProbScaler() {
       if (dev > this.maxDev) this.maxDev = dev;
       if (this.count <= SCALE_WARMUP) return { buyPct: p, sellPct: 100 - p, time: prob.time };
       let k = this.maxDev > 0 ? 50 / this.maxDev : 1;
-      const total = this.wins + this.losses;
-      if (total > 0 && this.wins / total < 0.40) k *= (this.wins / total);
+      const total = this.recent.length;
+      if (total >= SCALE_WIN_MIN) {
+        let wins = 0; for (const w of this.recent) if (w) wins++;
+        const wr = wins / total;
+        if (wr < 0.40) k *= wr;
+      }
       let sp = 50 + (p - 50) * k;
       sp = Math.max(0, Math.min(100, sp));
       return { buyPct: sp, sellPct: 100 - sp, time: prob.time };
     },
-    onClose(win) { if (win) this.wins++; else this.losses++; }
+    onClose(win) {
+      this.recent.push(win ? 1 : 0);
+      if (this.recent.length > SCALE_WIN_RECENT) this.recent.shift();
+    }
   };
 }
 
