@@ -211,6 +211,8 @@ const MODEL_STATS_WINDOW = MODEL_LOOKBACK;
 // прозорец. Стойност > всеки реалистичен брой свещи → combos/статистиката не се
 // изхвърлят, а базовата линия става expanding (както беше).
 const LOGISTIC_LOOKBACK = 1000000;
+// Прозорец за FFT модела (колко назад гледа Фурие).
+const FOURIER_LOOKBACK = 500;
 
 // ─── Fast Fourier Transform (FFT) ───
 // Дискретно преобразувание на Фурие върху видимите свещи. Серията се
@@ -363,6 +365,16 @@ function computeFourierProbability(candles) {
   const f = computeFourierAnalysis(candles);
   if (!f) return { buyPct: 50, sellPct: 50 };
   return { buyPct: f.buyPct, sellPct: f.sellPct };
+}
+
+// RSI модел: 0 = 100% sell, 100 = 100% buy. buyPct = 100 − RSI (RSI > 50 →
+// overbought → sell; RSI < 50 → oversold → buy).
+function computeRSIProbability(candles) {
+  if (!candles || candles.length < 16) return { buyPct: 50, sellPct: 50 };
+  const rsiV = computeRSI(candles, 14);
+  if (!rsiV.length) return { buyPct: 50, sellPct: 50 };
+  const buyPct = Math.max(0, Math.min(100, 100 - rsiV[rsiV.length - 1]));
+  return { buyPct, sellPct: 100 - buyPct };
 }
 
 // Плъзгаща FFT вероятност за всяка свещ (за probability canvas).
@@ -552,7 +564,7 @@ function computeAllModels(candles) {
   if (!candles || candles.length < 30) return null;
   const prices = candles.map(c => c.close);
   const hist = computeHistoricalProbability(candles);
-  return { models: { historical: hist, logistic: computeCombinationProbability(candles), markov: computeMarkovChain(candles), expectedValue: computeExpectedValue(candles), wavelet: computeWaveletProbability(prices), fourier: computeFourierProbability(candles) } };
+  return { models: { historical: hist, logistic: computeCombinationProbability(candles), markov: computeMarkovChain(candles), expectedValue: computeExpectedValue(candles), wavelet: computeWaveletProbability(prices), fourier: computeFourierProbability(candles), rsi: computeRSIProbability(candles) } };
 }
 
 // Кеш по хеш на свещите: ако данните не са се сменили, не преизчисляваме тежката
@@ -720,6 +732,15 @@ function computeModelProbCore(candles, modelIndex, opts) {
       const win = Math.max(0, i - (MODEL_LOOKBACK - 1));
       const v4 = inv(computeWaveletProbability(prices.slice(win, i + 1)).buyPct, 4); sum += v4; cnt++;
       val = cnt > 0 ? sum / cnt : 50;
+    } else if (modelIndex === 6) {
+      // Преобразование на Фурие: 0 = 100% sell, 100 = 100% buy (buyPct).
+      const win = Math.max(0, i - (FOURIER_LOOKBACK - 1));
+      const f = computeFourierProbability(candles.slice(win, i + 1));
+      val = f.buyPct;
+    } else if (modelIndex === 7) {
+      // RSI анализ: RSI > 50 (overbought) → sell; < 50 (oversold) → buy.
+      // buyPct = 100 − RSI (0 = 100% sell, 100 = 100% buy).
+      val = 100 - rsiAt(rsiV, i, 14);
     }
     result[i] = noClamp ? val : Math.max(1, Math.min(99, val));
   }
@@ -1021,6 +1042,7 @@ if (typeof module !== 'undefined' && module.exports) {
     computeModelProbSequence,
     computeWaveletProbability,
     computeFourierProbSequence,
+    computeRSIProbability,
     computeAllModels,
     computeHistoricalProbability,
     computeMarkovChain,

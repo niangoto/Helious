@@ -1006,7 +1006,7 @@
         // По подразбиране: интервал 1ч (период '7d' → интервал '1h'), модел „Логистична“ (1).
         let activePeriod = params.get('period') || '7d';
         let currentModel = parseInt(params.get('model') || '1', 10);
-        if (isNaN(currentModel) || currentModel < 0 || currentModel > 5) currentModel = 1;
+        if (isNaN(currentModel) || currentModel < 0 || currentModel > 7) currentModel = 1;
 
         const periodConfigs = {
             '5m': { interval: '1m', limit: 500 },
@@ -1094,7 +1094,7 @@
         // напр. 1м за ~34 дни; над това периодът се скъсява (вижда се в #periodInfo).
         const MAX_FETCH = 50000;
 
-        const modelNames = ['Историческа', 'Логистична', 'Марковска', 'Очаквана стойност', 'Уейвлет', 'Средна вероятност'];
+        const modelNames = ['Историческа', 'Логистична', 'Марковска', 'Очаквана стойност', 'Уейвлет', 'Средна вероятност', 'Фурие', 'RSI анализ'];
 
         let cancelFlag = false;
         let running = false;
