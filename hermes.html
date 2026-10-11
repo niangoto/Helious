@@ -1792,13 +1792,9 @@
             simBudget = P.budget;
             simI0 = i0;
             equityPct = new Array(n).fill(null);
-            // Адаптивно мащабиране на вероятностите — само за новите модели 6 (Фурие) и 7 (RSI).
-            const SCALE_MODEL = (currentModel === 6 || currentModel === 7);
-            const probScaler = (SCALE_MODEL && typeof createProbScaler === 'function') ? createProbScaler() : { scale: p => p, onClose: () => {} };
-
             for (let i = i0; i < n; i++) {
                 if (cancelFlag) return;
-                const prScaled = SCALE_MODEL ? probScaler.scale(probs[i]) : probs[i];
+                const prScaled = probs[i];
 
                 if (legs.length) {
                     const c = candles[i];
@@ -1840,7 +1836,6 @@
                             equity += pnl;
                             tradeCount++;
                             if (pnl > 0) winsCount++;
-                            probScaler.onClose(pnl > 0);
                             if (equity > peak) peak = equity;
                             const dd = (peak - equity) / peak * 100;
                             if (dd > maxDD) maxDD = dd;
@@ -1879,7 +1874,6 @@
                         if (worst) {
                             const pnl = wl;
                             equity += pnl; tradeCount++; if (pnl > 0) winsCount++;
-                            probScaler.onClose(pnl > 0);
                             if (equity > peak) peak = equity;
                             const dd = peak > 0 ? (peak - equity) / peak * 100 : 0; if (dd > maxDD) maxDD = dd;
                             prependOrder(worst, c.close, 'Маржин', pnl, equity, tradeCount);

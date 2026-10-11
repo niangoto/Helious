@@ -55,8 +55,6 @@ class PaperSession {
       startBalance: null, equity: 0, balance: 0, available: 0, unrealized: 0,
       snapshot: null, positions: new Map(), trades: [], markers: [], maxDD: 0, peak: 0
     } : null;
-    // Адаптивно мащабиране на вероятностите (за всички модели), по символ.
-    this.probScalers = {};
     this.status = 'running';
     this.error = null;
     this.createdAt = Date.now();
@@ -222,11 +220,6 @@ class PaperSession {
         const probs = models.computeModelProbSeriesLive(arr, this.model, { invert: this.contra, intervalSec: IV_SEC[this.interval] }, WINDOW);
         prob = probs[probs.length - 1] || null;
       } catch (e) { prob = null; }
-      // Адаптивно мащабиране — само за модели 6 (Фурие) и 7 (RSI).
-      if (prob && (this.model === 6 || this.model === 7)) {
-        const scaler = this.probScalers[symbol] || (this.probScalers[symbol] = models.createProbScaler());
-        prob = scaler.scale(prob);
-      }
     }
 
     // 1) Изход на отворена позиция
@@ -334,7 +327,6 @@ class PaperSession {
         const order = await broker.marketOrder(this.broker, symbol, side, pos.lots, true);
         const fill = parseFloat(order.avgPrice || order.price) || exitPrice;
         const pnl = (pos.dir === 'BUY' ? (fill - pos.entry) : (pos.entry - fill)) * pos.units * (pos.fx || 1);
-        const sc = this.probScalers[symbol]; if (sc) sc.onClose(pnl > 0);
         this.live.trades.push({ id: this.live.trades.length + 1, symbol, dir: pos.dir, lots: pos.lots, contract: pos.contract, units: pos.units, entry: pos.entry, exit: fill, tp: pos.tp, sl: pos.sl, openedAt: pos.openTime, closedAt: barTime, pnl, reason, prob: pos.prob, spread: pos.spread || 0 });
         this.live.positions.delete(symbol);
         this.live.markers.push({ symbol, time: barTime, position: pos.dir === 'BUY' ? 'aboveBar' : 'belowBar', color: pnl >= 0 ? '#00ff66' : '#ff0055', shape: 'circle', text: reason + (pnl >= 0 ? ' +' : ' ') + pnl.toFixed(2) + '€' });
@@ -344,7 +336,7 @@ class PaperSession {
       }
     } else {
       const tr = this.account.close(symbol, exitPrice, reason, barTime);
-      if (tr) { const sc = this.probScalers[symbol]; if (sc) sc.onClose(tr.pnl > 0); this.persistTrade(tr); }
+      if (tr) this.persistTrade(tr);
     }
   }
 

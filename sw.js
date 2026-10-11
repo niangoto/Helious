@@ -1,4 +1,4 @@
-const CACHE = 'helious-v31';
+const CACHE = 'helious-v32';
 const URLS = [
     '/index.html',
     '/manifest.json',
