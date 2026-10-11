@@ -1793,7 +1793,7 @@
             simI0 = i0;
             equityPct = new Array(n).fill(null);
             // Адаптивно мащабиране на вероятностите (за всички модели).
-            const probScaler = createProbScaler();
+            const probScaler = (typeof createProbScaler === 'function') ? createProbScaler() : { scale: p => p, onClose: () => {} };
 
             for (let i = i0; i < n; i++) {
                 if (cancelFlag) return;
