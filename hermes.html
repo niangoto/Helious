@@ -2350,18 +2350,28 @@
             return v.toFixed(6);
         }
 
+        let sweepState = null;
         function drawSweep(points, baseVal, label) {
             const cvs = document.getElementById('sweepCanvas');
             if (!cvs || !points.length) return;
             const w = cvs.width, h = cvs.height;
-            const ctx = cvs.getContext('2d');
-            ctx.clearRect(0, 0, w, h);
             const padL = 46, padR = 12, padT = 12, padB = 26;
             let xmin = Infinity, xmax = -Infinity, ymin = Infinity, ymax = -Infinity;
             for (const p of points) { xmin = Math.min(xmin, p.x); xmax = Math.max(xmax, p.x); ymin = Math.min(ymin, p.y); ymax = Math.max(ymax, p.y); }
             if (!(xmax > xmin)) xmax = xmin + 1;
             ymin = Math.min(ymin, 0); ymax = Math.max(ymax, 0);
             if (!(ymax > ymin)) ymax = ymin + 1;
+            sweepState = { points, baseVal, label, w, h, padL, padR, padT, padB, xmin, xmax, ymin, ymax };
+            renderSweep(null);
+        }
+
+        function renderSweep(hover) {
+            const cvs = document.getElementById('sweepCanvas');
+            const s = sweepState;
+            if (!cvs || !s) return;
+            const { points, baseVal, label, w, h, padL, padR, padT, padB, xmin, xmax, ymin, ymax } = s;
+            const ctx = cvs.getContext('2d');
+            ctx.clearRect(0, 0, w, h);
             const X = v => padL + (v - xmin) / (xmax - xmin) * (w - padL - padR);
             const Y = v => padT + (ymax - v) / (ymax - ymin) * (h - padT - padB);
             ctx.strokeStyle = 'rgba(255,255,255,0.25)';
@@ -2389,7 +2399,50 @@
             }
             ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
             ctx.fillText(label + ' → печалба %', padL + 4, padT + 4);
+
+            if (hover) {
+                const { mx, my, best } = hover;
+                ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.setLineDash([2, 3]);
+                ctx.beginPath(); ctx.moveTo(mx, padT); ctx.lineTo(mx, h - padB); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(padL, my); ctx.lineTo(w - padR, my); ctx.stroke();
+                ctx.setLineDash([]);
+                if (best) {
+                    const bx = X(best.x), by = Y(best.y);
+                    ctx.fillStyle = '#fff';
+                    ctx.beginPath(); ctx.arc(bx, by, 3, 0, Math.PI * 2); ctx.fill();
+                    ctx.font = '9px JetBrains Mono';
+                    const txt1 = label + ' = ' + fmtParam(best.x);
+                    const txt2 = 'печалба = ' + best.y.toFixed(2) + '%';
+                    const tw = Math.max(ctx.measureText(txt1).width, ctx.measureText(txt2).width) + 12;
+                    let tx = bx + 8; if (tx + tw > w - padR) tx = bx - tw - 8;
+                    let ty = by - 32; if (ty < padT) ty = by + 8;
+                    ctx.fillStyle = 'rgba(10,15,25,0.92)'; ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+                    ctx.beginPath(); ctx.rect(tx, ty, tw, 30); ctx.fill(); ctx.stroke();
+                    ctx.fillStyle = 'rgba(255,255,255,0.9)'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
+                    ctx.fillText(txt1, tx + 6, ty + 4);
+                    ctx.fillStyle = best.y >= 0 ? 'rgba(0,255,102,0.95)' : 'rgba(255,0,85,0.95)';
+                    ctx.fillText(txt2, tx + 6, ty + 16);
+                }
+            }
         }
+
+        function onSweepHover(e) {
+            const s = sweepState; if (!s) return;
+            const cvs = e.currentTarget;
+            const rect = cvs.getBoundingClientRect();
+            const mx = (e.clientX - rect.left) * (cvs.width / rect.width);
+            const my = (e.clientY - rect.top) * (cvs.height / rect.height);
+            const xVal = s.xmin + (mx - s.padL) / (cvs.width - s.padL - s.padR) * (s.xmax - s.xmin);
+            let best = null, bd = Infinity;
+            for (const p of s.points) { const d = Math.abs(p.x - xVal); if (d < bd) { bd = d; best = p; } }
+            renderSweep({ mx, my, best });
+        }
+        (function attachSweepHover() {
+            const cvs = document.getElementById('sweepCanvas');
+            if (!cvs) return;
+            cvs.addEventListener('mousemove', onSweepHover);
+            cvs.addEventListener('mouseleave', () => renderSweep(null));
+        })();
 
         // Мин. обем: показва на колко € се равнява при първата известна цена от периода.
         // Спред за мин. обем: показва отместването в цената и предупреждава, когато
