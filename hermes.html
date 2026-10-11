@@ -2106,10 +2106,11 @@
                     // назад — иначе при минал toS периодът не се покрива.
                     const nowLocal = timeToLocal(Math.floor(Date.now() / 1000));
                     const endS = Math.max(toS, nowLocal);
-                    // + WARMUP_BARS предварителна история ПРЕДИ периода, за да имат
-                    // всички модели данни още от първия бар на зададения период.
+                    // + 100 свещи буфер ПРЕДИ периода (за да имат моделите данни
+                    // от първия търгуван бар; „Логистична“ иначе гледа цялата налична
+                    // история, както преди).
                     const need = Math.ceil((endS - fromS) / intervalSecs(interval)) + 60;
-                    limit = Math.min(MAX_FETCH, Math.max(limit, need + 2000));
+                    limit = Math.min(MAX_FETCH, Math.max(limit, need + 100));
                 }
             }
 
