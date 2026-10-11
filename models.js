@@ -207,9 +207,8 @@ const MODEL_LOOKBACK = 2000;
 // За обратна съвместимост (същият прозорец).
 const MODEL_WINDOW = MODEL_LOOKBACK;
 const MODEL_STATS_WINDOW = MODEL_LOOKBACK;
-// „Логистична“ гледа последните LOGISTIC_LOOKBACK бара (по-кратък, по-адаптивен
-// прозорец от останалите модели).
-const LOGISTIC_LOOKBACK = 300;
+// „Логистична“ гледа последните LOGISTIC_LOOKBACK бара.
+const LOGISTIC_LOOKBACK = 3000;
 
 // ─── Fast Fourier Transform (FFT) ───
 // Дискретно преобразувание на Фурие върху видимите свещи. Серията се
