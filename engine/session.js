@@ -52,9 +52,11 @@ class PaperSession {
     // Демо сметката Е реалният Binance Testnet акаунт: баланс/капитал/P/L идват
     // от snapshot-а (`broker.account`). Начален капитал = първият видян баланс.
     this.live = this.mode === 'live' ? {
-      startBalance: null, startBalanceRaw: null, balance: 0, equity: 0, available: 0, unrealized: 0,
+      startBalance: null, equity: 0, balance: 0, available: 0, unrealized: 0,
       snapshot: null, positions: new Map(), trades: [], markers: [], maxDD: 0, peak: 0
     } : null;
+    // Адаптивно мащабиране на вероятностите (за всички модели), по символ.
+    this.probScalers = {};
     this.status = 'running';
     this.error = null;
     this.createdAt = Date.now();
@@ -212,6 +214,18 @@ class PaperSession {
     const fxr = fx.eurRateForSymbol(symbol);
     const spec = specFor(symbol);
 
+    // Вероятност за текущия момент (с адаптивно мащабиране) — веднъж на tick,
+    // ползва се и за изхода (процентно), и за входа.
+    let prob = null;
+    if (arr.length >= 30) {
+      try {
+        const probs = models.computeModelProbSeriesLive(arr, this.model, { invert: this.contra }, WINDOW);
+        prob = probs[probs.length - 1] || null;
+      } catch (e) { prob = null; }
+      const scaler = this.probScalers[symbol] || (this.probScalers[symbol] = models.createProbScaler());
+      if (prob) prob = scaler.scale(prob);
+    }
+
     // 1) Изход на отворена позиция
     const pos = this.getPosition(symbol);
     if (pos) {
@@ -237,8 +251,7 @@ class PaperSession {
       }
       if (exitPrice === null && this.isLive) {
         // Процентно затваряне при live (моделна вероятност срещу позицията).
-        const probs = models.computeModelProbSeriesLive(arr, this.model, { invert: this.contra }, WINDOW);
-        const pr = probs[probs.length - 1];
+        const pr = prob;
         if (pr && this.P.pctClose) {
           const pOpp = (pos.dir === 'BUY' ? pr.sellPct : pr.buyPct) / 100;
           const floatPnl = floatingPnl(pos, bar.close);
@@ -258,9 +271,6 @@ class PaperSession {
     // 2) Вход (само running, без позиция, пазар отворен)
     if (this.status !== 'running' || this.getPosition(symbol)) return;
     if (!marketOpen(symbol, bar.time)) return;
-    if (arr.length < 30) return;
-    const probs = models.computeModelProbSeriesLive(arr, this.model, { invert: this.contra }, WINDOW);
-    const prob = probs[probs.length - 1];
     if (!prob || !prob.buyPct) return;
     this.state[symbol].prob = prob.buyPct; this.state[symbol].probTime = bar.time;
     const atrArr = models.computeATR(arr, 14);
@@ -321,6 +331,7 @@ class PaperSession {
         const order = await broker.marketOrder(this.broker, symbol, side, pos.lots, true);
         const fill = parseFloat(order.avgPrice || order.price) || exitPrice;
         const pnl = (pos.dir === 'BUY' ? (fill - pos.entry) : (pos.entry - fill)) * pos.units * (pos.fx || 1);
+        const sc = this.probScalers[symbol]; if (sc) sc.onClose(pnl > 0);
         this.live.trades.push({ id: this.live.trades.length + 1, symbol, dir: pos.dir, lots: pos.lots, contract: pos.contract, units: pos.units, entry: pos.entry, exit: fill, tp: pos.tp, sl: pos.sl, openedAt: pos.openTime, closedAt: barTime, pnl, reason, prob: pos.prob, spread: pos.spread || 0 });
         this.live.positions.delete(symbol);
         this.live.markers.push({ symbol, time: barTime, position: pos.dir === 'BUY' ? 'aboveBar' : 'belowBar', color: pnl >= 0 ? '#00ff66' : '#ff0055', shape: 'circle', text: reason + (pnl >= 0 ? ' +' : ' ') + pnl.toFixed(2) + '€' });
@@ -330,7 +341,7 @@ class PaperSession {
       }
     } else {
       const tr = this.account.close(symbol, exitPrice, reason, barTime);
-      if (tr) this.persistTrade(tr);
+      if (tr) { const sc = this.probScalers[symbol]; if (sc) sc.onClose(tr.pnl > 0); this.persistTrade(tr); }
     }
   }
 

@@ -1792,9 +1792,12 @@
             simBudget = P.budget;
             simI0 = i0;
             equityPct = new Array(n).fill(null);
+            // Адаптивно мащабиране на вероятностите (за всички модели).
+            const probScaler = createProbScaler();
 
             for (let i = i0; i < n; i++) {
                 if (cancelFlag) return;
+                const prScaled = probScaler.scale(probs[i]);
 
                 if (legs.length) {
                     const c = candles[i];
@@ -1818,7 +1821,7 @@
                         // Процентно затваряне: P(обратна посока) [0..1] × плаващата загуба >= лимит.
                         // P = шансът да стане обратното на позицията (BUY → sellPct, SELL → buyPct).
                         if (exitPrice === null && P.pctClose) {
-                            const pr = probs[i];
+                            const pr = prScaled;
                             if (pr) {
                                 const pOpp = (pos.dir === 'BUY' ? pr.sellPct : pr.buyPct) / 100;
                                 const floatPnl = (pos.dir === 'BUY' ? (c.close - pos.entry) : (pos.entry - c.close)) * pos.units * (pos.fx || 1);
@@ -1836,6 +1839,7 @@
                             equity += pnl;
                             tradeCount++;
                             if (pnl > 0) winsCount++;
+                            probScaler.onClose(pnl > 0);
                             if (equity > peak) peak = equity;
                             const dd = (peak - equity) / peak * 100;
                             if (dd > maxDD) maxDD = dd;
@@ -1874,6 +1878,7 @@
                         if (worst) {
                             const pnl = wl;
                             equity += pnl; tradeCount++; if (pnl > 0) winsCount++;
+                            probScaler.onClose(pnl > 0);
                             if (equity > peak) peak = equity;
                             const dd = peak > 0 ? (peak - equity) / peak * 100 : 0; if (dd > maxDD) maxDD = dd;
                             prependOrder(worst, c.close, 'Маржин', pnl, equity, tradeCount);
@@ -1891,7 +1896,7 @@
                 }
 
                 if (!legs.length && i < n - 1 && marketOpen(currentSymbol, candles[i].time)) {
-                    const pr = probs[i];
+                    const pr = prScaled;
                     if (pr) {
                         const buyPct = pr.buyPct, sellPct = pr.sellPct;
                         const atr = atrSeries[i] || atrSeries[atrSeries.length - 1] || 1;

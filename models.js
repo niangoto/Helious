@@ -1026,6 +1026,36 @@ function getWaveletForecastData(prices, forecastSteps) {
   };
 }
 
+// ─── Адаптивно мащабиране на вероятностите („усилване на сигнала“) ──────────
+// За ВСИЧКИ модели, причинно (без бъдеще):
+//  • след SCALE_WARMUP бара се запомня най-голямото отклонение от 50 (|p−50|);
+//  • коефициент k = 50 / maxDev → неутралното 50 остава 50, а най-силният
+//    сигнал стига 0/100 („100% да се дели на макса“, изразено около 50);
+//  • ако успеваемостта падне под 40% (неуспешни > 60%), k се умножава по
+//    (успешни / общо) → пропорционално намаляване.
+// maxDev е running max от началото; мащабирането започва след загряващия период.
+const SCALE_WARMUP = 100;
+function createProbScaler() {
+  return {
+    maxDev: 0, wins: 0, losses: 0, count: 0,
+    scale(prob) {
+      if (!prob || prob.buyPct == null) return prob;
+      this.count++;
+      const p = prob.buyPct;
+      const dev = Math.abs(p - 50);
+      if (dev > this.maxDev) this.maxDev = dev;
+      if (this.count <= SCALE_WARMUP) return { buyPct: p, sellPct: 100 - p, time: prob.time };
+      let k = this.maxDev > 0 ? 50 / this.maxDev : 1;
+      const total = this.wins + this.losses;
+      if (total > 0 && this.wins / total < 0.40) k *= (this.wins / total);
+      let sp = 50 + (p - 50) * k;
+      sp = Math.max(0, Math.min(100, sp));
+      return { buyPct: sp, sellPct: 100 - sp, time: prob.time };
+    },
+    onClose(win) { if (win) this.wins++; else this.losses++; }
+  };
+}
+
 // ─── Node.js export (за търговския двигател) ───────────────────────
 // В браузъра `module` липсва, така че това не се изпълнява.
 if (typeof module !== 'undefined' && module.exports) {
@@ -1043,6 +1073,7 @@ if (typeof module !== 'undefined' && module.exports) {
     computeWaveletProbability,
     computeFourierProbSequence,
     computeRSIProbability,
+    createProbScaler,
     computeAllModels,
     computeHistoricalProbability,
     computeMarkovChain,
