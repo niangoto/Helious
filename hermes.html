@@ -2063,7 +2063,11 @@
             }
 
             renderSummary(P, equity, tradeCount, winsCount, maxDD);
-            setProgress(100, 'Симулацията завърши — ' + tradeCount + ' сделки');
+            if (tradeCount === 0) {
+                setProgress(100, '0 сделки — провери: „Мин. обем“ (твърде голям за бюджета → няма вход), праговете Buy/Sell, и че пазарът е отворен (не-крипто не търгува събота/неделя).');
+            } else {
+                setProgress(100, 'Симулацията завърши — ' + tradeCount + ' сделки');
+            }
         }
 
         async function runSimulation() {
@@ -2280,6 +2284,7 @@
             const tpDist = (parseFloat((document.getElementById('inpTp') || {}).value) || 1.5) * alpha * atr;
             const fx = fxFor(currentSymbol);                // котирана валута → EUR
             if (!fxFetchedAt) ensureFxRates();
+            const budget = Math.max(1, parseFloat((document.getElementById('inpBudget') || {}).value) || 1000);
             const dec = price >= 100 ? 2 : 5;
             el.classList.remove('warn');
             let txt;
@@ -2289,6 +2294,11 @@
                 txt = minLot.toFixed(2) + ' лот (' + currentSymbol + ') = ' + margin.toFixed(2) +
                     ' € маржин при 1:' + lev + ' (нотионал ' + notional.toFixed(2) +
                     ' € при последна цена ' + price.toFixed(dec) + ').';
+                if (margin > budget) {
+                    el.classList.add('warn');
+                    txt += ' ⚠ Маржинът за мин. обем (' + margin.toFixed(2) + ' €) надхвърля бюджета (' + budget.toFixed(2) +
+                        ' €) → НЯМА да се отварят позиции. Намали „Мин. обем“ (или ползвай авто-попълването от Binance) или увеличи бюджета.';
+                }
             } else {
                 txt = minLot.toFixed(2) + ' лот (' + currentSymbol + ').';
             }
