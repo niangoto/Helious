@@ -2165,12 +2165,15 @@
                 showRealInterval(simCandles, interval);
                 setProgress(10, `Изчисляване на вероятностите по модела (${simCandles.length} свещи)...`);
                 await sleep(30);
-                // ЕДНООБРАЗНО изчисление независимо от дължината на периода: всеки
-                // модел вече има ФИКСИРАН прозорец назад („Логистична“ 500, другите
-                // 2000), затова пълното причинно изчисление дава ЕДНАКВИ стойности
-                // за даден бар независимо колко е дълъг периодът (няма превключване
-                // на метод/праг, което да променя резултата според дължината).
-                const probs = computeModelProbSeries(simCandles, currentModel, { invert: contraFlags() });
+                // САМО „живото“ прозоречно изчисление (както реалния `engine/session.js`):
+                // всеки бар моделът вижда само последния прозорец назад („Логистична“ 500,
+                // другите 2000) — така резултатът за даден бар не зависи от дължината
+                // на периода. За дълги серии това е по-бавно (моли за търпение).
+                setProgress(10, `Изчисляване на вероятностите (прозоречно, ${simCandles.length} свещи)...`);
+                await sleep(30);
+                const probs = (typeof computeModelProbSeriesLive === 'function')
+                    ? computeModelProbSeriesLive(simCandles, currentModel, { invert: contraFlags() }, 2000)
+                    : computeModelProbSeries(simCandles, currentModel, { invert: contraFlags() });
                 if (cancelFlag) return;
 
                 const atrSeries = computeATR(simCandles, 14);
