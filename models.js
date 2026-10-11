@@ -635,6 +635,10 @@ function computeModelProbCore(candles, modelIndex, opts) {
   let totalWins = 0, totalTrades = 0;
   const recentTrades = [];
   const dirs = [];
+  // FIFO на приключилите сделки по closeIdx — за да изхвърляме статистиката
+  // по-стара от MODEL_LOOKBACK (иначе „Логистична“ трупа от бар 30 до края и
+  // вижда цялата история, не само последните 2000 бара).
+  const resolvedQ = [];
 
   const maskAt = (i) => signalMask(i, rsiAt(rsiV, i, 14), ema20[i], ema50[i], ema200[i], macd.macdLine[i], macd.signal[i], macd.histogram[i], atrV[i], adxR.adx[i], volV[i], meanAtrV[i], meanVolV[i]);
 
@@ -667,6 +671,20 @@ function computeModelProbCore(candles, modelIndex, opts) {
         if (e.win === 1) c.wins++;
         recentTrades.push({ win: e.win, atr: atrV[j] || 1 });
         if (recentTrades.length > MODEL_LOOKBACK) recentTrades.shift();
+        resolvedQ.push({ mask: e.mask, win: e.win, closeIdx: i });
+      }
+    }
+
+    // Изхвърляме статистиката по-стара от MODEL_LOOKBACK бара (плъзгащ прозорец).
+    while (resolvedQ.length && resolvedQ[0].closeIdx < i - (MODEL_LOOKBACK - 1)) {
+      const old = resolvedQ.shift();
+      totalTrades--;
+      if (old.win === 1) totalWins--;
+      const oc = combos.get(old.mask);
+      if (oc) {
+        oc.total--;
+        if (old.win === 1) oc.wins--;
+        if (oc.total <= 0) combos.delete(old.mask);
       }
     }
 
