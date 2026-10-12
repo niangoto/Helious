@@ -2312,6 +2312,11 @@
             const label = SWEEP_LABELS[inputId] || key;
             const info = document.getElementById('sweepInfo');
             showSweepPanel('Чувствителност: ' + label + ' (база ' + baseVal + ')');
+            // Базова проверка върху същите данни — колко сделки/печалба дава базата.
+            let baseRes = null;
+            try { baseRes = await simulate(candles, atrSeries, probs, baseP, interval, startIdx, true); } catch (e) { baseRes = null; }
+            const baseProfit = (baseRes && baseP.budget > 0) ? ((baseRes.equity - baseP.budget) / baseP.budget) * 100 : 0;
+            const baseTxt = baseRes ? ('база: ' + baseRes.tradeCount + ' сделки, ' + baseProfit.toFixed(2) + '%') : 'база: грешка';
             const results = [];
             const N = 201;
             const t0 = performance.now();
@@ -2340,7 +2345,7 @@
             }
             const dt = ((performance.now() - t0) / 1000).toFixed(1);
             const uniq = new Set(results.map(r => r.y.toFixed(4)));
-            let msg = 'Готово (' + results.length + ' точки, ' + dt + ' s) · база ' + label + ' = ' + baseVal;
+            let msg = 'Готово (' + results.length + ' точки, ' + dt + ' s) · база ' + label + ' = ' + baseVal + ' · ' + baseTxt;
             if (uniq.size <= 1) msg += ' — всички стойности са еднакви (параметърът не влияе или няма сделки; провери, че има сделки и промени модела/периода).';
             if (info) info.textContent = msg;
         }
