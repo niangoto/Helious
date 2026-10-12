@@ -1812,7 +1812,8 @@
                 equityPct = new Array(n).fill(null);
             }
             for (let i = i0; i < n; i++) {
-                if (cancelFlag) return silent ? { equity, tradeCount, winsCount, maxDD, cancelled: true } : undefined;
+                // При тих (sweep) режим гледаме sweepCancel; иначе — cancelFlag.
+                if (silent ? sweepCancel : cancelFlag) return silent ? { equity, tradeCount, winsCount, maxDD, cancelled: true } : undefined;
                 const prScaled = probs[i];
 
                 if (legs.length) {
@@ -2338,7 +2339,10 @@
                 sweepMode = false;
             }
             const dt = ((performance.now() - t0) / 1000).toFixed(1);
-            if (info) info.textContent = 'Готово (' + results.length + ' точки, ' + dt + ' s) · база ' + label + ' = ' + baseVal;
+            const uniq = new Set(results.map(r => r.y.toFixed(4)));
+            let msg = 'Готово (' + results.length + ' точки, ' + dt + ' s) · база ' + label + ' = ' + baseVal;
+            if (uniq.size <= 1) msg += ' — всички стойности са еднакви (параметърът не влияе или няма сделки; провери, че има сделки и промени модела/периода).';
+            if (info) info.textContent = msg;
         }
 
         function fmtParam(v) {
