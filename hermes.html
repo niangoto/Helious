@@ -2302,6 +2302,8 @@
                 alert('Пусни първо една симулация (▶ Стартирай), за да има заредени данни.');
                 return;
             }
+            // Нулираме cancelFlag (останал от „■ Стоп“), за да не блокира тихите пускове.
+            cancelFlag = false;
             sweepCancel = false; sweepMode = true;
             const { candles, atrSeries, probs, interval, startIdx } = lastSim;
             const baseP = readParams();
