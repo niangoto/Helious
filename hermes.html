@@ -2106,6 +2106,13 @@
         }
 
         async function runSimulation() {
+            // По време на анализ на чувствителността не стартираме симулация —
+            // отменяме sweep-а и ще я пуснем, след като той приключи.
+            if (sweepActive) {
+                sweepCancel = true;
+                runPending = true;
+                return;
+            }
             // Ако вече тече симулация — спираме я и пускаме нова (отначало, с новите
             // настройки). Веднага даваме индикация, че стартира наново.
             if (running) {
@@ -2119,6 +2126,10 @@
             running = true;
             cancelFlag = false;
             runPending = false;
+            // Старите данни/вероятности не важат за нова серия (символ, интервал,
+            // модел). Ако новата симулация бъде спряна преди да е готова, sweep-ът
+            // няма да работи върху остаряла серия.
+            lastSim = null;
 
             currentModel = parseInt(document.getElementById('inpModel').value, 10);
 
@@ -2223,6 +2234,9 @@
                     const spec = specFor(currentSymbol), fx = fxFor(currentSymbol);
                     P.minLot = Math.max(0.001, P.minLot / (P.refPrice * spec.contract * fx));
                 }
+                // Пазим ТОЧНИТЕ параметри на симулацията (с refPrice и превърнатия
+                // minLot) — sweep-ът варира от тях, а не от текущото състояние на UI.
+                lastSim.params = P;
                 resetOneMinCache();
                 await simulate(simCandles, atrSeries, probs, P, interval, simStartIdx);
                 if (!cancelFlag) {
@@ -2262,7 +2276,7 @@
             inpHold: 'Времево затваряне', inpKelly: 'Кели (част)', inpMaxKelly: 'Кели макс.',
             inpMinLot: 'Мин. обем', inpMinLotSpread: 'Спред на мин. обем'
         };
-        let pickingParam = false, sweepCancel = false, sweepMode = false, lastSim = null;
+        let pickingParam = false, sweepCancel = false, sweepMode = false, sweepActive = false, lastSim = null;
 
         function toggleSweepPick() {
             pickingParam = !pickingParam;
@@ -2302,33 +2316,50 @@
                 alert('Пусни първо една симулация (▶ Стартирай), за да има заредени данни.');
                 return;
             }
-            // Ако тече симулация (или е чакащ рестарт) — спираме и изчакваме да
-            // приключи, за да не се смесват състоянията.
-            if (running) {
-                cancelFlag = true;
-                for (let k = 0; k < 200 && running; k++) await sleep(25);
+            // Ако вече тече друг sweep — спираме го и изчакваме да приключи.
+            if (sweepActive) {
+                sweepCancel = true;
+                for (let k = 0; k < 400 && sweepActive; k++) await sleep(25);
             }
+            // Маркираме, че sweep тече. runSimulation няма да стартира нова
+            // симулация (отлага я чрез runPending), за да не се смесват глобалните
+            // флагове и състоянието на графиката по средата на анализа.
+            sweepActive = true;
             runPending = false;
-            cancelFlag = false;
-            sweepCancel = false; sweepMode = true;
-            const { candles, atrSeries, probs, interval, startIdx } = lastSim;
-            const baseP = readParams();
-            const baseVal = baseP[key];
-            const el = document.getElementById(inputId);
-            const minV = el && el.min !== '' ? parseFloat(el.min) : -Infinity;
-            const maxV = el && el.max !== '' ? parseFloat(el.max) : Infinity;
-            const label = SWEEP_LABELS[inputId] || key;
-            const info = document.getElementById('sweepInfo');
-            showSweepPanel('Чувствителност: ' + label + ' (база ' + baseVal + ')');
-            // Базова проверка върху същите данни — колко сделки/печалба дава базата.
-            let baseRes = null;
-            try { baseRes = await simulate(candles, atrSeries, probs, baseP, interval, startIdx, true); } catch (e) { baseRes = null; }
-            const baseProfit = (baseRes && baseP.budget > 0) ? ((baseRes.equity - baseP.budget) / baseP.budget) * 100 : 0;
-            const baseTxt = baseRes ? ('база: ' + baseRes.tradeCount + ' сделки, ' + baseProfit.toFixed(2) + '%') : 'база: грешка';
-            const results = [];
-            const N = 201;
-            const t0 = performance.now();
             try {
+                // Ако тече симулация (или е чакащ рестарт) — спираме и изчакваме.
+                // cancelFlag се вдига всеки цикъл, защото runSimulation може да го
+                // нулира при рестарт — иначе изчакването изтича и sweep-ът тръгва
+                // едновременно с работеща симулация (смесени резултати).
+                if (running) {
+                    for (let k = 0; k < 400 && running; k++) { cancelFlag = true; await sleep(25); }
+                    if (running) {   // не спря навреме → не смесваме състояния
+                        alert('Симулацията не спря навреме. Опитай отново.');
+                        return;   // finally ще нулира флаговете
+                    }
+                }
+                cancelFlag = false;
+                sweepCancel = false; sweepMode = true;
+                const { candles, atrSeries, probs, interval, startIdx } = lastSim;
+                // Базата е ТОЧНАТА симулация (същите параметри/модел), а не текущото
+                // състояние на UI — иначе базата и точките може да са несъвместими.
+                const baseP = lastSim.params ? Object.assign({}, lastSim.params) : readParams();
+                const baseVal = baseP[key];
+                const el = document.getElementById(inputId);
+                const minV = el && el.min !== '' ? parseFloat(el.min) : -Infinity;
+                const maxV = el && el.max !== '' ? parseFloat(el.max) : Infinity;
+                const label = SWEEP_LABELS[inputId] || key;
+                const info = document.getElementById('sweepInfo');
+                showSweepPanel('Чувствителност: ' + label + ' (база ' + baseVal + ')');
+                // Базова проверка върху същите данни — колко сделки/печалба дава базата.
+                let baseRes = null;
+                try { baseRes = await simulate(candles, atrSeries, probs, baseP, interval, startIdx, true); } catch (e) { baseRes = null; }
+                if (baseRes && baseRes.cancelled) baseRes = null;
+                const baseProfit = (baseRes && baseP.budget > 0) ? ((baseRes.equity - baseP.budget) / baseP.budget) * 100 : 0;
+                const baseTxt = baseRes ? ('база: ' + baseRes.tradeCount + ' сделки, ' + baseProfit.toFixed(2) + '%') : 'база: грешка';
+                const results = [];
+                const N = 201;
+                const t0 = performance.now();
                 for (let step = 0; step < N; step++) {
                     if (sweepCancel) break;
                     const pct = step - 100;   // −100..+100
@@ -2339,7 +2370,9 @@
                     P2[key] = val;
                     let r = null;
                     try { r = await simulate(candles, atrSeries, probs, P2, interval, startIdx, true); } catch (err) { r = null; }
-                    if (!r) continue;
+                    // Отменен (зададен нов старт/избор) → спираме, за да не впишем
+                    // частичен резултат като реална точка.
+                    if (!r || r.cancelled) { if (r && r.cancelled) break; else continue; }
                     const profit = baseP.budget > 0 ? ((r.equity - baseP.budget) / baseP.budget) * 100 : 0;
                     results.push({ x: val, y: profit, pct });
                     if (step % 4 === 0 || step === N - 1) {
@@ -2348,14 +2381,17 @@
                         await sleep(0);
                     }
                 }
+                const dt = ((performance.now() - t0) / 1000).toFixed(1);
+                const uniq = new Set(results.map(r => r.y.toFixed(4)));
+                let msg = 'Готово (' + results.length + ' точки, ' + dt + ' s) · база ' + label + ' = ' + baseVal + ' · ' + baseTxt;
+                if (uniq.size <= 1) msg += ' — всички стойности са еднакви (параметърът не влияе или няма сделки; провери, че има сделки и промени модела/периода).';
+                if (info) info.textContent = msg;
             } finally {
                 sweepMode = false;
+                sweepActive = false;
+                // Ако по време на sweep-а е поискан старт — пускаме симулацията сега.
+                if (runPending) { runPending = false; runSimulation(); }
             }
-            const dt = ((performance.now() - t0) / 1000).toFixed(1);
-            const uniq = new Set(results.map(r => r.y.toFixed(4)));
-            let msg = 'Готово (' + results.length + ' точки, ' + dt + ' s) · база ' + label + ' = ' + baseVal + ' · ' + baseTxt;
-            if (uniq.size <= 1) msg += ' — всички стойности са еднакви (параметърът не влияе или няма сделки; провери, че има сделки и промени модела/периода).';
-            if (info) info.textContent = msg;
         }
 
         function fmtParam(v) {
@@ -2651,6 +2687,15 @@
             mSel.addEventListener('change', () => {
                 document.getElementById('hModelBadge').textContent = modelNames[parseInt(mSel.value, 10)];
                 updateContraVisibility();
+                // Смяната на модела прави старите вероятности (probs) невалидни —
+                // sweep-ът иначе би варирал върху друг модел.
+                lastSim = null;
+            });
+            // „Контра“ флаговете също влизат в изчислението на вероятностите —
+            // промяната им инвалидира запазените probs за sweep-а.
+            [0, 1, 2, 3, 4].forEach(i => {
+                const el = document.getElementById('contraModel' + i);
+                if (el) el.addEventListener('change', () => { lastSim = null; });
             });
 
             toggleDates();
