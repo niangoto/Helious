@@ -871,6 +871,17 @@
         </div>
         <canvas id="sweepCanvas" width="450" height="240" style="width:100%;height:240px"></canvas>
         <div id="sweepInfo" style="font-size:10.5px;color:var(--text-dim);margin-top:4px"></div>
+        <div id="sweepMulti" style="margin-top:8px;border-top:1px solid var(--panel-border);padding-top:6px">
+            <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap">
+                <b style="font-size:11.5px">Комбинации от фактори</b>
+                <label style="font-size:10.5px;color:var(--text-dim)">Точки/фактор
+                    <input type="number" id="sweepPoints" value="11" min="3" max="201" step="1" style="width:54px">
+                </label>
+                <button class="btn" id="btnSweepMulti" onclick="runSweepCombos()" style="padding:2px 8px" title="Тества всички комбинации от избраните фактори върху същите данни">🔀 Изчисли</button>
+            </div>
+            <div id="sweepFactors" style="display:grid;grid-template-columns:1fr 1fr;gap:2px 10px;font-size:10.5px;margin-top:6px"></div>
+            <div id="sweepResults" style="margin-top:6px"></div>
+        </div>
     </div>
 
     <section class="controls">
@@ -2304,6 +2315,7 @@
             const p = document.getElementById('sweepPanel');
             if (p) p.style.display = 'block';
             if (title) document.getElementById('sweepTitle').textContent = title;
+            buildSweepFactors();
         }
         function closeSweepPanel() {
             sweepCancel = true;
@@ -2311,35 +2323,43 @@
             if (p) p.style.display = 'none';
         }
 
+        // Общо „заключване“ за sweep: изчаква текущия sweep/симулация, вдига
+        // флаговете и връща false, ако симулацията не спре навреме.
+        async function acquireSweep() {
+            if (sweepActive) {
+                sweepCancel = true;
+                for (let k = 0; k < 400 && sweepActive; k++) await sleep(25);
+            }
+            sweepActive = true;
+            runPending = false;
+            // cancelFlag се вдига всеки цикъл, защото runSimulation може да го
+            // нулира при рестарт — иначе изчакването изтича и sweep-ът тръгва
+            // едновременно с работеща симулация (смесени резултати).
+            if (running) {
+                for (let k = 0; k < 400 && running; k++) { cancelFlag = true; await sleep(25); }
+                if (running) { sweepActive = false; return false; }
+            }
+            cancelFlag = false;
+            sweepCancel = false; sweepMode = true;
+            return true;
+        }
+        function finishSweep() {
+            sweepMode = false;
+            sweepActive = false;
+            // Ако по време на sweep-а е поискан старт — пускаме симулацията сега.
+            if (runPending) { runPending = false; runSimulation(); }
+        }
+
         async function runSweep(inputId, key) {
             if (!lastSim || !lastSim.candles || !lastSim.candles.length) {
                 alert('Пусни първо една симулация (▶ Стартирай), за да има заредени данни.');
                 return;
             }
-            // Ако вече тече друг sweep — спираме го и изчакваме да приключи.
-            if (sweepActive) {
-                sweepCancel = true;
-                for (let k = 0; k < 400 && sweepActive; k++) await sleep(25);
+            if (!(await acquireSweep())) {
+                alert('Симулацията не спря навреме. Опитай отново.');
+                return;
             }
-            // Маркираме, че sweep тече. runSimulation няма да стартира нова
-            // симулация (отлага я чрез runPending), за да не се смесват глобалните
-            // флагове и състоянието на графиката по средата на анализа.
-            sweepActive = true;
-            runPending = false;
             try {
-                // Ако тече симулация (или е чакащ рестарт) — спираме и изчакваме.
-                // cancelFlag се вдига всеки цикъл, защото runSimulation може да го
-                // нулира при рестарт — иначе изчакването изтича и sweep-ът тръгва
-                // едновременно с работеща симулация (смесени резултати).
-                if (running) {
-                    for (let k = 0; k < 400 && running; k++) { cancelFlag = true; await sleep(25); }
-                    if (running) {   // не спря навреме → не смесваме състояния
-                        alert('Симулацията не спря навреме. Опитай отново.');
-                        return;   // finally ще нулира флаговете
-                    }
-                }
-                cancelFlag = false;
-                sweepCancel = false; sweepMode = true;
                 const { candles, atrSeries, probs, interval, startIdx } = lastSim;
                 // Базата е ТОЧНАТА симулация (същите параметри/модел), а не текущото
                 // състояние на UI — иначе базата и точките може да са несъвместими.
@@ -2350,6 +2370,8 @@
                 const maxV = el && el.max !== '' ? parseFloat(el.max) : Infinity;
                 const label = SWEEP_LABELS[inputId] || key;
                 const info = document.getElementById('sweepInfo');
+                const combosEl = document.getElementById('sweepResults');
+                if (combosEl) combosEl.innerHTML = '';   // махаме старите топ-3 от комбинации
                 showSweepPanel('Чувствителност: ' + label + ' (база ' + baseVal + ')');
                 // Базова проверка върху същите данни — колко сделки/печалба дава базата.
                 let baseRes = null;
@@ -2387,11 +2409,173 @@
                 if (uniq.size <= 1) msg += ' — всички стойности са еднакви (параметърът не влияе или няма сделки; провери, че има сделки и промени модела/периода).';
                 if (info) info.textContent = msg;
             } finally {
-                sweepMode = false;
-                sweepActive = false;
-                // Ако по време на sweep-а е поискан старт — пускаме симулацията сега.
-                if (runPending) { runPending = false; runSimulation(); }
+                finishSweep();
             }
+        }
+
+        // ── Комбинации от няколко фактора ────────────────────────────
+        // Избраните фактори се варират всеки в същия диапазон (−100%..+100% от
+        // базовата си стойност) през зададен брой точки и се тестват ВСИЧКИ
+        // комбинации върху същите данни. Показва % прогрес и топ 3.
+        let sweepTop = [];
+
+        function buildSweepFactors() {
+            const box = document.getElementById('sweepFactors');
+            if (!box || box.dataset.built) return;
+            box.dataset.built = '1';
+            box.innerHTML = Object.keys(SWEEP_LABELS).map(inputId => {
+                const key = SWEEP_KEYS[inputId];
+                return '<label style="display:flex;align-items:center;gap:4px;cursor:pointer">'
+                    + '<input type="checkbox" class="swf" data-input="' + inputId + '" data-key="' + key + '"> '
+                    + SWEEP_LABELS[inputId] + '</label>';
+            }).join('');
+        }
+
+        // Връща достатъчно точна стойност за запис в поле (без закръгляне на
+        // големи числа като fmtParam).
+        function fmtField(v) {
+            if (!isFinite(v)) return '';
+            return String(Math.round(v * 1e8) / 1e8);
+        }
+
+        async function runSweepCombos() {
+            if (!lastSim || !lastSim.candles || !lastSim.candles.length) {
+                alert('Пусни първо една симулация (▶ Стартирай), за да има заредени данни.');
+                return;
+            }
+            const checks = Array.from(document.querySelectorAll('#sweepFactors .swf:checked'));
+            if (!checks.length) {
+                alert('Избери поне един фактор (чекбокс) за комбинациите.');
+                return;
+            }
+            // Ръчно избиране на фактор гаси режима „цъкни върху поле“.
+            pickingParam = false;
+            document.body.style.cursor = '';
+            const bSweep = document.getElementById('btnSweep'); if (bSweep) bSweep.classList.remove('active');
+
+            const info = document.getElementById('sweepInfo');
+            const resultsEl = document.getElementById('sweepResults');
+            const baseP = lastSim.params ? Object.assign({}, lastSim.params) : readParams();
+            const points = Math.max(3, Math.min(201, parseInt((document.getElementById('sweepPoints') || {}).value, 10) || 11));
+
+            const dims = checks.map(c => {
+                const inputId = c.dataset.input, key = c.dataset.key;
+                const el = document.getElementById(inputId);
+                const minV = el && el.min !== '' ? parseFloat(el.min) : -Infinity;
+                const maxV = el && el.max !== '' ? parseFloat(el.max) : Infinity;
+                const baseVal = baseP[key];
+                const values = [];
+                for (let s = 0; s < points; s++) {
+                    const pct = -100 + (200 * s) / (points - 1);
+                    let v = (baseVal === 0) ? pct : baseVal * (1 + pct / 100);
+                    if (isFinite(minV)) v = Math.max(minV, v);
+                    if (isFinite(maxV)) v = Math.min(maxV, v);
+                    values.push(v);
+                }
+                return { key, inputId, label: SWEEP_LABELS[inputId] || key, values, baseVal };
+            });
+            const total = dims.reduce((a, d) => a * d.values.length, 1);
+            const MAX = 100000;
+            if (total > MAX) {
+                alert('Твърде много комбинации (' + total.toLocaleString('bg-BG') + '). Намали факторите или „Точки/фактор“ (макс. ' + MAX.toLocaleString('bg-BG') + ').');
+                return;
+            }
+            if (resultsEl) resultsEl.innerHTML = '';
+
+            if (!(await acquireSweep())) {
+                alert('Симулацията не спря навреме. Опитай отново.');
+                return;
+            }
+            try {
+                const { candles, atrSeries, probs, interval, startIdx } = lastSim;
+                showSweepPanel('Комбинации (' + total.toLocaleString('bg-BG') + '): ' + dims.map(d => d.label).join(' × '));
+                const idx = new Array(dims.length).fill(0);
+                const top = [];
+                const t0 = performance.now();
+                let done = 0;
+                // Базова проверка (без промени), за да има с какво да се сравнява.
+                let baseProfit = null;
+                try {
+                    const br = await simulate(candles, atrSeries, probs, Object.assign({}, baseP), interval, startIdx, true);
+                    if (br && !br.cancelled && baseP.budget > 0) baseProfit = ((br.equity - baseP.budget) / baseP.budget) * 100;
+                } catch (e) { baseProfit = null; }
+                while (true) {
+                    if (sweepCancel) break;
+                    const P2 = Object.assign({}, baseP);
+                    const vals = new Array(dims.length);
+                    for (let d = 0; d < dims.length; d++) { const v = dims[d].values[idx[d]]; P2[dims[d].key] = v; vals[d] = v; }
+                    let r = null;
+                    try { r = await simulate(candles, atrSeries, probs, P2, interval, startIdx, true); } catch (err) { r = null; }
+                    if (r && r.cancelled) break;
+                    if (r) {
+                        const profit = baseP.budget > 0 ? ((r.equity - baseP.budget) / baseP.budget) * 100 : 0;
+                        top.push({ profit, vals: vals.slice(), P: P2, trades: r.tradeCount });
+                        top.sort((a, b) => b.profit - a.profit);
+                        if (top.length > 3) top.length = 3;
+                    }
+                    done++;
+                    // Следваща комбинация (одометър).
+                    let d = dims.length - 1;
+                    while (d >= 0) { if (++idx[d] < dims[d].values.length) break; idx[d] = 0; d--; }
+                    if (d < 0) break;
+                    if (done % 15 === 0 || done === total) {
+                        if (info) info.textContent = 'Проверени ' + done.toLocaleString('bg-BG') + ' / ' + total.toLocaleString('bg-BG') + ' комбинации (' + (done / total * 100).toFixed(1) + '%)...';
+                        await sleep(0);
+                    }
+                }
+                const dt = ((performance.now() - t0) / 1000).toFixed(1);
+                renderSweepTop(top, dims, info, done, total, dt, baseProfit);
+            } finally {
+                finishSweep();
+            }
+        }
+
+        function renderSweepTop(top, dims, info, done, total, dt, baseProfit) {
+            const el = document.getElementById('sweepResults');
+            const baseTxt = (baseProfit != null) ? (' · база ' + baseProfit.toFixed(2) + '%') : '';
+            if (!el) return;
+            if (!top.length) {
+                el.innerHTML = '<div style="font-size:10.5px;color:var(--text-dim)">Няма резултати.</div>';
+                if (info) info.textContent = 'Готово (' + done.toLocaleString('bg-BG') + '/' + total.toLocaleString('bg-BG') + ', ' + dt + ' s)' + baseTxt;
+                return;
+            }
+            let html = '<div style="font-size:11px;font-weight:bold;margin-bottom:3px">Топ 3 комбинации' + baseTxt + '</div>';
+            top.forEach((t, i) => {
+                const params = dims.map((d, j) => d.label + ' = ' + fmtField(t.vals[j])).join(' · ');
+                html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin:3px 0;background:#0f1521;border:1px solid var(--panel-border);border-radius:6px;padding:4px 6px">'
+                    + '<div style="font-size:10.5px;line-height:1.35"><b>#' + (i + 1) + '</b> '
+                    + '<span class="' + (t.profit >= 0 ? 'pos' : 'neg') + '">' + (t.profit >= 0 ? '+' : '') + t.profit.toFixed(2) + '%</span>'
+                    + '<div style="color:var(--text-dim)">' + params + ' · ' + t.trades + ' сделки</div></div>'
+                    + '<button class="btn" style="padding:2px 8px;white-space:nowrap" onclick="applySweepCombo(' + i + ')">Приложи</button>'
+                    + '</div>';
+            });
+            el.innerHTML = html;
+            sweepTop = top;
+            if (info) info.textContent = 'Готово (' + done.toLocaleString('bg-BG') + '/' + total.toLocaleString('bg-BG') + ' комбинации, ' + dt + ' s)' + baseTxt;
+        }
+
+        // Прилага избраната комбинация: записва стойностите на факторите в полетата
+        // и пуска симулацията наново, за да се види резултатът веднага.
+        function applySweepCombo(i) {
+            const t = sweepTop[i];
+            if (!t || !t.P) return;
+            for (const inputId of Object.keys(SWEEP_KEYS)) {
+                const key = SWEEP_KEYS[inputId];
+                if (!(key in t.P)) continue;
+                const el = document.getElementById(inputId);
+                if (!el) continue;
+                let v = t.P[key];
+                // „Мин. обем“ при единица „цена“ (€) се пази в лотове — връщаме в €.
+                if (inputId === 'inpMinLot' && ((document.getElementById('inpMinLotUnit') || {}).value === 'value')) {
+                    const px = (t.P.refPrice > 0) ? t.P.refPrice : hintPrice();
+                    const spec = specFor(currentSymbol), fx = fxFor(currentSymbol);
+                    if (px > 0) v = v * px * spec.contract * fx;
+                }
+                el.value = fmtField(v);
+            }
+            updateMinLotSpreadHint();
+            closeSweepPanel();
+            runSimulation();
         }
 
         function fmtParam(v) {
