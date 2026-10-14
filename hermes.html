@@ -860,6 +860,10 @@
             <button class="btn start" id="btnStart" onclick="runSimulation()">▶ Стартирай</button>
             <button class="btn stop" id="btnStop" onclick="stopSimulation()">■ Стоп</button>
             <button class="btn" id="btnSweep" onclick="toggleSweepPick()" title="Анализ на чувствителността: цъкни бутона, после цъкни върху настройка">📈 Чувствителност</button>
+            <button class="btn" onclick="saveSettings()" title="Запази всички настройки във файл (.json)">💾 Запази</button>
+            <label class="btn" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="Зареди настройки от файл (.json)">📂 Зареди
+                <input type="file" id="settingsFile" accept=".json,application/json" style="display:none" onchange="loadSettings(event)">
+            </label>
             <button class="btn close" onclick="window.close()">✕</button>
         </div>
     </header>
@@ -2887,6 +2891,130 @@
                 }
                 updateMinLotSpreadHint();
             } catch (e) { /* не е Binance или мрежата е недостъпна */ }
+        }
+
+        // ── Запазване/зареждане на настройки (.json) ─────────────────
+        // Записва всички контролируеми полета, за да може един файл да върне
+        // точно състоянието на формуляра (символ, интервал, модел, параметри...).
+        const SETTINGS_SCHEMA = [
+            { id: 'inpBudget', type: 'value' },
+            { id: 'inpLev', type: 'value' },
+            { id: 'inpAlpha', type: 'value' },
+            { id: 'inpBuyTh', type: 'value' },
+            { id: 'inpSellTh', type: 'value' },
+            { id: 'inpMinEv', type: 'value' },
+            { id: 'inpTp', type: 'value' },
+            { id: 'inpSl', type: 'value' },
+            { id: 'inpHold', type: 'value' },
+            { id: 'inpKelly', type: 'value' },
+            { id: 'inpMaxKelly', type: 'value' },
+            { id: 'inpMinLot', type: 'value' },
+            { id: 'inpMinLotUnit', type: 'value' },
+            { id: 'inpMinLotSpread', type: 'value' },
+            { id: 'inpSpreadUnit', type: 'value' },
+            { id: 'inpPctClose', type: 'checkbox' },
+            { id: 'inpPctCloseLimit', type: 'value' },
+            { id: 'inpReverse', type: 'checkbox' },
+            { id: 'inpModel', type: 'value' },
+            { id: 'inpInterval', type: 'value' },
+            { id: 'inpSpeed', type: 'value' },
+            { id: 'inpUseDates', type: 'checkbox' },
+            { id: 'inpDateFrom', type: 'value' },
+            { id: 'inpDateTo', type: 'value' },
+            { id: 'contraModel0', type: 'checkbox' },
+            { id: 'contraModel1', type: 'checkbox' },
+            { id: 'contraModel2', type: 'checkbox' },
+            { id: 'contraModel3', type: 'checkbox' },
+            { id: 'contraModel4', type: 'checkbox' }
+        ];
+
+        function collectSettingsFields() {
+            const fields = {};
+            for (const f of SETTINGS_SCHEMA) {
+                const el = document.getElementById(f.id);
+                if (!el) continue;
+                fields[f.id] = (f.type === 'checkbox') ? !!el.checked : el.value;
+            }
+            return fields;
+        }
+
+        function applySettingsFields(fields) {
+            for (const f of SETTINGS_SCHEMA) {
+                if (!(f.id in fields)) continue;
+                const el = document.getElementById(f.id);
+                if (!el) continue;
+                if (f.type === 'checkbox') el.checked = !!fields[f.id];
+                else el.value = fields[f.id];
+            }
+        }
+
+        function saveSettings() {
+            const data = {
+                app: 'hermes',
+                type: 'settings',
+                version: 1,
+                savedAt: new Date().toISOString(),
+                symbol: currentSymbol,
+                fields: collectSettingsFields()
+            };
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const sym = String(currentSymbol || 'hermes').replace(/[^A-Za-z0-9._-]+/g, '');
+            a.href = url;
+            a.download = 'hermes-settings-' + sym + '.json';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+
+        function loadSettings(ev) {
+            const input = ev && ev.target;
+            const file = input && input.files && input.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = () => {
+                if (input) input.value = '';
+                let data;
+                try { data = JSON.parse(reader.result); } catch (e) { alert('Файлът не е валиден JSON.'); return; }
+                if (!data || !data.fields || typeof data.fields !== 'object') {
+                    alert('Това не е файл с настройки на HERMES (липсва „fields“).');
+                    return;
+                }
+                applyHermesSettings(data);
+            };
+            reader.onerror = () => { if (input) input.value = ''; alert('Грешка при четене на файла.'); };
+            reader.readAsText(file);
+        }
+
+        async function applyHermesSettings(data) {
+            const fields = data.fields;
+            const dateLoaded = ('inpDateFrom' in fields) || ('inpDateTo' in fields);
+            const symChanged = (typeof data.symbol === 'string' && data.symbol && data.symbol !== currentSymbol);
+            if (symChanged) {
+                currentSymbol = data.symbol;
+                const badge = document.getElementById('hSymbol');
+                if (badge) badge.textContent = currentSymbol;
+            }
+            applySettingsFields(fields);
+            if (dateLoaded) datesTouched = true;
+            updateContraVisibility();
+            const mSel = document.getElementById('inpModel');
+            if (mSel) {
+                const mb = document.getElementById('hModelBadge');
+                if (mb && modelNames[parseInt(mSel.value, 10)]) mb.textContent = modelNames[parseInt(mSel.value, 10)];
+            }
+            if (typeof toggleDates === 'function') toggleDates();
+            setProgress(0, 'Заредени настройки от файл. Зареждане на данни...');
+            if (symChanged) {
+                // Теглим мин. обем/спред за новия символ, после връщаме запазените
+                // стойности (за да не ги презапише авто-попълването).
+                try { await autoFillInstrument(); } catch (e) { }
+                applySettingsFields(fields);
+            }
+            updateMinLotSpreadHint();
+            runSimulation();
         }
 
         function initUI() {
