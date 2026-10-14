@@ -878,6 +878,8 @@
                     <input type="number" id="sweepPoints" value="11" min="3" max="201" step="1" style="width:54px">
                 </label>
                 <button class="btn" id="btnSweepMulti" onclick="runSweepCombos()" style="padding:2px 8px" title="Тества всички комбинации от избраните фактори върху същите данни">🔀 Изчисли</button>
+                <button class="btn" id="btnSweepPause" onclick="toggleSweepPause()" style="padding:2px 8px;display:none">⏸ Пауза</button>
+                <button class="btn stop" id="btnSweepStop" onclick="stopSweep()" style="padding:2px 8px;display:none">⏹ Стоп</button>
             </div>
             <div id="sweepFactors" style="display:grid;grid-template-columns:1fr 1fr;gap:2px 10px;font-size:10.5px;margin-top:6px"></div>
             <div id="sweepResults" style="margin-top:6px"></div>
@@ -2077,8 +2079,9 @@
                         setProgress(Math.round(((i - i0) / Math.max(1, n - i0)) * 100), `Обработка на свещ ${i}/${n} — ${tradeCount} сделки`);
                         await sleep(0);
                     }
-                } else if (i % 500 === 0) {
+                } else if (i % 500 === 0 || sweepPaused) {
                     await sleep(0);   // не блокираме UI при sweep
+                    while (sweepPaused && !sweepCancel) await sleep(50);   // пауза
                 }
             }
 
@@ -2287,7 +2290,7 @@
             inpHold: 'Времево затваряне', inpKelly: 'Кели (част)', inpMaxKelly: 'Кели макс.',
             inpMinLot: 'Мин. обем', inpMinLotSpread: 'Спред на мин. обем'
         };
-        let pickingParam = false, sweepCancel = false, sweepMode = false, sweepActive = false, lastSim = null;
+        let pickingParam = false, sweepCancel = false, sweepMode = false, sweepActive = false, sweepPaused = false, lastSim = null;
 
         function toggleSweepPick() {
             pickingParam = !pickingParam;
@@ -2319,8 +2322,40 @@
         }
         function closeSweepPanel() {
             sweepCancel = true;
+            sweepPaused = false;
             const p = document.getElementById('sweepPanel');
             if (p) p.style.display = 'none';
+        }
+
+        // Показва/скрива бутоните за пауза/стоп, докато тече sweep.
+        function setSweepControls(active) {
+            const p = document.getElementById('btnSweepPause');
+            const s = document.getElementById('btnSweepStop');
+            if (p) { p.style.display = active ? '' : 'none'; p.textContent = sweepPaused ? '▶ Продължи' : '⏸ Пауза'; }
+            if (s) s.style.display = active ? '' : 'none';
+            if (!active) sweepPaused = false;
+        }
+        function toggleSweepPause() {
+            if (!sweepActive) return;
+            sweepPaused = !sweepPaused;
+            const p = document.getElementById('btnSweepPause');
+            if (p) p.textContent = sweepPaused ? '▶ Продължи' : '⏸ Пауза';
+            const info = document.getElementById('sweepInfo');
+            if (info) info.textContent = info.textContent.replace(/ · пауза/g, '') + (sweepPaused ? ' · пауза' : '');
+        }
+        function stopSweep() {
+            sweepCancel = true;
+            sweepPaused = false;   // за да не чака в пауза
+        }
+        // Форматира секунди в четимо време (за оценката колко остава).
+        function fmtDur(sec) {
+            if (!isFinite(sec) || sec < 0) return '—';
+            if (sec < 1) return '<1с';
+            if (sec < 60) return Math.round(sec) + 'с';
+            const m = Math.floor(sec / 60), s = Math.round(sec % 60);
+            if (m < 60) return m + 'м ' + s + 'с';
+            const h = Math.floor(m / 60);
+            return h + 'ч ' + (m % 60) + 'м';
         }
 
         // Общо „заключване“ за sweep: изчаква текущия sweep/симулация, вдига
@@ -2331,13 +2366,15 @@
                 for (let k = 0; k < 400 && sweepActive; k++) await sleep(25);
             }
             sweepActive = true;
+            sweepPaused = false;
+            setSweepControls(true);
             runPending = false;
             // cancelFlag се вдига всеки цикъл, защото runSimulation може да го
             // нулира при рестарт — иначе изчакването изтича и sweep-ът тръгва
             // едновременно с работеща симулация (смесени резултати).
             if (running) {
                 for (let k = 0; k < 400 && running; k++) { cancelFlag = true; await sleep(25); }
-                if (running) { sweepActive = false; return false; }
+                if (running) { sweepActive = false; setSweepControls(false); return false; }
             }
             cancelFlag = false;
             sweepCancel = false; sweepMode = true;
@@ -2346,6 +2383,7 @@
         function finishSweep() {
             sweepMode = false;
             sweepActive = false;
+            setSweepControls(false);
             // Ако по време на sweep-а е поискан старт — пускаме симулацията сега.
             if (runPending) { runPending = false; runSimulation(); }
         }
@@ -2383,6 +2421,7 @@
                 const N = 201;
                 const t0 = performance.now();
                 for (let step = 0; step < N; step++) {
+                    while (sweepPaused && !sweepCancel) await sleep(50);
                     if (sweepCancel) break;
                     const pct = step - 100;   // −100..+100
                     let val = (baseVal === 0) ? pct : baseVal * (1 + pct / 100);
@@ -2475,9 +2514,14 @@
                 return { key, inputId, label: SWEEP_LABELS[inputId] || key, values, baseVal };
             });
             const total = dims.reduce((a, d) => a * d.values.length, 1);
-            const MAX = 100000;
+            const MAX = 5000000;   // твърда предпазна граница (процесът може да се паузира/спре)
             if (total > MAX) {
                 alert('Твърде много комбинации (' + total.toLocaleString('bg-BG') + '). Намали факторите или „Точки/фактор“ (макс. ' + MAX.toLocaleString('bg-BG') + ').');
+                return;
+            }
+            // Големите серии може да отнемат дълго — питаме, но по време на
+            // изчислението може да се паузира (⏸) или спре (⏹) по всяко време.
+            if (total > 200000 && !confirm('Предстоят ' + total.toLocaleString('bg-BG') + ' комбинации и може да отнеме много време. По време на изчислението можеш да го паузираш или спреш.\n\nДа продължа ли?')) {
                 return;
             }
             if (resultsEl) resultsEl.innerHTML = '';
@@ -2500,6 +2544,7 @@
                     if (br && !br.cancelled && baseP.budget > 0) baseProfit = ((br.equity - baseP.budget) / baseP.budget) * 100;
                 } catch (e) { baseProfit = null; }
                 while (true) {
+                    while (sweepPaused && !sweepCancel) await sleep(50);
                     if (sweepCancel) break;
                     const P2 = Object.assign({}, baseP);
                     const vals = new Array(dims.length);
@@ -2519,7 +2564,9 @@
                     while (d >= 0) { if (++idx[d] < dims[d].values.length) break; idx[d] = 0; d--; }
                     if (d < 0) break;
                     if (done % 15 === 0 || done === total) {
-                        if (info) info.textContent = 'Проверени ' + done.toLocaleString('bg-BG') + ' / ' + total.toLocaleString('bg-BG') + ' комбинации (' + (done / total * 100).toFixed(1) + '%)...';
+                        const elapsed = (performance.now() - t0) / 1000;
+                        const eta = done > 0 ? (elapsed / done) * (total - done) : 0;
+                        if (info) info.textContent = 'Проверени ' + done.toLocaleString('bg-BG') + ' / ' + total.toLocaleString('bg-BG') + ' (' + (done / total * 100).toFixed(1) + '%) · остават ~' + fmtDur(eta) + (sweepPaused ? ' · пауза' : '');
                         await sleep(0);
                     }
                 }
@@ -2533,10 +2580,11 @@
         function renderSweepTop(top, dims, info, done, total, dt, baseProfit) {
             const el = document.getElementById('sweepResults');
             const baseTxt = (baseProfit != null) ? (' · база ' + baseProfit.toFixed(2) + '%') : '';
+            const head = done < total ? 'Спряно' : 'Готово';
             if (!el) return;
             if (!top.length) {
                 el.innerHTML = '<div style="font-size:10.5px;color:var(--text-dim)">Няма резултати.</div>';
-                if (info) info.textContent = 'Готово (' + done.toLocaleString('bg-BG') + '/' + total.toLocaleString('bg-BG') + ', ' + dt + ' s)' + baseTxt;
+                if (info) info.textContent = head + ' (' + done.toLocaleString('bg-BG') + '/' + total.toLocaleString('bg-BG') + ', ' + dt + ' s)' + baseTxt;
                 return;
             }
             let html = '<div style="font-size:11px;font-weight:bold;margin-bottom:3px">Топ 3 комбинации' + baseTxt + '</div>';
@@ -2551,7 +2599,7 @@
             });
             el.innerHTML = html;
             sweepTop = top;
-            if (info) info.textContent = 'Готово (' + done.toLocaleString('bg-BG') + '/' + total.toLocaleString('bg-BG') + ' комбинации, ' + dt + ' s)' + baseTxt;
+            if (info) info.textContent = head + ' (' + done.toLocaleString('bg-BG') + '/' + total.toLocaleString('bg-BG') + ' комбинации, ' + dt + ' s)' + baseTxt;
         }
 
         // Прилага избраната комбинация: записва стойностите на факторите в полетата
