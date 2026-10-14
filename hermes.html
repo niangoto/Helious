@@ -2418,12 +2418,15 @@
                 const baseProfit = (baseRes && baseP.budget > 0) ? ((baseRes.equity - baseP.budget) / baseP.budget) * 100 : 0;
                 const baseTxt = baseRes ? ('база: ' + baseRes.tradeCount + ' сделки, ' + baseProfit.toFixed(2) + '%') : 'база: грешка';
                 const results = [];
-                const N = 201;
+                // Броят точки съвпада с „Точки/фактор“ — същата настройка важи и за
+                // един фактор (при 201 = старото поведение със стъпка 1%).
+                const N = Math.max(3, Math.min(201, parseInt((document.getElementById('sweepPoints') || {}).value, 10) || 11));
+                const paintEvery = Math.max(1, Math.round(N / 50));
                 const t0 = performance.now();
                 for (let step = 0; step < N; step++) {
                     while (sweepPaused && !sweepCancel) await sleep(50);
                     if (sweepCancel) break;
-                    const pct = step - 100;   // −100..+100
+                    const pct = -100 + (200 * step) / (N - 1);   // −100..+100
                     let val = (baseVal === 0) ? pct : baseVal * (1 + pct / 100);
                     if (isFinite(minV)) val = Math.max(minV, val);
                     if (isFinite(maxV)) val = Math.min(maxV, val);
@@ -2436,7 +2439,7 @@
                     if (!r || r.cancelled) { if (r && r.cancelled) break; else continue; }
                     const profit = baseP.budget > 0 ? ((r.equity - baseP.budget) / baseP.budget) * 100 : 0;
                     results.push({ x: val, y: profit, pct });
-                    if (step % 4 === 0 || step === N - 1) {
+                    if (step % paintEvery === 0 || step === N - 1) {
                         drawSweep(results, baseVal, label);
                         if (info) info.textContent = 'Точки: ' + results.length + '/' + N + ' · ' + label + ' = ' + fmtParam(val) + ' → ' + profit.toFixed(2) + '%';
                         await sleep(0);
