@@ -1033,6 +1033,7 @@ if (typeof module !== 'undefined' && module.exports) {
     resolveTrade,
     computeModelProbSeries,
     computeModelProbSeriesLive,
+    computeModelProbCore,
     computeModelProbSequence,
     computeWaveletProbability,
     computeFourierProbSequence,
