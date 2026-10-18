@@ -1822,18 +1822,19 @@
             }
         }
 
-        function renderSummary(P, equity, trades, wins, maxDD, pnlExSum) {
+        function renderSummary(P, equity, trades, wins, maxDD, pnlExSum, minLotsSum) {
             const pnl = equity - P.budget;
             const pct = P.budget > 0 ? (pnl / P.budget) * 100 : 0;
             const winRate = trades > 0 ? (wins / trades) * 100 : 0;
-            const avgEx = trades > 0 ? ((pnlExSum || 0) / trades) : 0;
+            // Средна печалба на МИНИМАЛЕН ОБЕМ (без спред) = Σ P/L без спред / Σ мин. обеми.
+            const avgEx = (minLotsSum > 0) ? ((pnlExSum || 0) / minLotsSum) : 0;
             const el = document.getElementById('summary');
             el.innerHTML = `
                 <div class="sum-item"><span>Начален капитал</span><b>${P.budget.toFixed(2)} €</b></div>
                 <div class="sum-item"><span>Краен капитал</span><b>${equity.toFixed(2)} €</b></div>
                 <div class="sum-item ${pnl >= 0 ? 'pos' : 'neg'}"><span>Печалба / Загуба</span><b>${(pnl >= 0 ? '+' : '') + pnl.toFixed(2)} € (${(pct >= 0 ? '+' : '') + pct.toFixed(2)}%)</b></div>
                 <div class="sum-item"><span>Сделки</span><b>${trades}</b></div>
-                <div class="sum-item ${avgEx >= 0 ? 'pos' : 'neg'}" title="Средна печалба на сделка без спреда (сума на P/L без спреда / брой сделки)"><span>Средна печалба/сделка (без спред)</span><b>${(avgEx >= 0 ? '+' : '') + avgEx.toFixed(2)} €</b></div>
+                <div class="sum-item ${avgEx >= 0 ? 'pos' : 'neg'}" title="Средна печалба на минимален обем без спреда (Σ P/L без спред / Σ минимални обеми)"><span>Средна печалба/мин. обем (без спред)</span><b>${(avgEx >= 0 ? '+' : '') + fmtAmt(avgEx)} €</b></div>
                 <div class="sum-item"><span>Win rate</span><b>${winRate.toFixed(1)}%</b></div>
                 <div class="sum-item ${maxDD > 0 ? 'neg' : 'pos'}"><span>Макс. теглене</span><b>${maxDD.toFixed(2)}%</b></div>
             `;
@@ -1854,6 +1855,9 @@
                 return (pos.dir === 'BUY' ? (exitPrice - entryEx) : (entryEx - exitPrice)) * pos.units * (pos.fx || 1);
             };
             let pnlExSum = 0;
+            // „Минимален обем“ за нормализиране на печалбата (конфигурираният мин. лот).
+            const minLotUnit = Math.max(1e-9, P.minLot || 1);
+            let minLotsSum = 0;
             const n = candles.length;
             if (!silent) {
                 tradeMarkers = [];
@@ -1910,6 +1914,7 @@
                                 : (pos.entry - exitPrice) * pos.units) * (pos.fx || 1);
                             equity += pnl;
                             pnlExSum += pnlExOf(pos, exitPrice);
+                            minLotsSum += (pos.lots || 0) / minLotUnit;
                             tradeCount++;
                             if (pnl > 0) winsCount++;
                             if (equity > peak) peak = equity;
@@ -1953,6 +1958,7 @@
                             const pnl = wl;
                             equity += pnl;
                             pnlExSum += pnlExOf(worst, c.close);
+                            minLotsSum += (worst.lots || 0) / minLotUnit;
                             tradeCount++; if (pnl > 0) winsCount++;
                             if (equity > peak) peak = equity;
                             const dd = peak > 0 ? (peak - equity) / peak * 100 : 0; if (dd > maxDD) maxDD = dd;
@@ -2161,6 +2167,7 @@
                         : (pos.entry - c.close) * pos.units) * (pos.fx || 1);
                     equity += pnl;
                     pnlExSum += pnlExOf(pos, c.close);
+                    minLotsSum += (pos.lots || 0) / minLotUnit;
                     tradeCount++;
                     if (pnl > 0) winsCount++;
                     if (!silent) {
@@ -2180,7 +2187,7 @@
             }
 
             if (silent) return { equity, tradeCount, winsCount, maxDD };
-            renderSummary(P, equity, tradeCount, winsCount, maxDD, pnlExSum);
+            renderSummary(P, equity, tradeCount, winsCount, maxDD, pnlExSum, minLotsSum);
             if (tradeCount === 0) {
                 setProgress(100, '0 сделки — провери: „Мин. обем“ (твърде голям за бюджета → няма вход), праговете Buy/Sell, и че пазарът е отворен (не-крипто не търгува събота/неделя).');
             } else {
