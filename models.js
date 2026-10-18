@@ -644,6 +644,11 @@ function computeModelProbCore(candles, modelIndex, opts) {
   const invert = (opts && Array.isArray(opts.invert)) ? opts.invert : [];
   const inv = (v, m) => invert[m] ? (100 - v) : v;
   const noClamp = !!(opts && opts.noClamp);
+  // Параметър „поглед назад“ (свещи). Ако не е подаден — текущите стойности по
+  // подразбиране (логистична: LOGISTIC_LOOKBACK; останалите: MODEL_LOOKBACK).
+  const lb = (opts && opts.lookback > 0) ? Math.max(30, Math.floor(opts.lookback)) : 0;
+  const logisticLb = lb || LOGISTIC_LOOKBACK;
+  const modelLb = lb || MODEL_LOOKBACK;
   const result = new Array(n).fill(null);
   const prices = candles.map(c => c.close);
   const rsiV = typeof computeRSI === 'function' ? computeRSI(candles, 14) : prices.map(() => 50);
@@ -655,8 +660,8 @@ function computeModelProbCore(candles, modelIndex, opts) {
   const adxR = computeADX(candles, 14);
   const volV = candles.map(c => c.volume || 0);
   // Причинна базова линия (средно само до i) — без бъдещи ATR/обем.
-  const meanAtrV = rollingMean(atrV, LOGISTIC_LOOKBACK);
-  const meanVolV = rollingMean(volV, LOGISTIC_LOOKBACK);
+  const meanAtrV = rollingMean(atrV, logisticLb);
+  const meanVolV = rollingMean(volV, logisticLb);
   const maxBars = Math.min(50, n);
 
   // RSI модел: усредняваме buyPct само за таймфреймове >= избрания период за
@@ -711,7 +716,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
     // Насочена статистика в плъзгащ прозорец — посоката е известна към време i
     const d = candles[i].close >= candles[i - 1].close ? 1 : 0;
     dirs.push(d);
-    if (dirs.length > MODEL_WINDOW) dirs.shift();
+    if (dirs.length > modelLb) dirs.shift();
 
     // Fold in all trades that resolved exactly at candle i (entry order).
     if (resolvedAt[i].length) {
@@ -724,13 +729,13 @@ function computeModelProbCore(candles, modelIndex, opts) {
         const c = combos.get(e.mask); c.total++;
         if (e.win === 1) c.wins++;
         recentTrades.push({ win: e.win, atr: atrV[j] || 1 });
-        if (recentTrades.length > MODEL_LOOKBACK) recentTrades.shift();
+        if (recentTrades.length > modelLb) recentTrades.shift();
         resolvedQ.push({ mask: e.mask, win: e.win, closeIdx: i });
       }
     }
 
     // Изхвърляме статистиката по-стара от MODEL_LOOKBACK бара (плъзгащ прозорец).
-    while (resolvedQ.length && resolvedQ[0].closeIdx < i - (LOGISTIC_LOOKBACK - 1)) {
+    while (resolvedQ.length && resolvedQ[0].closeIdx < i - (logisticLb - 1)) {
       const old = resolvedQ.shift();
       totalTrades--;
       if (old.win === 1) totalWins--;
@@ -755,7 +760,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
       val = evVal();
     } else if (modelIndex === 4) {
       // Плъзгащ прозорец (последни 500 цени) — пази O(n) при големи серии
-      const win = Math.max(0, i - (MODEL_LOOKBACK - 1));
+      const win = Math.max(0, i - (modelLb - 1));
       const w = computeWaveletProbability(prices.slice(win, i + 1));
       val = w.buyPct;
     } else if (modelIndex === 5) {
@@ -767,7 +772,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
       v1 = inv(v1, 1); sum += v1; cnt++;
       const v2 = inv(amplify(markovProb(dirs)), 2); sum += v2; cnt++;
       const v3 = inv(evVal(), 3); sum += v3; cnt++;
-      const win = Math.max(0, i - (MODEL_LOOKBACK - 1));
+      const win = Math.max(0, i - (modelLb - 1));
       const v4 = inv(computeWaveletProbability(prices.slice(win, i + 1)).buyPct, 4); sum += v4; cnt++;
       val = cnt > 0 ? sum / cnt : 50;
     } else if (modelIndex === 6) {

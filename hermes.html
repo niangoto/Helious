@@ -972,6 +972,9 @@
         <label>Модел
             <select id="inpModel"></select>
         </label>
+        <label>Поглед назад (свещи)
+            <input type="number" id="inpLookback" value="3000" min="30" max="50000" step="100" title="Колко свещи назад да гледат моделите (статистика/прозорци). По подразбиране 3000.">
+        </label>
         <div class="contra-box" id="contraBox" style="display:none">
             <span class="contra-title">Контра по модели (при „Средна вероятност“)</span>
             <label class="contra-item"><input type="checkbox" id="contraModel0"> Историческа</label>
@@ -1727,6 +1730,7 @@
                 priceWithSpread: !!((document.getElementById('inpPriceWithSpread') || {}).checked),
                 pctClose: !!((document.getElementById('inpPctClose') || {}).checked),
                 pctCloseLimit: Math.max(0, parseFloat((document.getElementById('inpPctCloseLimit') || {}).value) || 0),
+                lookback: Math.max(30, Math.min(50000, parseInt((document.getElementById('inpLookback') || {}).value, 10) || 3000)),
                 reverse: document.getElementById('inpReverse').checked
             };
         }
@@ -2208,9 +2212,9 @@
 
             const P = readParams();
             const interval = document.getElementById('inpInterval').value || '5m';
-            // Поне 3000 свещи, за да може „Логистична“ да ползва пълния си
-            // фиксиран прозорец (LOGISTIC_LOOKBACK = 3000).
-            let limit = 3000;
+            // Теглим поне колкото е „Поглед назад“, за да имат моделите пълен
+            // прозорец (по подразбиране 3000; при по-малък поглед — пак 3000).
+            let limit = Math.min(MAX_FETCH, Math.max(3000, P.lookback || 3000));
             // Ако е зададен точен период, теглим достатъчно свещи, за да го покрием на този интервал.
             {
                 const useDates = document.getElementById('inpUseDates').checked;
@@ -2291,8 +2295,8 @@
                 setProgress(10, `Изчисляване на вероятностите (прозоречно, ${simCandles.length} свещи)...`);
                 await sleep(30);
                 const probs = (typeof computeModelProbSeriesLive === 'function')
-                    ? computeModelProbSeriesLive(simCandles, currentModel, { invert: contraFlags(), intervalSec: intervalSecs(interval) }, 2000)
-                    : computeModelProbSeries(simCandles, currentModel, { invert: contraFlags() });
+                    ? computeModelProbSeriesLive(simCandles, currentModel, { invert: contraFlags(), intervalSec: intervalSecs(interval), lookback: P.lookback }, P.lookback)
+                    : computeModelProbSeries(simCandles, currentModel, { invert: contraFlags(), lookback: P.lookback });
                 if (cancelFlag) return;
 
                 const atrSeries = computeATR(simCandles, 14);
@@ -2986,6 +2990,7 @@
             { id: 'inpPctCloseLimit', type: 'value' },
             { id: 'inpReverse', type: 'checkbox' },
             { id: 'inpModel', type: 'value' },
+            { id: 'inpLookback', type: 'value' },
             { id: 'inpInterval', type: 'value' },
             { id: 'inpSpeed', type: 'value' },
             { id: 'inpUseDates', type: 'checkbox' },
@@ -3130,6 +3135,9 @@
                 const el = document.getElementById('contraModel' + i);
                 if (el) el.addEventListener('change', () => { lastSim = null; });
             });
+            // Промяната на „Поглед назад“ прави старите probs невалидни за sweep-а.
+            const lbEl = document.getElementById('inpLookback');
+            if (lbEl) lbEl.addEventListener('change', () => { lastSim = null; });
 
             toggleDates();
             ['inpDateFrom', 'inpDateTo'].forEach(id => {
