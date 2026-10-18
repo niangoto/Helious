@@ -900,7 +900,7 @@
             <div style="display:flex;justify-content:space-between;align-items:center;gap:6px;flex-wrap:wrap">
                 <b style="font-size:11.5px">Комбинации от фактори</b>
                 <label style="font-size:10.5px;color:var(--text-dim)">Точки/фактор
-                    <input type="number" id="sweepPoints" value="11" min="3" max="201" step="1" style="width:54px">
+                    <input type="number" id="sweepPoints" value="11" min="3" max="2001" step="1" style="width:54px">
                 </label>
                 <button class="btn" id="btnSweepMulti" onclick="runSweepCombos()" style="padding:2px 8px" title="Тества всички комбинации от избраните фактори върху същите данни">🔀 Изчисли</button>
                 <button class="btn" id="btnSweepPause" onclick="toggleSweepPause()" style="padding:2px 8px;display:none">⏸ Пауза</button>
@@ -2341,7 +2341,8 @@
 
         // ── Анализ на чувствителността ──────────────────────────────
         // Цъкни бутона „Чувствителност“, после цъкни настройка → варираме я от
-        // −100% до +100% през 1% (201 варианта, другите настройки непроменени) и
+        // −100% до +100% през зададен брой точки (напр. 201 = 1%, 2001 = 0.1%),
+        // другите настройки непроменени, и
         // чертаем относителната печалба (%). Точките се нанасят постепенно.
         const SWEEP_KEYS = {
             inpBudget: 'budget', inpLev: 'leverage', inpAlpha: 'alpha', inpBuyTh: 'buyTh',
@@ -2494,8 +2495,8 @@
                 const baseTxt = baseRes ? ('база: ' + baseRes.tradeCount + ' сделки, ' + baseProfit.toFixed(2) + '%') : 'база: грешка';
                 const results = [];
                 // Броят точки съвпада с „Точки/фактор“ — същата настройка важи и за
-                // един фактор (при 201 = старото поведение със стъпка 1%).
-                const N = Math.max(3, Math.min(201, parseInt((document.getElementById('sweepPoints') || {}).value, 10) || 11));
+                // един фактор (при 201 = старото поведение със стъпка 1%; макс. 2001).
+                const N = Math.max(3, Math.min(2001, parseInt((document.getElementById('sweepPoints') || {}).value, 10) || 11));
                 const paintEvery = Math.max(1, Math.round(N / 50));
                 const t0 = performance.now();
                 for (let step = 0; step < N; step++) {
@@ -2577,7 +2578,7 @@
             const info = document.getElementById('sweepInfo');
             const resultsEl = document.getElementById('sweepResults');
             const baseP = lastSim.params ? Object.assign({}, lastSim.params) : readParams();
-            const points = Math.max(3, Math.min(201, parseInt((document.getElementById('sweepPoints') || {}).value, 10) || 11));
+            const points = Math.max(3, Math.min(2001, parseInt((document.getElementById('sweepPoints') || {}).value, 10) || 11));
 
             const dims = checks.map(c => {
                 const inputId = c.dataset.input, key = c.dataset.key;
