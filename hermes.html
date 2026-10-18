@@ -2347,13 +2347,13 @@
             inpBudget: 'budget', inpLev: 'leverage', inpAlpha: 'alpha', inpBuyTh: 'buyTh',
             inpSellTh: 'sellTh', inpMinEv: 'minEv', inpTp: 'tpMult', inpSl: 'slMult',
             inpHold: 'holdBars', inpKelly: 'kellyF', inpMaxKelly: 'maxKelly',
-            inpMinLot: 'minLot', inpMinLotSpread: 'minLotSpread'
+            inpMinLot: 'minLot', inpMinLotSpread: 'minLotSpread', inpLookback: 'lookback'
         };
         const SWEEP_LABELS = {
             inpBudget: 'Бюджет', inpLev: 'Леверидж', inpAlpha: 'Риск (α)', inpBuyTh: 'Buy праг',
             inpSellTh: 'Sell праг', inpMinEv: 'Мин. EV', inpTp: 'TP = ×ATR', inpSl: 'SL = ×ATR',
             inpHold: 'Времево затваряне', inpKelly: 'Кели (част)', inpMaxKelly: 'Кели макс.',
-            inpMinLot: 'Мин. обем', inpMinLotSpread: 'Спред на мин. обем'
+            inpMinLot: 'Мин. обем', inpMinLotSpread: 'Спред на мин. обем', inpLookback: 'Поглед назад'
         };
         let pickingParam = false, sweepCancel = false, sweepMode = false, sweepActive = false, sweepPaused = false, lastSim = null;
 
@@ -2453,6 +2453,16 @@
             if (runPending) { runPending = false; runSimulation(); }
         }
 
+        // Вероятности за конкретен „поглед назад“ (същите данни/модел/интервал).
+        // Нужно е, защото lookback влияе на модела, а sweep-ът иначе ползва
+        // предварително сметнатите probs от базовата симулация.
+        function computeSweepProbs(candles, interval, lookback) {
+            const opts = { invert: contraFlags(), intervalSec: intervalSecs(interval), lookback: lookback };
+            return (typeof computeModelProbSeriesLive === 'function')
+                ? computeModelProbSeriesLive(candles, currentModel, opts, lookback)
+                : computeModelProbSeries(candles, currentModel, opts);
+        }
+
         async function runSweep(inputId, key) {
             if (!lastSim || !lastSim.candles || !lastSim.candles.length) {
                 alert('Пусни първо една симулация (▶ Стартирай), за да има заредени данни.');
@@ -2495,10 +2505,14 @@
                     let val = (baseVal === 0) ? pct : baseVal * (1 + pct / 100);
                     if (isFinite(minV)) val = Math.max(minV, val);
                     if (isFinite(maxV)) val = Math.min(maxV, val);
+                    if (key === 'lookback') val = Math.round(val);
                     const P2 = Object.assign({}, baseP);
                     P2[key] = val;
+                    // Lookback променя вероятностите → преизчисляваме ги за тази
+                    // стойност; за другите фактори ползваме базовите probs.
+                    const useProbs = (key === 'lookback') ? computeSweepProbs(candles, interval, val) : probs;
                     let r = null;
-                    try { r = await simulate(candles, atrSeries, probs, P2, interval, startIdx, true); } catch (err) { r = null; }
+                    try { r = await simulate(candles, atrSeries, useProbs, P2, interval, startIdx, true); } catch (err) { r = null; }
                     // Отменен (зададен нов старт/избор) → спираме, за да не впишем
                     // частичен резултат като реална точка.
                     if (!r || r.cancelled) { if (r && r.cancelled) break; else continue; }
@@ -2577,6 +2591,7 @@
                     let v = (baseVal === 0) ? pct : baseVal * (1 + pct / 100);
                     if (isFinite(minV)) v = Math.max(minV, v);
                     if (isFinite(maxV)) v = Math.min(maxV, v);
+                    if (key === 'lookback') v = Math.round(v);
                     values.push(v);
                 }
                 return { key, inputId, label: SWEEP_LABELS[inputId] || key, values, baseVal };
@@ -2600,6 +2615,19 @@
             }
             try {
                 const { candles, atrSeries, probs, interval, startIdx } = lastSim;
+                // Ако „Поглед назад“ е сред факторите, вероятностите се различават
+                // за всяка негова стойност → преизчисляваме ги веднъж на стойност
+                // (кеш), а не за всяка комбинация.
+                const lbDim = dims.findIndex(d => d.key === 'lookback');
+                const probsCache = new Map();
+                const getProbs = (lb) => {
+                    if (lbDim < 0) return probs;
+                    const k = Math.round(lb);
+                    if (probsCache.has(k)) return probsCache.get(k);
+                    const p = computeSweepProbs(candles, interval, k);
+                    probsCache.set(k, p);
+                    return p;
+                };
                 showSweepPanel('Комбинации (' + total.toLocaleString('bg-BG') + '): ' + dims.map(d => d.label).join(' × '));
                 const idx = new Array(dims.length).fill(0);
                 const top = [];
@@ -2617,8 +2645,9 @@
                     const P2 = Object.assign({}, baseP);
                     const vals = new Array(dims.length);
                     for (let d = 0; d < dims.length; d++) { const v = dims[d].values[idx[d]]; P2[dims[d].key] = v; vals[d] = v; }
+                    const useProbs = getProbs(lbDim >= 0 ? vals[lbDim] : baseP.lookback);
                     let r = null;
-                    try { r = await simulate(candles, atrSeries, probs, P2, interval, startIdx, true); } catch (err) { r = null; }
+                    try { r = await simulate(candles, atrSeries, useProbs, P2, interval, startIdx, true); } catch (err) { r = null; }
                     if (r && r.cancelled) break;
                     if (r) {
                         const profit = baseP.budget > 0 ? ((r.equity - baseP.budget) / baseP.budget) * 100 : 0;
