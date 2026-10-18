@@ -945,9 +945,9 @@
         </label>
         <label class="cal-label">Процентно затваряне
             <span class="cal-controls">
-                <input type="checkbox" id="inpPctClose" title="Вместо фиксирани TP/SL: затваря, когато P(същата посока) × плаващата печалба достигне лимита (TP) или P(обратна посока) × плаващата загуба достигне лимита (SL)">
-                <span class="cal-sep" style="font-size:11px;text-transform:none;letter-spacing:0.3px">вместо TP/SL · лимит</span>
-                <input type="number" id="inpPctCloseLimit" value="0" min="0" step="1" style="width:90px" title="Лимит (€). 0 = авто: съответно печалбата до TP / загубата до SL в €.">
+                <input type="checkbox" id="inpPctClose" title="Вместо фиксиран SL: затваря, когато P(обратна посока) [0..1] × плаващата загуба достигне лимита. TP по цена продължава да работи.">
+                <span class="cal-sep" style="font-size:11px;text-transform:none;letter-spacing:0.3px">вместо SL · лимит</span>
+                <input type="number" id="inpPctCloseLimit" value="0" min="0" step="1" style="width:90px" title="Лимит (€). 0 = авто: дължината до SL в €.">
             </span>
         </label>
         <label class="cal-label">Времеви период
@@ -1867,9 +1867,9 @@
                         const held = i - pos.openIdx;
                         let exitPrice = null, reason = null;
                         // Кое ниво е засегнато в бара:
-                        // При „Процентно затваряне“ фиксираните TP и SL не се ползват —
-                        // изходът се решава по вероятност × плаващ P/L.
-                        const tpHit = !P.pctClose && (pos.dir === 'BUY' ? (c.high >= pos.tp) : (c.low <= pos.tp));
+                        // При „Процентно затваряне“ фиксираният SL не се ползва (заменя
+                        // се от процентното правило), но TP по цена продължава да работи.
+                        const tpHit = pos.dir === 'BUY' ? (c.high >= pos.tp) : (c.low <= pos.tp);
                         const slHit = !P.pctClose && (pos.dir === 'BUY' ? (c.low <= pos.sl) : (c.high >= pos.sl));
                         if (tpHit && slHit) {
                             // Бар с и TP, и SL → гледаме 1м кое е първо. Ако и на 1м
@@ -1881,24 +1881,18 @@
                         } else if (slHit) {
                             exitPrice = pos.sl; reason = 'SL';
                         }
-                        // Процентно затваряне:
-                        //  • загуба: P(обратна посока) × плаващата загуба >= лимит;
-                        //  • печалба: P(същата посока като позицията) × плаващата печалба >= лимит.
-                        // P = шансът за съответното действие (BUY → buyPct, SELL → sellPct).
+                        // Процентно затваряне (вместо SL): P(обратна посока) [0..1] × плаващата
+                        // загуба >= лимит. P = шансът да стане обратното на позицията
+                        // (BUY → sellPct, SELL → buyPct). TP по цена остава както преди.
                         if (exitPrice === null && P.pctClose) {
                             const pr = prScaled;
                             if (pr) {
                                 const pOpp = (pos.dir === 'BUY' ? pr.sellPct : pr.buyPct) / 100;
-                                const pSame = (pos.dir === 'BUY' ? pr.buyPct : pr.sellPct) / 100;
                                 const floatPnl = (pos.dir === 'BUY' ? (c.close - pos.entry) : (pos.entry - c.close)) * pos.units * (pos.fx || 1);
                                 const loss = Math.max(0, -floatPnl);
-                                const profit = Math.max(0, floatPnl);
                                 const slLoss = Math.abs(pos.entry - pos.sl) * pos.units * (pos.fx || 1);
-                                const tpProfit = Math.abs(pos.tp - pos.entry) * pos.units * (pos.fx || 1);
-                                const lossLimit = (P.pctCloseLimit > 0) ? P.pctCloseLimit : slLoss;
-                                const profitLimit = (P.pctCloseLimit > 0) ? P.pctCloseLimit : tpProfit;
-                                if (pOpp * loss >= lossLimit - 1e-9) { exitPrice = c.close; reason = 'Процентно'; }
-                                else if (pSame * profit >= profitLimit - 1e-9) { exitPrice = c.close; reason = 'Процентно TP'; }
+                                const limit = (P.pctCloseLimit > 0) ? P.pctCloseLimit : slLoss;
+                                if (pOpp * loss >= limit - 1e-9) { exitPrice = c.close; reason = 'Процентно'; }
                             }
                         }
                         if (exitPrice === null && held >= P.holdBars) { exitPrice = c.close; reason = 'Време'; }
