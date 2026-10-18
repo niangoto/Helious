@@ -2030,11 +2030,16 @@
                                     // Само обратната посока, ако е избрана (влиза в посоката на спреда).
                                     if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
                                     const spreadCost = perUnitSpread * finalUnits;
-                                    // Вход: при включен „Цена със спред“ влошаваме цената с
-                                    // цената на спреда (BUY по-високо / SELL по-ниско).
+                                    // Вход: при „Цена със спред“ смятаме при каква нова цена
+                                    // разликата спрямо текущата, процентно върху въображаемата
+                                    // (предстоящата) позиция, е равна на спреда:
+                                    //   (нова − текуща) / текуща = spreadCost / notional.
+                                    // BUY → по-висока цена, SELL → по-ниска.
+                                    const imagNotional = finalUnits * entry * fx;   // стойност на позицията сега
+                                    const spreadPct = imagNotional > 0 ? spreadCost / imagNotional : 0;
                                     let fill = entry, fillShift = 0;
-                                    if (P.priceWithSpread && spreadCost > 0 && finalUnits > 0) {
-                                        fillShift = spreadCost / (finalUnits * fx);   // в цена
+                                    if (P.priceWithSpread && spreadPct > 0) {
+                                        fillShift = entry * spreadPct;               // ценовата разлика
                                         fill = (dir === 'BUY') ? entry + fillShift : entry - fillShift;
                                     }
                                     // Маржинът/нотионалът са по реалната цена на входа; TP/SL са
@@ -2896,6 +2901,14 @@
                 ? ' влиза в цената на входа (BUY по-високо / SELL по-ниско; N мин. обема = N×).'
                 : ' взима се от сметката при отваряне (N мин. обема = N×).';
             txt += ' ' + spreadTxt + ' на мин. обем (' + minLot.toFixed(2) + ' лот),' + modeTxt;
+            if (priceWithSpread && price > 0 && units > 0) {
+                // Процентът на спреда спрямо стойността на (въображаемата) позиция
+                // определя с колко се измества цената на входа.
+                const notionalMin = units * price * fx;
+                const shPct = notionalMin > 0 ? (spreadEur / notionalMin) * 100 : 0;
+                const shAbs = price * shPct / 100;
+                txt += ' → цената се измества с ' + shPct.toFixed(3) + '% (' + fmtAmt(shAbs) + ' при цена ' + price.toFixed(dec) + ').';
+            }
             if (atr > 0) {
                 const tpEur = tpDist * units * fx;          // потенциална печалба до TP за мин. обем
                 if (spreadEur >= tpEur) {
