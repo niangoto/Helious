@@ -1822,16 +1822,18 @@
             }
         }
 
-        function renderSummary(P, equity, trades, wins, maxDD) {
+        function renderSummary(P, equity, trades, wins, maxDD, pnlExSum) {
             const pnl = equity - P.budget;
             const pct = P.budget > 0 ? (pnl / P.budget) * 100 : 0;
             const winRate = trades > 0 ? (wins / trades) * 100 : 0;
+            const avgEx = trades > 0 ? ((pnlExSum || 0) / trades) : 0;
             const el = document.getElementById('summary');
             el.innerHTML = `
                 <div class="sum-item"><span>Начален капитал</span><b>${P.budget.toFixed(2)} €</b></div>
                 <div class="sum-item"><span>Краен капитал</span><b>${equity.toFixed(2)} €</b></div>
                 <div class="sum-item ${pnl >= 0 ? 'pos' : 'neg'}"><span>Печалба / Загуба</span><b>${(pnl >= 0 ? '+' : '') + pnl.toFixed(2)} € (${(pct >= 0 ? '+' : '') + pct.toFixed(2)}%)</b></div>
                 <div class="sum-item"><span>Сделки</span><b>${trades}</b></div>
+                <div class="sum-item ${avgEx >= 0 ? 'pos' : 'neg'}" title="Средна печалба на сделка без спреда (сума на P/L без спреда / брой сделки)"><span>Средна печалба/сделка (без спред)</span><b>${(avgEx >= 0 ? '+' : '') + avgEx.toFixed(2)} €</b></div>
                 <div class="sum-item"><span>Win rate</span><b>${winRate.toFixed(1)}%</b></div>
                 <div class="sum-item ${maxDD > 0 ? 'neg' : 'pos'}"><span>Макс. теглене</span><b>${maxDD.toFixed(2)}%</b></div>
             `;
@@ -1846,6 +1848,12 @@
             let maxDD = 0;
             let tradeCount = 0, winsCount = 0;
             let legs = [];
+            // P/L без спреда: ползваме пазарния вход (връщаме отместването fillShift).
+            const pnlExOf = (pos, exitPrice) => {
+                const entryEx = pos.dir === 'BUY' ? pos.entry - (pos.fillShift || 0) : pos.entry + (pos.fillShift || 0);
+                return (pos.dir === 'BUY' ? (exitPrice - entryEx) : (entryEx - exitPrice)) * pos.units * (pos.fx || 1);
+            };
+            let pnlExSum = 0;
             const n = candles.length;
             if (!silent) {
                 tradeMarkers = [];
@@ -1901,6 +1909,7 @@
                                 ? (exitPrice - pos.entry) * pos.units
                                 : (pos.entry - exitPrice) * pos.units) * (pos.fx || 1);
                             equity += pnl;
+                            pnlExSum += pnlExOf(pos, exitPrice);
                             tradeCount++;
                             if (pnl > 0) winsCount++;
                             if (equity > peak) peak = equity;
@@ -1942,7 +1951,9 @@
                         }
                         if (worst) {
                             const pnl = wl;
-                            equity += pnl; tradeCount++; if (pnl > 0) winsCount++;
+                            equity += pnl;
+                            pnlExSum += pnlExOf(worst, c.close);
+                            tradeCount++; if (pnl > 0) winsCount++;
                             if (equity > peak) peak = equity;
                             const dd = peak > 0 ? (peak - equity) / peak * 100 : 0; if (dd > maxDD) maxDD = dd;
                             if (!silent) {
@@ -2149,6 +2160,7 @@
                         ? (c.close - pos.entry) * pos.units
                         : (pos.entry - c.close) * pos.units) * (pos.fx || 1);
                     equity += pnl;
+                    pnlExSum += pnlExOf(pos, c.close);
                     tradeCount++;
                     if (pnl > 0) winsCount++;
                     if (!silent) {
@@ -2168,7 +2180,7 @@
             }
 
             if (silent) return { equity, tradeCount, winsCount, maxDD };
-            renderSummary(P, equity, tradeCount, winsCount, maxDD);
+            renderSummary(P, equity, tradeCount, winsCount, maxDD, pnlExSum);
             if (tradeCount === 0) {
                 setProgress(100, '0 сделки — провери: „Мин. обем“ (твърде голям за бюджета → няма вход), праговете Buy/Sell, и че пазарът е отворен (не-крипто не търгува събота/неделя).');
             } else {
