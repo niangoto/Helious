@@ -459,6 +459,27 @@
             text-align: right;
         }
 
+        .adv-grid label.adv-check {
+            flex-direction: row;
+            align-items: center;
+            gap: 6px;
+            text-transform: none;
+            letter-spacing: 0.2px;
+            font-size: 10.5px;
+            cursor: pointer;
+        }
+
+        .adv-grid label.adv-check input {
+            width: auto;
+            padding: 0;
+            margin: 0;
+            border: none;
+            background: none;
+            text-align: left;
+            cursor: pointer;
+            accent-color: #00f0ff;
+        }
+
         .summary {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -971,7 +992,8 @@
                 <label>Кели (дробна част) <input type="number" id="inpKelly" value="0.25" min="0.01" step="0.05"></label>
                 <label>Кели (макс. фракция) <input type="number" id="inpMaxKelly" value="0.05" min="0.01" max="1" step="0.05"></label>
                 <label>Мин. обем <select id="inpMinLotUnit" style="width:auto"><option value="lot">лот</option><option value="value">цена (€)</option></select> <input type="number" id="inpMinLot" value="0.01" min="0.00001" step="any"></label>
-                <label title="Разход за ЕДИН минимален обем (спред + комисиона при авто-попълване от Binance). Единица: € (валидна при ТЕКУЩАТА цена, мащабира се с нея) или % от сумата, нужна за отваряне на мин. позиция (маржина = нотионал/ливъридж). Пропорционален на броя минимални обеми. Взима се директно от сметката при отваряне.">Спред/такса на мин. обем <select id="inpSpreadUnit" style="width:auto"><option value="eur">€</option><option value="pct">% от сумата</option></select> <input type="number" id="inpMinLotSpread" value="0" min="0" step="any"></label>
+                <label title="Разход за ЕДИН минимален обем (спред + комисиона при авто-попълване от Binance). Единица: € (валидна при ТЕКУЩАТА цена, мащабира се с нея) или % от сумата, нужна за отваряне на мин. позиция (маржина = нотионал/ливъридж). Пропорционален на броя минимални обеми. Взима се директно от сметката при отваряне, освен ако е включено „Цена със спред“ (тогава влиза в цената на входа).">Спред/такса на мин. обем <select id="inpSpreadUnit" style="width:auto"><option value="eur">€</option><option value="pct">% от сумата</option></select> <input type="number" id="inpMinLotSpread" value="0" min="0" step="any"></label>
+                <label class="adv-check" title="Взимане на цена със спреда: при включване входната цена се влошава с цената на спреда — BUY влиза по-високо, SELL по-ниско. Спредът НЕ се тегли директно от сметката; използва се при преценката дали изобщо да се отвори позицията."><input type="checkbox" id="inpPriceWithSpread"> Цена със спред</label>
             </div>
         </details>
         <!-- Винаги видимо: колко струва минималният обем (маржин с левериджа). -->
@@ -1702,6 +1724,7 @@
                 minLotUnit: ((document.getElementById('inpMinLotUnit') || {}).value === 'value') ? 'value' : 'lot',
                 minLotSpread: Math.max(0, parseFloat((document.getElementById('inpMinLotSpread') || {}).value) || 0),
                 spreadUnit: ((document.getElementById('inpSpreadUnit') || {}).value === 'pct') ? 'pct' : 'eur',
+                priceWithSpread: !!((document.getElementById('inpPriceWithSpread') || {}).checked),
                 pctClose: !!((document.getElementById('inpPctClose') || {}).checked),
                 pctCloseLimit: Math.max(0, parseFloat((document.getElementById('inpPctCloseLimit') || {}).value) || 0),
                 reverse: document.getElementById('inpReverse').checked
@@ -1993,7 +2016,10 @@
                                         perUnitSpread = (minSpread / (minLot * spec.contract)) * priceK;
                                     }
                                     const perUnitMargin = (entry * fx) / P.leverage;
-                                    const perUnitCost = perUnitMargin + perUnitSpread;
+                                    // При „цена със спред“ спредът е в цената на входа, а не
+                                    // допълнителен разход — затова не го добавяме към
+                                    // изисквания свободен маржин.
+                                    const perUnitCost = perUnitMargin + (P.priceWithSpread ? 0 : perUnitSpread);
                                     const maxUnits = perUnitCost > 0 ? freeMargin / perUnitCost : 0;
                                     units = Math.min(units, maxUnits);
                                     let lots = Math.floor((units / spec.contract) / minLot + 1e-9) * minLot;
@@ -2003,17 +2029,31 @@
                                     const finalUnits = lots * spec.contract;
                                     // Само обратната посока, ако е избрана (влиза в посоката на спреда).
                                     if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
-                                    // Спредът (€) се взима ДИРЕКТНО от сметката при отваряне.
                                     const spreadCost = perUnitSpread * finalUnits;
-                                    const fill = entry;
-                                    // Сметката/маржинът се смятат по пазарната цена (entry),
-                                    // нивата TP/SL — също от нея.
+                                    // Вход: при включен „Цена със спред“ влошаваме цената с
+                                    // цената на спреда (BUY по-високо / SELL по-ниско).
+                                    let fill = entry, fillShift = 0;
+                                    if (P.priceWithSpread && spreadCost > 0 && finalUnits > 0) {
+                                        fillShift = spreadCost / (finalUnits * fx);   // в цена
+                                        fill = (dir === 'BUY') ? entry + fillShift : entry - fillShift;
+                                    }
+                                    // Маржинът/нотионалът са по реалната цена на входа; TP/SL са
+                                    // спрямо пазарната цена (сигнала), затова при изместен вход
+                                    // рискът до SL включва и спреда.
                                     const notional = finalUnits * fill * fx;   // в EUR
                                     const margin = notional / P.leverage;       // в EUR
-                                    const riskCost = slDist * finalUnits * fx; // потенциална загуба до SL
+                                    const tpPrice = dir === 'BUY' ? entry + tpDist : entry - tpDist;
+                                    const slPrice = dir === 'BUY' ? entry - slDist : entry + slDist;
+                                    const riskCost = Math.abs(fill - slPrice) * finalUnits * fx;
+                                    const upfrontCost = P.priceWithSpread ? 0 : spreadCost;
+                                    // При „цена със спред“ лошият вход може вече да е зад TP
+                                    // (спредът изяжда цялата печалба) → не отваряме изобщо.
+                                    const badEntry = P.priceWithSpread && (dir === 'BUY'
+                                        ? (fill >= tpPrice || fill <= slPrice)
+                                        : (fill <= tpPrice || fill >= slPrice));
                                     // Отваряме само ако свободният маржин покрива маржин +
-                                    // спред + риск до SL (както при реален брокер).
-                                    if (lots >= minLot && margin > 0 && margin + spreadCost <= freeMargin + 1e-9 && riskCost <= freeMargin + 1e-9 && notional >= 1) {
+                                    // (при директно теглене) спред + риск до SL.
+                                    if (lots >= minLot && margin > 0 && !badEntry && margin + upfrontCost <= freeMargin + 1e-9 && riskCost <= freeMargin + 1e-9 && notional >= 1) {
                                         const t = candles[i].time;
                                         legs = [{
                                             dir,
@@ -2021,8 +2061,8 @@
                                             lots,
                                             contract: spec.contract,
                                             units: finalUnits,
-                                            tp: dir === 'BUY' ? entry + tpDist : entry - tpDist,
-                                            sl: dir === 'BUY' ? entry - slDist : entry + slDist,
+                                            tp: tpPrice,
+                                            sl: slPrice,
                                             atr,
                                             openIdx: i,
                                             prob: (dir === 'BUY' ? pRise : pFall) * 100,
@@ -2031,12 +2071,13 @@
                                             openTime: t,
                                             alpha,
                                             spread: spreadCost,
-                                            fillShift: 0,
+                                            fillShift,
                                             fx
                                         }];
-                                        // Спредът се взима директно от сметката (капитала).
-                                        if (spreadCost > 0) {
-                                            equity -= spreadCost;
+                                        // При директния режим спредът се взима от капитала;
+                                        // при „цена със спред“ той вече е в по-лошия вход.
+                                        if (upfrontCost > 0) {
+                                            equity -= upfrontCost;
                                             const dd0 = peak > 0 ? (peak - equity) / peak * 100 : 0;
                                             if (dd0 > maxDD) maxDD = dd0;
                                         }
@@ -2838,10 +2879,11 @@
                 txt = minLot.toFixed(2) + ' лот (' + currentSymbol + ').';
             }
             if (spread <= 0) {
-                txt += ' Спредът е 0 — не се взима нищо от сметката.';
+                txt += ' Спредът е 0 — не влияе на входа/сметката.';
                 el.textContent = txt;
                 return;
             }
+            const priceWithSpread = !!((document.getElementById('inpPriceWithSpread') || {}).checked);
             // € стойност за 1 мин. обем: при '€' е въведената сума (валидна при текущата
             // цена и мащабирана с нея), при '%' е процент от сумата (нотионала) на мин. лот.
             const spreadUnit = ((document.getElementById('inpSpreadUnit') || {}).value === 'pct') ? 'pct' : 'eur';
@@ -2850,7 +2892,10 @@
             const spreadTxt = (spreadUnit === 'pct')
                 ? 'Спред ' + spread + '% от сумата за отваряне = ' + fmtAmt(spreadEur) + ' €'
                 : 'Спред ' + fmtAmt(spreadEur) + ' € (при текущата цена)';
-            txt += ' ' + spreadTxt + ' на мин. обем (' + minLot.toFixed(2) + ' лот), взима се от сметката при отваряне (N мин. обема = N×).';
+            const modeTxt = priceWithSpread
+                ? ' влиза в цената на входа (BUY по-високо / SELL по-ниско; N мин. обема = N×).'
+                : ' взима се от сметката при отваряне (N мин. обема = N×).';
+            txt += ' ' + spreadTxt + ' на мин. обем (' + minLot.toFixed(2) + ' лот),' + modeTxt;
             if (atr > 0) {
                 const tpEur = tpDist * units * fx;          // потенциална печалба до TP за мин. обем
                 if (spreadEur >= tpEur) {
@@ -2912,6 +2957,7 @@
             { id: 'inpMinLotUnit', type: 'value' },
             { id: 'inpMinLotSpread', type: 'value' },
             { id: 'inpSpreadUnit', type: 'value' },
+            { id: 'inpPriceWithSpread', type: 'checkbox' },
             { id: 'inpPctClose', type: 'checkbox' },
             { id: 'inpPctCloseLimit', type: 'value' },
             { id: 'inpReverse', type: 'checkbox' },
@@ -3076,6 +3122,8 @@
             });
             const unitSel = document.getElementById('inpSpreadUnit');
             if (unitSel) unitSel.addEventListener('change', updateMinLotSpreadHint);
+            const pwsEl = document.getElementById('inpPriceWithSpread');
+            if (pwsEl) pwsEl.addEventListener('change', updateMinLotSpreadHint);
             // Смяна на единицата на мин. обем → преизчислява от Binance (лот/цена).
             const mlUnitSel = document.getElementById('inpMinLotUnit');
             if (mlUnitSel) mlUnitSel.addEventListener('change', () => autoFillInstrument());
