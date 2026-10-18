@@ -168,8 +168,8 @@ function buildStats(candles) {
   const combos = new Map();
   let totalWins = 0, totalTrades = 0;
   let wins = 0, losses = 0, tpSum = 0, slSum = 0;
-  // Само последните MODEL_LOOKBACK бара (единен прозорец за всички модели).
-  for (let i = Math.max(20, n - MODEL_LOOKBACK - 1); i < n - 1; i++) {
+  // Логистичната гледа фиксирано LOGISTIC_LOOKBACK бара назад.
+  for (let i = Math.max(20, n - LOGISTIC_LOOKBACK - 1); i < n - 1; i++) {
     const atr = atrV[i] || atrV[atrV.length - 1] || 1;
     const result = simulateTrade(candles, i, atr, maxBars);
     if (result < 0) continue;
@@ -207,10 +207,10 @@ const MODEL_LOOKBACK = 2000;
 // За обратна съвместимост (същият прозорец).
 const MODEL_WINDOW = MODEL_LOOKBACK;
 const MODEL_STATS_WINDOW = MODEL_LOOKBACK;
-// „Логистична“ гледа цялата налична история (както преди) — без фиксиран
-// прозорец. Стойност > всеки реалистичен брой свещи → combos/статистиката не се
-// изхвърлят, а базовата линия става expanding (както беше).
-const LOGISTIC_LOOKBACK = 1000000;
+// „Логистична“ гледа фиксирано назад LOGISTIC_LOOKBACK свещи: базовата линия
+// (среден ATR/обем) и статистиката по приключили сделки се държат само в този
+// прозорец (FIFO). Така решението не зависи от цялата налична история.
+const LOGISTIC_LOOKBACK = 1200;
 // Прозорец за FFT модела (колко назад гледа Фурие).
 const FOURIER_LOOKBACK = 500;
 
@@ -805,68 +805,13 @@ function computeModelProbSeries(candles, modelIndex, opts) {
   return result;
 }
 
-// Точно „живото" (live) изчисление: живият двигател (engine/session.js) на всеки
-// затворен бар преизчислява модела върху ПОДВИЖЕН прозорец от последните `window`
-// свещи и взима последната стойност. При серии, по-дълги от `window`, това дава
-// различни резултати от еднократното изчисление върху цялата история, защото
-// seed-ът на индикаторите (EMA/RSI/ATR) зависи къде започва прозорецът. Засяга
-// само моделите, които ползват signalMask → 1 (логистична) и дела ѝ в 5 (средна).
-// Модели 0/2/3/4 са инвариантни на прозореца в бара на решението и се взимат от
-// бързото пълно изчисление. За серии <= `window` резултатът е идентичен с
-// computeModelProbSeries (прозорецът покрива всичко), затова бързата пътека се
-// ползва директно.
+// Причинна серия от вероятности (същата, която ползва живият двигател).
+// „Логистична“ (1) вече е с фиксиран прозорец LOGISTIC_LOOKBACK (= 1200) вътре
+// в computeModelProbCore — базовата линия и FIFO статистиката по приключили
+// сделки се държат само в него. Затова тук не се правят тежки пре-изчисления по
+// плъзгащ прозорец: те не променят статистиката, а биха забавили всеки tick.
 function computeModelProbSeriesLive(candles, modelIndex, opts, window) {
-  const n = candles ? candles.length : 0;
-  if (n < 30) return [];
-  // „Логистична“ = последните LOGISTIC_LOOKBACK бара (останалите модели са
-  // инвариантни на този прозорец в бара на решението).
-  const W = LOGISTIC_LOOKBACK;
-  if (modelIndex !== 1 && modelIndex !== 5) return computeModelProbSeries(candles, modelIndex, opts);
-  const invert = (opts && Array.isArray(opts.invert)) ? opts.invert : [];
-  const inv = (v, m) => invert[m] ? (100 - v) : v;
-  const clamp = (v) => Math.max(1, Math.min(99, v));
-
-  if (modelIndex === 1) {
-    const vals = computeModelProbCore(candles, 1, opts);
-    if (!vals) return [];
-    // Само за барове след първия пълен прозорец преизчисляваме наново.
-    for (let i = W; i < n; i++) {
-      const win = candles.slice(i - W + 1, i + 1);
-      const w = computeModelProbCore(win, 1, null);
-      if (w && w[w.length - 1] != null) vals[i] = w[w.length - 1];
-    }
-    const out = new Array(n).fill(null);
-    for (let i = 0; i < n; i++) if (vals[i] != null) out[i] = { time: candles[i].time, buyPct: vals[i], sellPct: 100 - vals[i] };
-    return out;
-  }
-
-  // modelIndex === 5: сглобяваме от компонентите; само модел 1 става прозоречен.
-  // noClamp: single-pass модел 5 усреднява СУРОВИ компоненти и ограничава чак
-  // накрая (v1/v3 могат да са извън [1,99]) — иначе средното се разминава.
-  const rawOpt = { noClamp: true };
-  const comp = [computeModelProbCore(candles, 0, rawOpt), computeModelProbCore(candles, 1, rawOpt),
-                computeModelProbCore(candles, 2, rawOpt), computeModelProbCore(candles, 3, rawOpt),
-                computeModelProbCore(candles, 4, rawOpt)];
-  const v1 = comp[1];
-  if (v1) {
-    for (let i = W; i < n; i++) {
-      const win = candles.slice(i - W + 1, i + 1);
-      const w = computeModelProbCore(win, 1, rawOpt);
-      if (w && w[w.length - 1] != null) v1[i] = w[w.length - 1];
-    }
-  }
-  const out = new Array(n).fill(null);
-  for (let i = 0; i < n; i++) {
-    let sum = 0, cnt = 0;
-    for (let m = 0; m < 5; m++) {
-      const raw = comp[m] ? comp[m][i] : null;
-      if (raw == null) continue;
-      sum += inv(raw, m); cnt++;
-    }
-    if (cnt === 0) continue;
-    out[i] = { time: candles[i].time, buyPct: clamp(sum / cnt), sellPct: 100 - clamp(sum / cnt) };
-  }
-  return out;
+  return computeModelProbSeries(candles, modelIndex, opts);
 }
 
 // ════════════════════════════════════════════════════════════════
