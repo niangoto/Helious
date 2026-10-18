@@ -2208,7 +2208,9 @@
 
             const P = readParams();
             const interval = document.getElementById('inpInterval').value || '5m';
-            let limit = 2000;
+            // Поне 3000 свещи, за да може „Логистична“ да ползва пълния си
+            // фиксиран прозорец (LOGISTIC_LOOKBACK = 3000).
+            let limit = 3000;
             // Ако е зададен точен период, теглим достатъчно свещи, за да го покрием на този интервал.
             {
                 const useDates = document.getElementById('inpUseDates').checked;
