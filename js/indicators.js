@@ -80,7 +80,7 @@ function computeIndicatorModelProbs(candles) {
     if (!needed) { indicatorData.modelProbs = null; return; }
     const mp = [null, null, null, null, null, null];
     for (const mi of needed) {
-        mp[mi] = (mi === 5) ? computeFourierProbSequence(candles) : computeModelProbSequence(candles, mi, { lookback: analysisLookback });
+        mp[mi] = (mi === 5) ? computeFourierProbSequence(candles, { lookback: analysisLookback }) : computeModelProbSequence(candles, mi, { lookback: analysisLookback });
     }
     indicatorData.modelProbs = mp;
 }

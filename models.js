@@ -403,30 +403,31 @@ function rsiBuySeriesForTf(candles, k) {
 
 // Плъзгаща FFT вероятност за всяка свещ (за probability canvas).
 // Кешира се по хеш на свещите (както statsCache) — преизчислява се само при смяна.
-let fourierSeqCache = { hash: 0, data: null };
-function computeFourierProbSequence(candles) {
+let fourierSeqCache = { hash: 0, lookback: -1, data: null };
+function computeFourierProbSequence(candles, opts) {
   const n = candles.length;
   if (n < 32) return [];
+  const lb = lookbackOf(opts);
   const h = candlesHash(candles);
-  if (fourierSeqCache.hash === h) return fourierSeqCache.data;
+  if (fourierSeqCache.hash === h && fourierSeqCache.lookback === lb) return fourierSeqCache.data;
   const result = [];
-  // По-лека версия за линията на вероятността: малък прозорец и по-малко
-  // компоненти са достатъчни, защото това е само сигналната линия (0-100%).
-  const win = 48;
+  // 1:1 с Hermes: Фурие ползва последните min(lookback, FOURIER_LOOKBACK) свещи
+  // (в строгия прозорец), с пълния computeFourierProbability.
+  const win = lb > 0 ? Math.min(lb, FOURIER_LOOKBACK) : FOURIER_LOOKBACK;
   const maxPoints = 36;
   const step = Math.max(1, Math.floor((n - 30) / maxPoints));
   for (let i = 30; i < n; i += step) {
     const slice = candles.slice(Math.max(0, i - win + 1), i + 1);
-    const f = computeFourierAnalysisLight(slice);
+    const f = computeFourierProbability(slice);
     result.push({ time: candles[i].time, value: f ? f.buyPct : 50 });
   }
   // Винаги добавяме и последната (текуща) свещ, за да съвпада картата с графиката.
   if (result.length && result[result.length - 1].time !== candles[n - 1].time) {
-    const slice = candles.slice(Math.max(0, n - 1 - win + 1), n);
-    const f = computeFourierAnalysisLight(slice);
+    const slice = candles.slice(Math.max(0, n - win), n);
+    const f = computeFourierProbability(slice);
     result.push({ time: candles[n - 1].time, value: f ? f.buyPct : 50 });
   }
-  fourierSeqCache = { hash: h, data: result };
+  fourierSeqCache = { hash: h, lookback: lb, data: result };
   return result;
 }
 
@@ -590,48 +591,81 @@ function computeExpectedValue(candles) {
   return { buyPct: Math.max(1, Math.min(99, buyPct)), sellPct: Math.max(1, Math.min(99, 100 - buyPct)), ev, winRate, avgProfit, avgLoss };
 }
 
-// Стойностите за картите на таблото се взимат от СЪЩИТЕ причинни редици, които
-// чертае графиката (computeModelProbSequence / computeFourierProbSequence), за да
-// съвпадат процентите на таблото и на графиката 1:1 (и с Hermes, който ползва
-// computeModelProbCore).
+// ── Строг (1:1 с Hermes) прозорец ───────────────────────────────
+// За бар i моделът се смята САМО върху последните W свещи
+// (candles[i-W+1 .. i]), с индикатори, заредени от началото на този прозорец —
+// точно както computeModelProbSeriesStrict в Hermes.
+function lookbackOf(opts) {
+  return (opts && opts.lookback > 0) ? Math.floor(opts.lookback) : 0;
+}
+function windowFor(modelIndex, opts) {
+  const lb = lookbackOf(opts);
+  if (lb > 0) return lb;
+  return (modelIndex === 1) ? LOGISTIC_LOOKBACK : MODEL_LOOKBACK;
+}
+function computeModelProbAt(candles, i, modelIndex, opts, W) {
+  const w = Math.max(30, Math.floor(W) || 1);
+  const s = Math.max(0, i - w + 1);
+  const win = candles.slice(s, i + 1);
+  const vals = computeModelProbCore(win, modelIndex, Object.assign({}, opts, { lookback: w }));
+  if (!vals) return null;
+  return vals[vals.length - 1];
+}
+
+// Стойностите за картите на таблото се взимат от СЪЩАТА строга стойност на
+// последния бар, която чертае и графиката (1:1 с Hermes).
 function computeAllModels(candles, opts) {
   if (!candles || candles.length < 30) return null;
-  const seqLast = (mi) => {
-    const s = computeModelProbSequence(candles, mi, opts);
-    return s.length ? s[s.length - 1].value : 50;
+  const n = candles.length;
+  const atLast = (mi) => {
+    const W = windowFor(mi, opts);
+    if (W >= n) {
+      const vals = computeModelProbCore(candles, mi, opts || null);
+      return vals ? vals[n - 1] : null;
+    }
+    return computeModelProbAt(candles, n - 1, mi, opts, W);
   };
-  const fourier = computeFourierProbSequence(candles);
-  const fLast = fourier.length ? fourier[fourier.length - 1].value : 50;
-  const wrap = (v) => ({ buyPct: v, sellPct: 100 - v });
+  const wrap = (v) => ({ buyPct: v == null ? 50 : v, sellPct: 100 - (v == null ? 50 : v) });
+  // Фурие: същата стойност като графиката (последните min(W, FOURIER_LOOKBACK) свещи).
+  const lb = lookbackOf(opts);
+  const fWin = lb > 0 ? Math.min(lb, FOURIER_LOOKBACK) : FOURIER_LOOKBACK;
+  const f = computeFourierProbability(candles.slice(Math.max(0, n - fWin), n));
   return { models: {
-    historical: wrap(seqLast(0)),
-    logistic: wrap(seqLast(1)),
-    markov: wrap(seqLast(2)),
-    expectedValue: wrap(seqLast(3)),
-    wavelet: wrap(seqLast(4)),
-    fourier: wrap(fLast),
+    historical: wrap(atLast(0)),
+    logistic: wrap(atLast(1)),
+    markov: wrap(atLast(2)),
+    expectedValue: wrap(atLast(3)),
+    wavelet: wrap(atLast(4)),
+    fourier: wrap(f ? f.buyPct : 50),
     rsi: computeRSIProbability(candles)
   } };
 }
 
-// Кеш по хеш на свещите: ако данните не са се сменили, не преизчисляваме тежката
-// плъзгаща редица. Пази максимум 1 запис на модел (6 модела).
+// Кеш по хеш на свещите + lookback. Пази максимум 1 запис на модел.
 const modelSeqCache = new Map();
 function computeModelProbSequence(candles, modelIndex, opts) {
   if (!candles || candles.length < 30) return [];
-  const lookback = (opts && opts.lookback > 0) ? Math.floor(opts.lookback) : 0;
+  const lookback = lookbackOf(opts);
   const cacheHash = candlesHash(candles);
   const cached = modelSeqCache.get(modelIndex);
   if (cached && cached.hash === cacheHash && cached.lookback === lookback) return cached.data;
   const n = candles.length;
-  const vals = computeModelProbCore(candles, modelIndex, opts || null);
-  if (!vals) return [];
+  const W = windowFor(modelIndex, opts);
   const step = Math.max(1, Math.floor(n / 200));
   const result = [];
-  for (let i = 30; i < n; i++) {
-    if (i % step === 0 || i === n - 1) {
-      if (vals[i] == null) continue;
-      result.push({ time: candles[i].time, value: vals[i] });
+  if (W >= n) {
+    // Целият ред е в прозореца → обикновеното причинно изчисление.
+    const vals = computeModelProbCore(candles, modelIndex, opts || null);
+    if (!vals) return [];
+    for (let i = 30; i < n; i++) {
+      if ((i % step === 0 || i === n - 1) && vals[i] != null) result.push({ time: candles[i].time, value: vals[i] });
+    }
+  } else {
+    // Строго: за всяка начертана точка — само последните W свещи.
+    for (let i = 30; i < n; i++) {
+      if (i % step !== 0 && i !== n - 1) continue;
+      const v = computeModelProbAt(candles, i, modelIndex, opts, W);
+      if (v != null) result.push({ time: candles[i].time, value: v });
     }
   }
   modelSeqCache.set(modelIndex, { hash: cacheHash, lookback, data: result });
