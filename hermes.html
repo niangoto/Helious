@@ -3265,11 +3265,24 @@
         let aiMessages = [];
         let aiBusy = false;
 
+        // Нормализира модела (махни „models/“ и мигрира спрени Gemini модели).
+        function aiNormalizeModel(provider, model) {
+            let m = String(model || '').trim();
+            if (provider === 'gemini') {
+                if (m.indexOf('models/') === 0) m = m.slice(7);
+                // gemini-2.0-flash вече не е наличен → 3.8-flash.
+                if (!m || m === 'gemini-2.0-flash' || m === 'gemini-1.5-flash') m = 'gemini-3.8-flash';
+            }
+            return m;
+        }
         function aiLoadCfg() {
             try {
                 const o = JSON.parse(localStorage.getItem(AI_LS_KEY) || '{}');
                 if (o && typeof o === 'object') aiCfg = Object.assign(aiCfg, o);
             } catch (e) { }
+            // Миграция: стар запазен модел (напр. gemini-2.0-flash) се оправя сам.
+            aiCfg.model = aiNormalizeModel(aiCfg.provider, aiCfg.model);
+            try { localStorage.setItem(AI_LS_KEY, JSON.stringify(aiCfg)); } catch (e) { }
             const p = document.getElementById('aiProvider'); if (p) p.value = aiCfg.provider;
             const m = document.getElementById('aiModel'); if (m) m.value = aiCfg.model;
             const k = document.getElementById('aiKey'); if (k) k.value = aiCfg.key;
@@ -3278,7 +3291,7 @@
         }
         function aiSaveCfg() {
             aiCfg.provider = ((document.getElementById('aiProvider') || {}).value) || 'gemini';
-            aiCfg.model = (((document.getElementById('aiModel') || {}).value) || '').trim();
+            aiCfg.model = aiNormalizeModel(aiCfg.provider, ((document.getElementById('aiModel') || {}).value) || '');
             aiCfg.key = (((document.getElementById('aiKey') || {}).value) || '').trim();
             aiCfg.baseUrl = (((document.getElementById('aiBaseUrl') || {}).value) || '').trim();
             const inc = document.getElementById('aiIncludeCode');
@@ -3363,7 +3376,7 @@
             const cfg = aiCfg;
             if (!cfg.key) throw new Error('Няма API ключ. Отвори „Настройки на ИИ“ и го постави.');
             if (cfg.provider === 'gemini') {
-                const model = cfg.model || 'gemini-3.8-flash';
+                const model = aiNormalizeModel('gemini', cfg.model) || 'gemini-3.8-flash';
                 const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent';
                 const contents = messages.filter(m => m.role !== 'system').map(m => ({
                     role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }]
