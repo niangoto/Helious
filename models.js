@@ -364,7 +364,9 @@ function computeFourierAnalysis(candles) {
 function computeFourierProbability(candles) {
   const f = computeFourierAnalysis(candles);
   if (!f) return { buyPct: 50, sellPct: 50 };
-  return { buyPct: f.buyPct, sellPct: f.sellPct };
+  // Обърнати вероятности (Buy ↔ Sell): точно обратното на предишното.
+  const buyPct = Math.max(0, Math.min(100, 100 - f.buyPct));
+  return { buyPct, sellPct: 100 - buyPct };
 }
 
 // RSI модел: 0 = 100% sell, 100 = 100% buy. buyPct = 100 − RSI (RSI > 50 →
