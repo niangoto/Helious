@@ -1098,9 +1098,13 @@
                     <option value="anthropic">Anthropic</option>
                 </select>
             </label>
-            <label>Модел <input type="text" id="aiModel" placeholder="gemini-2.0-flash"></label>
+            <label>Модел <input type="text" id="aiModel" placeholder="gemini-3.8-flash"></label>
             <label>API ключ <input type="password" id="aiKey" placeholder="постави ключа" autocomplete="off"></label>
             <label>Base URL (за OpenAI-съвместим) <input type="text" id="aiBaseUrl" placeholder="https://api.openai.com/v1"></label>
+            <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0.2px;margin-top:8px">
+                <input type="checkbox" id="aiIncludeCode" checked style="width:auto">
+                Изпращай кода към ИИ (за по-точни заключения)
+            </label>
             <div class="ai-cfg-actions">
                 <button class="btn" onclick="aiSaveCfg()" style="padding:3px 10px">Запази</button>
                 <span id="aiCfgStatus" class="ai-dim"></span>
@@ -3257,7 +3261,7 @@
 
         // ── ИИ чат за настройки (без да пипа симулацията) ────────────
         const AI_LS_KEY = 'hermes_ai_cfg';
-        let aiCfg = { provider: 'gemini', model: 'gemini-2.0-flash', key: '', baseUrl: 'https://api.openai.com/v1' };
+        let aiCfg = { provider: 'gemini', model: 'gemini-3.8-flash', key: '', baseUrl: 'https://api.openai.com/v1', includeCode: true };
         let aiMessages = [];
         let aiBusy = false;
 
@@ -3270,12 +3274,15 @@
             const m = document.getElementById('aiModel'); if (m) m.value = aiCfg.model;
             const k = document.getElementById('aiKey'); if (k) k.value = aiCfg.key;
             const b = document.getElementById('aiBaseUrl'); if (b) b.value = aiCfg.baseUrl;
+            const inc = document.getElementById('aiIncludeCode'); if (inc) inc.checked = !!aiCfg.includeCode;
         }
         function aiSaveCfg() {
             aiCfg.provider = ((document.getElementById('aiProvider') || {}).value) || 'gemini';
             aiCfg.model = (((document.getElementById('aiModel') || {}).value) || '').trim();
             aiCfg.key = (((document.getElementById('aiKey') || {}).value) || '').trim();
             aiCfg.baseUrl = (((document.getElementById('aiBaseUrl') || {}).value) || '').trim();
+            const inc = document.getElementById('aiIncludeCode');
+            if (inc) aiCfg.includeCode = !!inc.checked;
             localStorage.setItem(AI_LS_KEY, JSON.stringify(aiCfg));
             const st = document.getElementById('aiCfgStatus');
             if (st) { st.textContent = 'Запазено'; setTimeout(() => { st.textContent = ''; }, 1500); }
@@ -3284,7 +3291,7 @@
             const p = ((document.getElementById('aiProvider') || {}).value) || 'gemini';
             const m = document.getElementById('aiModel');
             const b = document.getElementById('aiBaseUrl');
-            if (m) m.value = p === 'gemini' ? 'gemini-2.0-flash' : p === 'anthropic' ? 'claude-3-5-sonnet-latest' : 'gpt-4o-mini';
+            if (m) m.value = p === 'gemini' ? 'gemini-3.8-flash' : p === 'anthropic' ? 'claude-3-5-sonnet-latest' : 'gpt-4o-mini';
             if (b) b.value = p === 'openai' ? 'https://api.openai.com/v1' : '';
         }
         function toggleAiPanel(force) {
@@ -3314,11 +3321,21 @@
             }
             return out;
         }
+        function aiCodeContext() {
+            // Реалният код на ключовите функции — за да дава ИИ точни заключения.
+            const names = ['readParams', 'simulate', 'computeModelProbSeriesStrict', 'computeModelProbCore', 'computeFourierProbability'];
+            const parts = [];
+            for (const name of names) {
+                const fn = (typeof window !== 'undefined') ? window[name] : null;
+                if (typeof fn === 'function') parts.push('// ===== ' + name + ' =====\n' + fn.toString());
+            }
+            return parts.join('\n\n');
+        }
         function aiSystemPrompt() {
             const lines = aiSettingsSnapshot().map(s =>
                 '- ' + s.id + ' (' + s.label + ', ' + (s.type === 'checkbox' ? 'bool' : 'text') + '): ' + JSON.stringify(s.value)
             ).join('\n');
-            return [
+            const base = [
                 'Ти си асистент за настройките на HERMES (бектест симулатор).',
                 'Можеш да променяш САМО полетата по-долу по id. НЕ стартирай симулация и НЕ пипай резултатите — само задавай стойности.',
                 'Отговаряй на български. Връщай САМО валиден JSON без текст извън него, във формат:',
@@ -3328,6 +3345,11 @@
                 'Текущи настройки:',
                 lines
             ].join('\n');
+            if (aiCfg.includeCode) {
+                const code = aiCodeContext();
+                if (code) return base + '\n\nКОД НА КЛЮЧОВИТЕ ФУНКЦИИ (само за справка — не го променяй):\n' + code;
+            }
+            return base;
         }
         function aiExtractJson(text) {
             if (!text) return null;
@@ -3341,7 +3363,7 @@
             const cfg = aiCfg;
             if (!cfg.key) throw new Error('Няма API ключ. Отвори „Настройки на ИИ“ и го постави.');
             if (cfg.provider === 'gemini') {
-                const model = cfg.model || 'gemini-2.0-flash';
+                const model = cfg.model || 'gemini-3.8-flash';
                 const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent';
                 const contents = messages.filter(m => m.role !== 'system').map(m => ({
                     role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }]
