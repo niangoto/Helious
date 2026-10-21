@@ -857,6 +857,32 @@
                 width: 90px;
             }
         }
+
+        /* ── ИИ панел (най-отдясно) ─────────────────────────────── */
+        #aiPanel {
+            position: fixed; top: 0; right: 0; height: 100vh; width: 390px; max-width: 96vw;
+            background: #0b0f18; border-left: 1px solid var(--panel-border);
+            box-shadow: -10px 0 34px rgba(0,0,0,0.55); z-index: 10001;
+            display: flex; flex-direction: column;
+            transform: translateX(105%); transition: transform 0.25s ease;
+        }
+        #aiPanel.open { transform: translateX(0); }
+        .ai-head { display: flex; justify-content: space-between; align-items: center; padding: 10px 12px; border-bottom: 1px solid var(--panel-border); }
+        .ai-cfg { padding: 8px 12px; border-bottom: 1px solid var(--panel-border); font-size: 11px; }
+        .ai-cfg summary { cursor: pointer; color: var(--text-dim); font-weight: 700; }
+        .ai-cfg label { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; color: var(--text-dim); font-size: 9px; text-transform: uppercase; letter-spacing: 0.4px; }
+        .ai-cfg input, .ai-cfg select { background: rgba(255,255,255,0.04); border: 1px solid var(--panel-border); color: var(--text-main); border-radius: 6px; padding: 5px 7px; font-size: 12px; font-family: 'JetBrains Mono', monospace; width: 100%; }
+        .ai-cfg-actions { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+        .ai-dim { color: var(--text-dim); }
+        .ai-log { flex: 1; overflow-y: auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+        .ai-msg { font-size: 12px; line-height: 1.45; padding: 7px 9px; border-radius: 8px; white-space: pre-wrap; word-break: break-word; }
+        .ai-msg.user { align-self: flex-end; background: rgba(0,240,255,0.12); border: 1px solid rgba(0,240,255,0.25); }
+        .ai-msg.bot { align-self: flex-start; background: rgba(255,255,255,0.04); border: 1px solid var(--panel-border); }
+        .ai-msg.err { background: rgba(255,0,85,0.12); border-color: rgba(255,0,85,0.3); color: #ffb3c4; }
+        .ai-msg.sys { align-self: center; color: var(--text-dim); font-size: 10.5px; background: transparent; border: none; }
+        .ai-compose { padding: 10px 12px; border-top: 1px solid var(--panel-border); display: flex; flex-direction: column; gap: 8px; }
+        .ai-compose textarea { resize: none; height: 64px; background: rgba(255,255,255,0.04); border: 1px solid var(--panel-border); color: var(--text-main); border-radius: 8px; padding: 8px; font-family: 'Outfit', sans-serif; font-size: 12px; outline: none; }
+        .ai-compose textarea:focus { border-color: var(--accent-cyan); }
     </style>
 </head>
 
@@ -885,6 +911,7 @@
             <label class="btn" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="Зареди настройки от файл (.json)">📂 Зареди
                 <input type="file" id="settingsFile" accept=".json,application/json" style="display:none" onchange="loadSettings(event)">
             </label>
+            <button class="btn" id="btnAi" onclick="toggleAiPanel()" title="ИИ чат за настройки — променя само полетата, без да пипа текущата симулация">🤖 ИИ</button>
             <button class="btn close" onclick="window.close()">✕</button>
         </div>
     </header>
@@ -1055,6 +1082,39 @@
     <div class="footer">
         Историческа симулация: ботът знае само данните до текущата свещ. Бюджетът се третира в EUR. Риск (α): 0.1–0.5 консервативен · 1.0 умерен · &gt;1.0 агресивен. Не е финансов съвет.
     </div>
+
+    <!-- ИИ панел (най-отдясно) -->
+    <aside id="aiPanel" aria-hidden="true">
+        <div class="ai-head">
+            <b style="font-size:12px">🤖 ИИ настройки</b>
+            <button class="btn close" onclick="toggleAiPanel(false)" style="padding:2px 8px">✕</button>
+        </div>
+        <details class="ai-cfg">
+            <summary>Настройки на ИИ</summary>
+            <label>Доставчик
+                <select id="aiProvider" onchange="aiCfgChanged()">
+                    <option value="gemini">Google Gemini</option>
+                    <option value="openai">OpenAI / съвместим</option>
+                    <option value="anthropic">Anthropic</option>
+                </select>
+            </label>
+            <label>Модел <input type="text" id="aiModel" placeholder="gemini-2.0-flash"></label>
+            <label>API ключ <input type="password" id="aiKey" placeholder="постави ключа" autocomplete="off"></label>
+            <label>Base URL (за OpenAI-съвместим) <input type="text" id="aiBaseUrl" placeholder="https://api.openai.com/v1"></label>
+            <div class="ai-cfg-actions">
+                <button class="btn" onclick="aiSaveCfg()" style="padding:3px 10px">Запази</button>
+                <span id="aiCfgStatus" class="ai-dim"></span>
+            </div>
+            <div class="ai-dim" style="font-size:10px;margin-top:6px;text-transform:none;letter-spacing:0">Ключът се пази само в този браузър (localStorage) и не се качва в repo. ИИ променя само полетата — не стартира и не пипа текущата симулация.</div>
+        </details>
+        <div id="aiLog" class="ai-log">
+            <div class="ai-msg sys">Питай за настройки, напр. „сложи α=1.5, модел Логистична и TP=2.5“.</div>
+        </div>
+        <div class="ai-compose">
+            <textarea id="aiInput" placeholder="Напиши какво да настроя..."></textarea>
+            <button class="btn start" id="btnAiSend" onclick="sendAiMessage()">Изпрати</button>
+        </div>
+    </aside>
 
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
     <script src="models.js"></script>
@@ -3195,6 +3255,197 @@
             runSimulation();
         }
 
+        // ── ИИ чат за настройки (без да пипа симулацията) ────────────
+        const AI_LS_KEY = 'hermes_ai_cfg';
+        let aiCfg = { provider: 'gemini', model: 'gemini-2.0-flash', key: '', baseUrl: 'https://api.openai.com/v1' };
+        let aiMessages = [];
+        let aiBusy = false;
+
+        function aiLoadCfg() {
+            try {
+                const o = JSON.parse(localStorage.getItem(AI_LS_KEY) || '{}');
+                if (o && typeof o === 'object') aiCfg = Object.assign(aiCfg, o);
+            } catch (e) { }
+            const p = document.getElementById('aiProvider'); if (p) p.value = aiCfg.provider;
+            const m = document.getElementById('aiModel'); if (m) m.value = aiCfg.model;
+            const k = document.getElementById('aiKey'); if (k) k.value = aiCfg.key;
+            const b = document.getElementById('aiBaseUrl'); if (b) b.value = aiCfg.baseUrl;
+        }
+        function aiSaveCfg() {
+            aiCfg.provider = ((document.getElementById('aiProvider') || {}).value) || 'gemini';
+            aiCfg.model = (((document.getElementById('aiModel') || {}).value) || '').trim();
+            aiCfg.key = (((document.getElementById('aiKey') || {}).value) || '').trim();
+            aiCfg.baseUrl = (((document.getElementById('aiBaseUrl') || {}).value) || '').trim();
+            localStorage.setItem(AI_LS_KEY, JSON.stringify(aiCfg));
+            const st = document.getElementById('aiCfgStatus');
+            if (st) { st.textContent = 'Запазено'; setTimeout(() => { st.textContent = ''; }, 1500); }
+        }
+        function aiCfgChanged() {
+            const p = ((document.getElementById('aiProvider') || {}).value) || 'gemini';
+            const m = document.getElementById('aiModel');
+            const b = document.getElementById('aiBaseUrl');
+            if (m) m.value = p === 'gemini' ? 'gemini-2.0-flash' : p === 'anthropic' ? 'claude-3-5-sonnet-latest' : 'gpt-4o-mini';
+            if (b) b.value = p === 'openai' ? 'https://api.openai.com/v1' : '';
+        }
+        function toggleAiPanel(force) {
+            const p = document.getElementById('aiPanel');
+            if (!p) return;
+            const open = (typeof force === 'boolean') ? force : !p.classList.contains('open');
+            p.classList.toggle('open', open);
+            p.setAttribute('aria-hidden', open ? 'false' : 'true');
+            const b = document.getElementById('btnAi'); if (b) b.classList.toggle('active', open);
+            if (open) { const inp = document.getElementById('aiInput'); if (inp) inp.focus(); }
+        }
+        function aiLogMsg(role, text) {
+            const log = document.getElementById('aiLog'); if (!log) return;
+            const d = document.createElement('div');
+            d.className = 'ai-msg ' + role;
+            d.textContent = text;
+            log.appendChild(d);
+            log.scrollTop = log.scrollHeight;
+        }
+        function aiSettingsSnapshot() {
+            const out = [];
+            for (const f of SETTINGS_SCHEMA) {
+                const el = document.getElementById(f.id);
+                if (!el) continue;
+                out.push({ id: f.id, type: f.type, label: SWEEP_LABELS[f.id] || f.id,
+                    value: (f.type === 'checkbox') ? !!el.checked : el.value });
+            }
+            return out;
+        }
+        function aiSystemPrompt() {
+            const lines = aiSettingsSnapshot().map(s =>
+                '- ' + s.id + ' (' + s.label + ', ' + (s.type === 'checkbox' ? 'bool' : 'text') + '): ' + JSON.stringify(s.value)
+            ).join('\n');
+            return [
+                'Ти си асистент за настройките на HERMES (бектест симулатор).',
+                'Можеш да променяш САМО полетата по-долу по id. НЕ стартирай симулация и НЕ пипай резултатите — само задавай стойности.',
+                'Отговаряй на български. Връщай САМО валиден JSON без текст извън него, във формат:',
+                '{"reply":"кратко обяснение","changes":{"inpAlpha":"1.5","inpModel":"1"}}',
+                'Ако не е нужна промяна: {"reply":"...","changes":{}}.',
+                'За checkbox: true/false. За select (inpModel, inpInterval, inpMinLotUnit, inpSpreadUnit, inpSpeed) давай точната стойност на опцията (inpModel: "1"=Логистична).',
+                'Текущи настройки:',
+                lines
+            ].join('\n');
+        }
+        function aiExtractJson(text) {
+            if (!text) return null;
+            let t = String(text).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '');
+            try { return JSON.parse(t); } catch (e) { }
+            const a = t.indexOf('{'), b = t.lastIndexOf('}');
+            if (a >= 0 && b > a) { try { return JSON.parse(t.slice(a, b + 1)); } catch (e) { } }
+            return null;
+        }
+        async function aiCall(messages) {
+            const cfg = aiCfg;
+            if (!cfg.key) throw new Error('Няма API ключ. Отвори „Настройки на ИИ“ и го постави.');
+            if (cfg.provider === 'gemini') {
+                const model = cfg.model || 'gemini-2.0-flash';
+                const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent';
+                const contents = messages.filter(m => m.role !== 'system').map(m => ({
+                    role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }]
+                }));
+                const sys = messages.find(m => m.role === 'system');
+                const body = { contents, generationConfig: { temperature: 0.2 } };
+                if (sys) body.systemInstruction = { parts: [{ text: sys.content }] };
+                const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.key }, body: JSON.stringify(body) });
+                const j = await r.json();
+                if (!r.ok) throw new Error((j && j.error && j.error.message) || ('HTTP ' + r.status));
+                const parts = j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts;
+                return (parts || []).map(p => p.text || '').join('');
+            }
+            if (cfg.provider === 'anthropic') {
+                const model = cfg.model || 'claude-3-5-sonnet-latest';
+                const sys = messages.find(m => m.role === 'system');
+                const conv = messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content }));
+                const r = await fetch('https://api.anthropic.com/v1/messages', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'x-api-key': cfg.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+                    body: JSON.stringify({ model, max_tokens: 1024, system: sys ? sys.content : undefined, messages: conv })
+                });
+                const j = await r.json();
+                if (!r.ok) throw new Error((j && j.error && j.error.message) || ('HTTP ' + r.status));
+                return (j.content || []).map(p => p.text || '').join('');
+            }
+            const base = (cfg.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
+            const model = cfg.model || 'gpt-4o-mini';
+            const r = await fetch(base + '/chat/completions', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.key },
+                body: JSON.stringify({ model, temperature: 0.2, messages })
+            });
+            const j = await r.json();
+            if (!r.ok) throw new Error((j && j.error && j.error.message) || ('HTTP ' + r.status));
+            return j.choices && j.choices[0] && j.choices[0].message ? j.choices[0].message.content : '';
+        }
+        function aiApplyChanges(changes) {
+            // ВАЖНО: само записва стойности в полетата. Без dispatchEvent и без
+            // runSimulation → lastSim/текущата симулация и sweep-ът не се пипат.
+            if (!changes || typeof changes !== 'object') return [];
+            const allowed = new Set(SETTINGS_SCHEMA.map(f => f.id));
+            const applied = [];
+            for (const id of Object.keys(changes)) {
+                if (!allowed.has(id)) continue;
+                const f = SETTINGS_SCHEMA.find(x => x.id === id);
+                const el = document.getElementById(id);
+                if (!f || !el) continue;
+                let v = changes[id];
+                if (f.type === 'checkbox') {
+                    el.checked = !!v;
+                } else {
+                    if (el.type === 'number') {
+                        const num = parseFloat(v);
+                        if (isFinite(num)) v = num;
+                        const mn = el.min !== '' ? parseFloat(el.min) : -Infinity;
+                        const mx = el.max !== '' ? parseFloat(el.max) : Infinity;
+                        if (isFinite(mn)) v = Math.max(mn, v);
+                        if (isFinite(mx)) v = Math.min(mx, v);
+                    }
+                    el.value = v;
+                }
+                applied.push(f.label || id);
+            }
+            // само визуални обновявания
+            updateContraVisibility();
+            const mSel = document.getElementById('inpModel');
+            if (mSel) {
+                const mb = document.getElementById('hModelBadge');
+                if (mb && modelNames[parseInt(mSel.value, 10)]) mb.textContent = modelNames[parseInt(mSel.value, 10)];
+            }
+            updateMinLotSpreadHint();
+            return applied;
+        }
+        async function sendAiMessage() {
+            if (aiBusy) return;
+            const inp = document.getElementById('aiInput');
+            const text = ((inp && inp.value) || '').trim();
+            if (!text) return;
+            if (!aiCfg.key) { aiLogMsg('err', 'Няма API ключ. Отвори „Настройки на ИИ“ и го постави.'); return; }
+            aiBusy = true;
+            const btn = document.getElementById('btnAiSend'); if (btn) btn.disabled = true;
+            aiLogMsg('user', text);
+            if (inp) inp.value = '';
+            aiMessages.push({ role: 'user', content: text });
+            try {
+                const sys = { role: 'system', content: aiSystemPrompt() };
+                const answer = await aiCall([sys].concat(aiMessages.slice(-12)));
+                aiMessages.push({ role: 'assistant', content: answer });
+                const data = aiExtractJson(answer);
+                if (data && data.reply) aiLogMsg('bot', data.reply);
+                else if (answer) aiLogMsg('bot', answer);
+                if (data && data.changes) {
+                    const applied = aiApplyChanges(data.changes);
+                    if (applied.length) aiLogMsg('sys', 'Приложени: ' + applied.join(', ') + ' (симулацията не е пипана)');
+                }
+            } catch (e) {
+                aiLogMsg('err', 'Грешка: ' + e.message);
+            } finally {
+                aiBusy = false;
+                if (btn) btn.disabled = false;
+            }
+        }
+
         function initUI() {
             document.getElementById('hSymbol').textContent = currentSymbol;
 
@@ -3267,6 +3518,7 @@
             iSel.addEventListener('change', () => { updateMinLotSpreadHint(); runSimulation(); });
             ensureFxRates();
             updateMinLotSpreadHint();
+            aiLoadCfg();
 
             // Попълва от Binance (ако има) и тогава пуска симулацията.
             autoFillInstrument().then(() => runSimulation());
