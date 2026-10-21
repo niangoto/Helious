@@ -169,6 +169,18 @@ function changeAnalysisPeriod(period) {
     ivReload();
 }
 
+// Промяна на „Поглед назад (свещи)“ — същата настройка като в Hermes.
+// Изчиства кеша на моделите и преизчислява отворения изглед.
+function lookbackChange(val) {
+    analysisLookback = Math.max(30, Math.min(5000, parseInt(val, 10) || 3000));
+    const el = document.getElementById('inpLookback');
+    if (el) el.value = analysisLookback;
+    if (typeof modelSeqCache !== 'undefined' && modelSeqCache.clear) modelSeqCache.clear();
+    ivDataCache = null;
+    recomputePredictions();
+    if (indicatorViewVisible()) ivReload();
+}
+
 function updateForecastHorizon(val) {
     forecastSteps = parseInt(val);
     latestForecastData = null;
@@ -492,7 +504,10 @@ async function ivReload() {
     const config = periodConfigs[period];
     if (!config) { ivEl.style.opacity = '1'; return; }
     try {
-        const data = await fetchKlines(sym, config.interval, config.limit);
+        // Теглим поне колкото е зададеният „Поглед назад“, за да има моделите
+        // пълния прозорец (както в Hermes).
+        const ivLimit = Math.min(50000, Math.max(config.limit, analysisLookback + 100));
+        const data = await fetchKlines(sym, config.interval, ivLimit);
         if (data.code === -1121 || data.error || !Array.isArray(data)) {
             document.getElementById('ivRsiVal').textContent = 'N/A';
             document.getElementById('ivVolVal').textContent = 'N/A';

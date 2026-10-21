@@ -1167,6 +1167,12 @@
                     <span class="stat-label">Текуща цена</span>
                     <span id="currentPrice" class="stat-val">---</span>
                 </div>
+                <div class="stat-group" title="Колко свещи назад да гледат моделите (същото като „Поглед назад“ в Hermes)">
+                    <span class="stat-label">Поглед назад</span>
+                    <input type="number" id="inpLookback" value="3000" min="30" max="5000" step="100"
+                        style="width:66px;background:rgba(255,255,255,0.04);border:1px solid var(--panel-border);color:var(--text-main);border-radius:6px;padding:3px 6px;font-family:'JetBrains Mono',monospace;font-size:12px"
+                        onchange="lookbackChange(this.value)">
+                </div>
                 <div class="stat-group" id="betaControl" style="display:none">
                     <span class="stat-label">β затихване</span>
                     <input type="range" id="candleBetaSlider" min="0.01" max="1" step="0.01" value="0.5" style="width:90px" oninput="candleBetaChange(this.value)">

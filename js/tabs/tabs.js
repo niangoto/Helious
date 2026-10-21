@@ -15,7 +15,7 @@ let ivPanelCandles = null;
 function updateIvPanel(candles) {
     if (!candles || candles.length < 25) return;
     if (typeof indicatorViewVisible === 'function' && !indicatorViewVisible()) return;
-    ivModelsCache = computeAllModels(candles);
+    ivModelsCache = computeAllModels(candles, { lookback: analysisLookback });
     ivPanelCandles = candles;
     renderCurrentTabPanel();
 }

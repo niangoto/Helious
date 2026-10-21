@@ -594,10 +594,10 @@ function computeExpectedValue(candles) {
 // чертае графиката (computeModelProbSequence / computeFourierProbSequence), за да
 // съвпадат процентите на таблото и на графиката 1:1 (и с Hermes, който ползва
 // computeModelProbCore).
-function computeAllModels(candles) {
+function computeAllModels(candles, opts) {
   if (!candles || candles.length < 30) return null;
   const seqLast = (mi) => {
-    const s = computeModelProbSequence(candles, mi);
+    const s = computeModelProbSequence(candles, mi, opts);
     return s.length ? s[s.length - 1].value : 50;
   };
   const fourier = computeFourierProbSequence(candles);
@@ -617,13 +617,14 @@ function computeAllModels(candles) {
 // Кеш по хеш на свещите: ако данните не са се сменили, не преизчисляваме тежката
 // плъзгаща редица. Пази максимум 1 запис на модел (6 модела).
 const modelSeqCache = new Map();
-function computeModelProbSequence(candles, modelIndex) {
+function computeModelProbSequence(candles, modelIndex, opts) {
   if (!candles || candles.length < 30) return [];
+  const lookback = (opts && opts.lookback > 0) ? Math.floor(opts.lookback) : 0;
   const cacheHash = candlesHash(candles);
   const cached = modelSeqCache.get(modelIndex);
-  if (cached && cached.hash === cacheHash) return cached.data;
+  if (cached && cached.hash === cacheHash && cached.lookback === lookback) return cached.data;
   const n = candles.length;
-  const vals = computeModelProbCore(candles, modelIndex, null);
+  const vals = computeModelProbCore(candles, modelIndex, opts || null);
   if (!vals) return [];
   const step = Math.max(1, Math.floor(n / 200));
   const result = [];
@@ -633,7 +634,7 @@ function computeModelProbSequence(candles, modelIndex) {
       result.push({ time: candles[i].time, value: vals[i] });
     }
   }
-  modelSeqCache.set(modelIndex, { hash: cacheHash, data: result });
+  modelSeqCache.set(modelIndex, { hash: cacheHash, lookback, data: result });
   return result;
 }
 
