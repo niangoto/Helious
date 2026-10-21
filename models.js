@@ -420,6 +420,12 @@ function computeFourierProbSequence(candles) {
     const f = computeFourierAnalysisLight(slice);
     result.push({ time: candles[i].time, value: f ? f.buyPct : 50 });
   }
+  // Винаги добавяме и последната (текуща) свещ, за да съвпада картата с графиката.
+  if (result.length && result[result.length - 1].time !== candles[n - 1].time) {
+    const slice = candles.slice(Math.max(0, n - 1 - win + 1), n);
+    const f = computeFourierAnalysisLight(slice);
+    result.push({ time: candles[n - 1].time, value: f ? f.buyPct : 50 });
+  }
   fourierSeqCache = { hash: h, data: result };
   return result;
 }
@@ -584,11 +590,28 @@ function computeExpectedValue(candles) {
   return { buyPct: Math.max(1, Math.min(99, buyPct)), sellPct: Math.max(1, Math.min(99, 100 - buyPct)), ev, winRate, avgProfit, avgLoss };
 }
 
+// Стойностите за картите на таблото се взимат от СЪЩИТЕ причинни редици, които
+// чертае графиката (computeModelProbSequence / computeFourierProbSequence), за да
+// съвпадат процентите на таблото и на графиката 1:1 (и с Hermes, който ползва
+// computeModelProbCore).
 function computeAllModels(candles) {
   if (!candles || candles.length < 30) return null;
-  const prices = candles.map(c => c.close);
-  const hist = computeHistoricalProbability(candles);
-  return { models: { historical: hist, logistic: computeCombinationProbability(candles), markov: computeMarkovChain(candles), expectedValue: computeExpectedValue(candles), wavelet: computeWaveletProbability(prices), fourier: computeFourierProbability(candles), rsi: computeRSIProbability(candles) } };
+  const seqLast = (mi) => {
+    const s = computeModelProbSequence(candles, mi);
+    return s.length ? s[s.length - 1].value : 50;
+  };
+  const fourier = computeFourierProbSequence(candles);
+  const fLast = fourier.length ? fourier[fourier.length - 1].value : 50;
+  const wrap = (v) => ({ buyPct: v, sellPct: 100 - v });
+  return { models: {
+    historical: wrap(seqLast(0)),
+    logistic: wrap(seqLast(1)),
+    markov: wrap(seqLast(2)),
+    expectedValue: wrap(seqLast(3)),
+    wavelet: wrap(seqLast(4)),
+    fourier: wrap(fLast),
+    rsi: computeRSIProbability(candles)
+  } };
 }
 
 // Кеш по хеш на свещите: ако данните не са се сменили, не преизчисляваме тежката

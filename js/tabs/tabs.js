@@ -105,14 +105,15 @@ function drawProbLine(ctx, w, h, probData) {
     const toY = (v) => h - (v / 100) * (h - 8) - 4;
     const midY = toY(50);
 
-    // Axis labels: 0 at middle, ±100 at extremes
+    // Axis labels: 0-100 buy probability (50 = neutral) — СЪЩАТА скала като
+    // картите в таблото (напр. 75 значи Buy 75%, а не „Buy 50“).
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
     [
-        { v: 100, label: 'Buy 100' },
-        { v: 75, label: 'Buy 50' },
-        { v: 50, label: '0' },
-        { v: 25, label: 'Sell 50' },
-        { v: 0, label: 'Sell 100' }
+        { v: 100, label: 'Buy 100%' },
+        { v: 75, label: 'Buy 75%' },
+        { v: 50, label: '50%' },
+        { v: 25, label: 'Sell 75%' },
+        { v: 0, label: 'Sell 100%' }
     ].forEach(({ v, label }) => {
         const y = toY(v);
         ctx.fillStyle = v === 50 ? 'rgba(255,255,255,0.5)' : 'rgba(255,255,255,0.35)';
