@@ -1099,6 +1099,7 @@
                 </select>
             </label>
             <label>Модел <input type="text" id="aiModel" placeholder="gemini-3.8-flash"></label>
+            <label>Резервен модел (при „high demand“) <input type="text" id="aiFallbackModel" placeholder="gemini-3.8-pro"></label>
             <label>API ключ <input type="password" id="aiKey" placeholder="постави ключа" autocomplete="off"></label>
             <label>Base URL (за OpenAI-съвместим) <input type="text" id="aiBaseUrl" placeholder="https://api.openai.com/v1"></label>
             <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0.2px;margin-top:8px">
@@ -3261,7 +3262,7 @@
 
         // ── ИИ чат за настройки (без да пипа симулацията) ────────────
         const AI_LS_KEY = 'hermes_ai_cfg';
-        let aiCfg = { provider: 'gemini', model: 'gemini-3.8-flash', key: '', baseUrl: 'https://api.openai.com/v1', includeCode: true };
+        let aiCfg = { provider: 'gemini', model: 'gemini-3.8-flash', fallbackModel: 'gemini-3.8-pro', key: '', baseUrl: 'https://api.openai.com/v1', includeCode: true };
         let aiMessages = [];
         let aiBusy = false;
 
@@ -3282,9 +3283,11 @@
             } catch (e) { }
             // Миграция: стар запазен модел (напр. gemini-2.0-flash) се оправя сам.
             aiCfg.model = aiNormalizeModel(aiCfg.provider, aiCfg.model);
+            aiCfg.fallbackModel = aiNormalizeModel(aiCfg.provider, aiCfg.fallbackModel);
             try { localStorage.setItem(AI_LS_KEY, JSON.stringify(aiCfg)); } catch (e) { }
             const p = document.getElementById('aiProvider'); if (p) p.value = aiCfg.provider;
             const m = document.getElementById('aiModel'); if (m) m.value = aiCfg.model;
+            const fm = document.getElementById('aiFallbackModel'); if (fm) fm.value = aiCfg.fallbackModel || '';
             const k = document.getElementById('aiKey'); if (k) k.value = aiCfg.key;
             const b = document.getElementById('aiBaseUrl'); if (b) b.value = aiCfg.baseUrl;
             const inc = document.getElementById('aiIncludeCode'); if (inc) inc.checked = !!aiCfg.includeCode;
@@ -3292,6 +3295,7 @@
         function aiSaveCfg() {
             aiCfg.provider = ((document.getElementById('aiProvider') || {}).value) || 'gemini';
             aiCfg.model = aiNormalizeModel(aiCfg.provider, ((document.getElementById('aiModel') || {}).value) || '');
+            aiCfg.fallbackModel = aiNormalizeModel(aiCfg.provider, ((document.getElementById('aiFallbackModel') || {}).value) || '');
             aiCfg.key = (((document.getElementById('aiKey') || {}).value) || '').trim();
             aiCfg.baseUrl = (((document.getElementById('aiBaseUrl') || {}).value) || '').trim();
             const inc = document.getElementById('aiIncludeCode');
@@ -3303,8 +3307,10 @@
         function aiCfgChanged() {
             const p = ((document.getElementById('aiProvider') || {}).value) || 'gemini';
             const m = document.getElementById('aiModel');
+            const fm = document.getElementById('aiFallbackModel');
             const b = document.getElementById('aiBaseUrl');
             if (m) m.value = p === 'gemini' ? 'gemini-3.8-flash' : p === 'anthropic' ? 'claude-3-5-sonnet-latest' : 'gpt-4o-mini';
+            if (fm) fm.value = p === 'gemini' ? 'gemini-3.8-pro' : p === 'anthropic' ? 'claude-3-5-haiku-latest' : 'gpt-4o';
             if (b) b.value = p === 'openai' ? 'https://api.openai.com/v1' : '';
         }
         function toggleAiPanel(force) {
@@ -3372,47 +3378,75 @@
             if (a >= 0 && b > a) { try { return JSON.parse(t.slice(a, b + 1)); } catch (e) { } }
             return null;
         }
-        async function aiCall(messages) {
-            const cfg = aiCfg;
-            if (!cfg.key) throw new Error('Няма API ключ. Отвори „Настройки на ИИ“ и го постави.');
+        function aiRetryable(status, msg) {
+            const t = String(msg || '').toLowerCase();
+            if (status === 429 || status === 500 || status === 502 || status === 503 || status === 504) return true;
+            return /high demand|overloaded|try again later|resource exhausted|rate limit|currently experiencing|temporarily|no longer available|not available/.test(t);
+        }
+        async function aiCallWithModel(cfg, model, messages) {
             if (cfg.provider === 'gemini') {
-                const model = aiNormalizeModel('gemini', cfg.model) || 'gemini-3.8-flash';
-                const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(model) + ':generateContent';
-                const contents = messages.filter(m => m.role !== 'system').map(m => ({
-                    role: m.role === 'assistant' ? 'model' : 'user', parts: [{ text: m.content }]
+                const m = aiNormalizeModel('gemini', model) || 'gemini-3.8-flash';
+                const url = 'https://generativelanguage.googleapis.com/v1beta/models/' + encodeURIComponent(m) + ':generateContent';
+                const contents = messages.filter(x => x.role !== 'system').map(x => ({
+                    role: x.role === 'assistant' ? 'model' : 'user', parts: [{ text: x.content }]
                 }));
-                const sys = messages.find(m => m.role === 'system');
+                const sys = messages.find(x => x.role === 'system');
                 const body = { contents, generationConfig: { temperature: 0.2 } };
                 if (sys) body.systemInstruction = { parts: [{ text: sys.content }] };
                 const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.key }, body: JSON.stringify(body) });
                 const j = await r.json();
-                if (!r.ok) throw new Error((j && j.error && j.error.message) || ('HTTP ' + r.status));
+                if (!r.ok) {
+                    const msg = (j && j.error && j.error.message) || ('HTTP ' + r.status);
+                    const err = new Error(msg); err.retryable = aiRetryable(r.status, msg); throw err;
+                }
                 const parts = j.candidates && j.candidates[0] && j.candidates[0].content && j.candidates[0].content.parts;
                 return (parts || []).map(p => p.text || '').join('');
             }
             if (cfg.provider === 'anthropic') {
-                const model = cfg.model || 'claude-3-5-sonnet-latest';
-                const sys = messages.find(m => m.role === 'system');
-                const conv = messages.filter(m => m.role !== 'system').map(m => ({ role: m.role, content: m.content }));
+                const m = model || 'claude-3-5-sonnet-latest';
+                const sys = messages.find(x => x.role === 'system');
+                const conv = messages.filter(x => x.role !== 'system').map(x => ({ role: x.role, content: x.content }));
                 const r = await fetch('https://api.anthropic.com/v1/messages', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', 'x-api-key': cfg.key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
-                    body: JSON.stringify({ model, max_tokens: 1024, system: sys ? sys.content : undefined, messages: conv })
+                    body: JSON.stringify({ model: m, max_tokens: 1024, system: sys ? sys.content : undefined, messages: conv })
                 });
                 const j = await r.json();
-                if (!r.ok) throw new Error((j && j.error && j.error.message) || ('HTTP ' + r.status));
+                if (!r.ok) { const msg = (j && j.error && j.error.message) || ('HTTP ' + r.status); const err = new Error(msg); err.retryable = aiRetryable(r.status, msg); throw err; }
                 return (j.content || []).map(p => p.text || '').join('');
             }
             const base = (cfg.baseUrl || 'https://api.openai.com/v1').replace(/\/+$/, '');
-            const model = cfg.model || 'gpt-4o-mini';
+            const m = model || 'gpt-4o-mini';
             const r = await fetch(base + '/chat/completions', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.key },
-                body: JSON.stringify({ model, temperature: 0.2, messages })
+                body: JSON.stringify({ model: m, temperature: 0.2, messages })
             });
             const j = await r.json();
-            if (!r.ok) throw new Error((j && j.error && j.error.message) || ('HTTP ' + r.status));
+            if (!r.ok) { const msg = (j && j.error && j.error.message) || ('HTTP ' + r.status); const err = new Error(msg); err.retryable = aiRetryable(r.status, msg); throw err; }
             return j.choices && j.choices[0] && j.choices[0].message ? j.choices[0].message.content : '';
+        }
+        async function aiCall(messages) {
+            const cfg = aiCfg;
+            if (!cfg.key) throw new Error('Няма API ключ. Отвори „Настройки на ИИ“ и го постави.');
+            const defBy = (p) => p === 'gemini' ? 'gemini-3.8-flash' : p === 'anthropic' ? 'claude-3-5-sonnet-latest' : 'gpt-4o-mini';
+            const primary = aiNormalizeModel(cfg.provider, cfg.model) || defBy(cfg.provider);
+            const fallback = aiNormalizeModel(cfg.provider, cfg.fallbackModel || '');
+            const models = [primary];
+            if (fallback && fallback !== primary) models.push(fallback);
+            let lastErr = null;
+            for (let i = 0; i < models.length; i++) {
+                try {
+                    const text = await aiCallWithModel(cfg, models[i], messages);
+                    if (i > 0) aiLogMsg('sys', 'Основният модел не е достъпен — използван резервен: ' + models[i]);
+                    return text;
+                } catch (e) {
+                    lastErr = e;
+                    const canRetry = e && e.retryable && i < models.length - 1;
+                    if (!canRetry) throw e;
+                }
+            }
+            throw lastErr || new Error('Неуспешно извикване на ИИ.');
         }
         function aiApplyChanges(changes) {
             // ВАЖНО: само записва стойности в полетата. Без dispatchEvent и без
