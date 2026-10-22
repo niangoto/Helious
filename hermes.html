@@ -2433,18 +2433,17 @@
                 showRealInterval(simCandles, interval);
                 setProgress(10, `Изчисляване на вероятностите по модела (${simCandles.length} свещи)...`);
                 await sleep(30);
-                // СТРОГ прозорец: за всеки бар i моделът се смята само върху
-                // последните `lookback` свещи (candles[i-lookback+1..i]), с
-                // индикатори, заредени от началото на този прозорец — така
-                // никакви по-стари данни не влияят. Ако зареденият ред е по-къс
-                // от прозореца, това е обикновеното причинно изчисление (бързо).
-                setProgress(10, `Изчисляване на вероятностите (строг прозорец ${P.lookback}, ${simCandles.length} свещи)...`);
-                await sleep(30);
-                const probs = await computeModelProbSeriesStrict(
-                    simCandles, currentModel,
-                    { invert: contraFlags(), intervalSec: intervalSecs(interval), lookback: P.lookback },
-                    P.lookback, null, simStartIdx, P.lookbackGrow
-                );
+                // БЪРЗО и ПРИЧИННО: индикаторите (EMA/RSI/ATR/ADX/MACD) се смятат
+                // ЕДНОКРАТНО за целия период, но само напред във времето — стойността
+                // на бар i зависи само от барове <= i, т.е. моделът НЕ вижда бъдещето.
+                // Статистиката (combo win-rate) е walk-forward: включва само сделки,
+                // чийто изход вече е известен до бар i.
+                setProgress(10, `Изчисляване на вероятностите (причинно, ${simCandles.length} свещи)...`);
+                await sleep(0);
+                const probs = computeModelProbSeries(simCandles, currentModel, {
+                    invert: contraFlags(), intervalSec: intervalSecs(interval),
+                    lookback: P.lookback, lookbackGrow: P.lookbackGrow, growFrom: simStartIdx
+                });
                 if (cancelFlag) return;
 
                 const atrSeries = computeATR(simCandles, 14);
@@ -2606,8 +2605,9 @@
         // Нужно е, защото lookback влияе на модела, а sweep-ът иначе ползва
         // предварително сметнатите probs от базовата симулация.
         async function computeSweepProbs(candles, interval, lookback, progressCb, fromIdx, grow) {
-            const opts = { invert: contraFlags(), intervalSec: intervalSecs(interval), lookback: lookback };
-            return await computeModelProbSeriesStrict(candles, currentModel, opts, lookback, progressCb, fromIdx, grow);
+            // Същото бързо причинно изчисление (без пре-изчисляване по бар).
+            const opts = { invert: contraFlags(), intervalSec: intervalSecs(interval), lookback: lookback, lookbackGrow: grow, growFrom: fromIdx };
+            return computeModelProbSeries(candles, currentModel, opts);
         }
 
         async function runSweep(inputId, key) {

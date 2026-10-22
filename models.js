@@ -415,7 +415,7 @@ function computeFourierProbSequence(candles, opts) {
   const result = [];
   // 1:1 с Hermes: Фурие ползва последните min(lookback, FOURIER_LOOKBACK) свещи
   // (в строгия прозорец), с пълния computeFourierProbability.
-  const win = lb > 0 ? Math.min(lb, FOURIER_LOOKBACK) : FOURIER_LOOKBACK;
+  const win = FOURIER_LOOKBACK;   // като модел 6 в computeModelProbCore
   const maxPoints = 36;
   const step = Math.max(1, Math.floor((n - 30) / maxPoints));
   for (let i = 30; i < n; i += step) {
@@ -619,19 +619,15 @@ function computeModelProbAt(candles, i, modelIndex, opts, W) {
 function computeAllModels(candles, opts) {
   if (!candles || candles.length < 30) return null;
   const n = candles.length;
+  // Бързо причинно изчисление (индикаторите се смятат веднъж за целия период,
+  // но само напред — без бъдеще); картата = последната точка на графиката.
   const atLast = (mi) => {
-    const W = windowFor(mi, opts);
-    if (W >= n) {
-      const vals = computeModelProbCore(candles, mi, opts || null);
-      return vals ? vals[n - 1] : null;
-    }
-    return computeModelProbAt(candles, n - 1, mi, opts, W);
+    const vals = computeModelProbCore(candles, mi, opts || null);
+    return vals ? vals[n - 1] : null;
   };
   const wrap = (v) => ({ buyPct: v == null ? 50 : v, sellPct: 100 - (v == null ? 50 : v) });
-  // Фурие: същата стойност като графиката (последните min(W, FOURIER_LOOKBACK) свещи).
-  const lb = lookbackOf(opts);
-  const fWin = lb > 0 ? Math.min(lb, FOURIER_LOOKBACK) : FOURIER_LOOKBACK;
-  const f = computeFourierProbability(candles.slice(Math.max(0, n - fWin), n));
+  // Фурие: като модел 6 в Hermes — последните FOURIER_LOOKBACK (500) свещи.
+  const f = computeFourierProbability(candles.slice(Math.max(0, n - FOURIER_LOOKBACK), n));
   return { models: {
     historical: wrap(atLast(0)),
     logistic: wrap(atLast(1)),
@@ -652,23 +648,14 @@ function computeModelProbSequence(candles, modelIndex, opts) {
   const cached = modelSeqCache.get(modelIndex);
   if (cached && cached.hash === cacheHash && cached.lookback === lookback) return cached.data;
   const n = candles.length;
-  const W = windowFor(modelIndex, opts);
+  // Едно причинно изчисление за целия период (индикаторите са forward-only,
+  // статистиката е walk-forward) → бързо и БЕЗ да вижда бъдещето.
+  const vals = computeModelProbCore(candles, modelIndex, opts || null);
+  if (!vals) return [];
   const step = Math.max(1, Math.floor(n / 200));
   const result = [];
-  if (W >= n) {
-    // Целият ред е в прозореца → обикновеното причинно изчисление.
-    const vals = computeModelProbCore(candles, modelIndex, opts || null);
-    if (!vals) return [];
-    for (let i = 30; i < n; i++) {
-      if ((i % step === 0 || i === n - 1) && vals[i] != null) result.push({ time: candles[i].time, value: vals[i] });
-    }
-  } else {
-    // Строго: за всяка начертана точка — само последните W свещи.
-    for (let i = 30; i < n; i++) {
-      if (i % step !== 0 && i !== n - 1) continue;
-      const v = computeModelProbAt(candles, i, modelIndex, opts, W);
-      if (v != null) result.push({ time: candles[i].time, value: v });
-    }
+  for (let i = 30; i < n; i++) {
+    if ((i % step === 0 || i === n - 1) && vals[i] != null) result.push({ time: candles[i].time, value: vals[i] });
   }
   modelSeqCache.set(modelIndex, { hash: cacheHash, lookback, data: result });
   return result;
@@ -709,6 +696,8 @@ function computeModelProbCore(candles, modelIndex, opts) {
   const lb = (opts && opts.lookback > 0) ? Math.max(30, Math.floor(opts.lookback)) : 0;
   const logisticLb = lb || LOGISTIC_LOOKBACK;
   const modelLb = lb || MODEL_LOOKBACK;
+  // „Разширявай“: от growFrom нататък прозорецът расте с +1 на бар.
+  const growFrom = (opts && opts.lookbackGrow && opts.growFrom > 0) ? Math.floor(opts.growFrom) : -1;
   const result = new Array(n).fill(null);
   const prices = candles.map(c => c.close);
   const rsiV = typeof computeRSI === 'function' ? computeRSI(candles, 14) : prices.map(() => 50);
@@ -720,8 +709,10 @@ function computeModelProbCore(candles, modelIndex, opts) {
   const adxR = computeADX(candles, 14);
   const volV = candles.map(c => c.volume || 0);
   // Причинна базова линия (средно само до i) — без бъдещи ATR/обем.
-  const meanAtrV = rollingMean(atrV, logisticLb);
-  const meanVolV = rollingMean(volV, logisticLb);
+  // При „разширявай“ базовата линия е expanding (цялата история до i).
+  const meanWin = (growFrom >= 0) ? n : logisticLb;
+  const meanAtrV = rollingMean(atrV, meanWin);
+  const meanVolV = rollingMean(volV, meanWin);
   const maxBars = Math.min(50, n);
 
   // RSI модел: усредняваме buyPct само за таймфреймове >= избрания период за
@@ -773,10 +764,14 @@ function computeModelProbCore(candles, modelIndex, opts) {
   const evVal = () => 50 + (evStats().winRate - breakevenWinRate(1.5, 1.0)) * 1.5;
 
   for (let i = 30; i < n; i++) {
+    // Текущ (при „разширявай“ — растящ) прозорец.
+    const growAdd = (growFrom >= 0) ? Math.max(0, i - growFrom) : 0;
+    const curLogisticLb = logisticLb + growAdd;
+    const curModelLb = modelLb + growAdd;
     // Насочена статистика в плъзгащ прозорец — посоката е известна към време i
     const d = candles[i].close >= candles[i - 1].close ? 1 : 0;
     dirs.push(d);
-    if (dirs.length > modelLb) dirs.shift();
+    if (dirs.length > curModelLb) dirs.shift();
 
     // Fold in all trades that resolved exactly at candle i (entry order).
     if (resolvedAt[i].length) {
@@ -789,13 +784,13 @@ function computeModelProbCore(candles, modelIndex, opts) {
         const c = combos.get(e.mask); c.total++;
         if (e.win === 1) c.wins++;
         recentTrades.push({ win: e.win, atr: atrV[j] || 1 });
-        if (recentTrades.length > modelLb) recentTrades.shift();
+        if (recentTrades.length > curModelLb) recentTrades.shift();
         resolvedQ.push({ mask: e.mask, win: e.win, closeIdx: i });
       }
     }
 
     // Изхвърляме статистиката по-стара от MODEL_LOOKBACK бара (плъзгащ прозорец).
-    while (resolvedQ.length && resolvedQ[0].closeIdx < i - (logisticLb - 1)) {
+    while (resolvedQ.length && resolvedQ[0].closeIdx < i - (curLogisticLb - 1)) {
       const old = resolvedQ.shift();
       totalTrades--;
       if (old.win === 1) totalWins--;
@@ -820,7 +815,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
       val = evVal();
     } else if (modelIndex === 4) {
       // Плъзгащ прозорец (последни 500 цени) — пази O(n) при големи серии
-      const win = Math.max(0, i - (modelLb - 1));
+      const win = Math.max(0, i - (curModelLb - 1));
       const w = computeWaveletProbability(prices.slice(win, i + 1));
       val = w.buyPct;
     } else if (modelIndex === 5) {
@@ -832,7 +827,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
       v1 = inv(v1, 1); sum += v1; cnt++;
       const v2 = inv(amplify(markovProb(dirs)), 2); sum += v2; cnt++;
       const v3 = inv(evVal(), 3); sum += v3; cnt++;
-      const win = Math.max(0, i - (modelLb - 1));
+      const win = Math.max(0, i - (curModelLb - 1));
       const v4 = inv(computeWaveletProbability(prices.slice(win, i + 1)).buyPct, 4); sum += v4; cnt++;
       val = cnt > 0 ? sum / cnt : 50;
     } else if (modelIndex === 6) {
