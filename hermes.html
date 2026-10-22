@@ -1002,6 +1002,9 @@
         <label>Поглед назад (свещи)
             <input type="number" id="inpLookback" value="3000" min="30" max="50000" step="100" title="Колко свещи назад да гледат моделите (статистика/прозорци). По подразбиране 3000.">
         </label>
+        <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0.2px" title="При включване: първоначално се ползва зададеният поглед назад, а след това прозорецът расте с всеки изминал бар и включва цялата изминала история.">
+            <input type="checkbox" id="inpLookbackGrow" style="width:auto"> разширявай
+        </label>
         <div class="contra-box" id="contraBox" style="display:none">
             <span class="contra-title">Контра по модели (при „Средна вероятност“)</span>
             <label class="contra-item"><input type="checkbox" id="contraModel0"> Историческа</label>
@@ -1105,6 +1108,10 @@
             <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0.2px;margin-top:8px">
                 <input type="checkbox" id="aiIncludeCode" checked style="width:auto">
                 Изпращай кода към ИИ (за по-точни заключения)
+            </label>
+            <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0.2px;margin-top:4px">
+                <input type="checkbox" id="aiIncludeResult" checked style="width:auto">
+                Изпращай резултата от симулацията (само за четене/анализ)
             </label>
             <div class="ai-cfg-actions">
                 <button class="btn" onclick="aiSaveCfg()" style="padding:3px 10px">Запази</button>
@@ -1796,6 +1803,7 @@
                 pctClose: !!((document.getElementById('inpPctClose') || {}).checked),
                 pctCloseLimit: Math.max(0, parseFloat((document.getElementById('inpPctCloseLimit') || {}).value) || 0),
                 lookback: Math.max(30, Math.min(50000, parseInt((document.getElementById('inpLookback') || {}).value, 10) || 3000)),
+                lookbackGrow: !!((document.getElementById('inpLookbackGrow') || {}).checked),
                 reverse: document.getElementById('inpReverse').checked
             };
         }
@@ -2265,7 +2273,7 @@
         // (candles[i-W+1 .. i]). Индикаторите (EMA/RSI/ATR/ADX/MACD) се зареждат
         // от началото на този прозорец, така че никакви по-стари данни не влияят.
         // По-бавно е (O(n·W)); дава прогрес и може да се паузира/спре.
-        async function computeModelProbSeriesStrict(candles, modelIndex, opts, W, progressCb, fromIdx) {
+        async function computeModelProbSeriesStrict(candles, modelIndex, opts, W, progressCb, fromIdx, grow) {
             const n = candles ? candles.length : 0;
             const out = new Array(n).fill(null);
             if (n < 30) return out;
@@ -2284,12 +2292,14 @@
             for (let i = start; i < n; i++) {
                 if (sweepPaused) { while (sweepPaused && !sweepCancel) await sleep(50); }
                 if (cancelFlag || (sweepActive && sweepCancel)) return out;
-                const s0 = Math.max(0, i - w + 1);
+                // При „разширявай“: първоначално зададеният поглед, после +1 на бар.
+                const effW = grow ? (w + Math.max(0, i - start)) : w;
+                const s0 = Math.max(0, i - effW + 1);
                 const win = candles.slice(s0, i + 1);
                 let v = null;
                 try {
                     const vals = (typeof computeModelProbCore === 'function')
-                        ? computeModelProbCore(win, modelIndex, Object.assign({}, opts, { lookback: w }))
+                        ? computeModelProbCore(win, modelIndex, Object.assign({}, opts, { lookback: effW }))
                         : null;
                     if (vals && vals[vals.length - 1] != null) {
                         v = vals[vals.length - 1];
@@ -2433,7 +2443,7 @@
                 const probs = await computeModelProbSeriesStrict(
                     simCandles, currentModel,
                     { invert: contraFlags(), intervalSec: intervalSecs(interval), lookback: P.lookback },
-                    P.lookback, null, simStartIdx
+                    P.lookback, null, simStartIdx, P.lookbackGrow
                 );
                 if (cancelFlag) return;
 
@@ -2595,9 +2605,9 @@
         // Вероятности за конкретен „поглед назад“ (същите данни/модел/интервал).
         // Нужно е, защото lookback влияе на модела, а sweep-ът иначе ползва
         // предварително сметнатите probs от базовата симулация.
-        async function computeSweepProbs(candles, interval, lookback, progressCb, fromIdx) {
+        async function computeSweepProbs(candles, interval, lookback, progressCb, fromIdx, grow) {
             const opts = { invert: contraFlags(), intervalSec: intervalSecs(interval), lookback: lookback };
-            return await computeModelProbSeriesStrict(candles, currentModel, opts, lookback, progressCb, fromIdx);
+            return await computeModelProbSeriesStrict(candles, currentModel, opts, lookback, progressCb, fromIdx, grow);
         }
 
         async function runSweep(inputId, key) {
@@ -2648,7 +2658,7 @@
                     // Lookback променя вероятностите → преизчисляваме ги за тази
                     // стойност; за другите фактори ползваме базовите probs.
                     const useProbs = (key === 'lookback')
-                        ? await computeSweepProbs(candles, interval, val, (i, n, w) => { if (info) info.textContent = 'Преизчисляване за поглед ' + w + ': бар ' + (i + 1) + '/' + n + '...'; }, startIdx)
+                        ? await computeSweepProbs(candles, interval, val, (i, n, w) => { if (info) info.textContent = 'Преизчисляване за поглед ' + w + ': бар ' + (i + 1) + '/' + n + '...'; }, startIdx, baseP.lookbackGrow)
                         : probs;
                     let r = null;
                     try { r = await simulate(candles, atrSeries, useProbs, P2, interval, startIdx, true); } catch (err) { r = null; }
@@ -2763,7 +2773,7 @@
                     if (lbDim < 0) return probs;
                     const k = Math.round(lb);
                     if (probsCache.has(k)) return probsCache.get(k);
-                    const p = await computeSweepProbs(candles, interval, k, (i, n, w) => { if (info) info.textContent = 'Преизчисляване за поглед ' + w + ': бар ' + (i + 1) + '/' + n + '...'; }, startIdx);
+                    const p = await computeSweepProbs(candles, interval, k, (i, n, w) => { if (info) info.textContent = 'Преизчисляване за поглед ' + w + ': бар ' + (i + 1) + '/' + n + '...'; }, startIdx, baseP.lookbackGrow);
                     probsCache.set(k, p);
                     return p;
                 };
@@ -3159,6 +3169,7 @@
             { id: 'inpReverse', type: 'checkbox' },
             { id: 'inpModel', type: 'value' },
             { id: 'inpLookback', type: 'value' },
+            { id: 'inpLookbackGrow', type: 'checkbox' },
             { id: 'inpInterval', type: 'value' },
             { id: 'inpSpeed', type: 'value' },
             { id: 'inpUseDates', type: 'checkbox' },
@@ -3262,7 +3273,7 @@
 
         // ── ИИ чат за настройки (без да пипа симулацията) ────────────
         const AI_LS_KEY = 'hermes_ai_cfg';
-        let aiCfg = { provider: 'gemini', model: 'gemini-3.8-flash', fallbackModel: 'gemini-3.8-pro', key: '', baseUrl: 'https://api.openai.com/v1', includeCode: true };
+        let aiCfg = { provider: 'gemini', model: 'gemini-3.8-flash', fallbackModel: 'gemini-3.8-pro', key: '', baseUrl: 'https://api.openai.com/v1', includeCode: true, includeResult: true };
         let aiMessages = [];
         let aiBusy = false;
 
@@ -3291,6 +3302,7 @@
             const k = document.getElementById('aiKey'); if (k) k.value = aiCfg.key;
             const b = document.getElementById('aiBaseUrl'); if (b) b.value = aiCfg.baseUrl;
             const inc = document.getElementById('aiIncludeCode'); if (inc) inc.checked = !!aiCfg.includeCode;
+            const incr = document.getElementById('aiIncludeResult'); if (incr) incr.checked = (aiCfg.includeResult !== false);
         }
         function aiSaveCfg() {
             aiCfg.provider = ((document.getElementById('aiProvider') || {}).value) || 'gemini';
@@ -3300,6 +3312,8 @@
             aiCfg.baseUrl = (((document.getElementById('aiBaseUrl') || {}).value) || '').trim();
             const inc = document.getElementById('aiIncludeCode');
             if (inc) aiCfg.includeCode = !!inc.checked;
+            const incr = document.getElementById('aiIncludeResult');
+            if (incr) aiCfg.includeResult = !!incr.checked;
             localStorage.setItem(AI_LS_KEY, JSON.stringify(aiCfg));
             const st = document.getElementById('aiCfgStatus');
             if (st) { st.textContent = 'Запазено'; setTimeout(() => { st.textContent = ''; }, 1500); }
@@ -3350,6 +3364,28 @@
             }
             return parts.join('\n\n');
         }
+        function aiResultContext() {
+            const sim = (typeof lastSim !== 'undefined') ? lastSim : null;
+            if (!sim || !sim.candles || !sim.candles.length) return 'Няма завършена/заредена симулация (lastSim е null).';
+            const n = sim.candles.length;
+            const p = sim.params || {};
+            const lastProb = sim.probs ? sim.probs[n - 1] : null;
+            const sumEl = document.getElementById('summary');
+            const summary = sumEl ? String(sumEl.innerText || sumEl.textContent || '').replace(/\n{2,}/g, '\n').trim() : '';
+            const rows = Array.from(document.querySelectorAll('#ordersList .order-row'));
+            const recent = rows.slice(0, 40).map(r => String(r.innerText || r.textContent || '').replace(/\s+/g, ' ').trim());
+            const posEl = document.getElementById('currentPos');
+            const pos = posEl ? String(posEl.innerText || posEl.textContent || '').replace(/\s+/g, ' ').trim() : '';
+            return [
+                'Състояние: ' + ((typeof running !== 'undefined' && running) ? 'симулацията ТЕЧИ (резултатът е от предишния завършен run)' : 'няма течаща симулация'),
+                'Брой свещи: ' + n + ' · интервал: ' + (sim.interval || '?') + ' · старт бар: ' + (sim.startIdx || 0),
+                'Параметри, с които е пусната симулацията: ' + JSON.stringify(p),
+                'Последна вероятност: ' + JSON.stringify(lastProb),
+                'ОБОБЩЕНИЕ (както е на екрана):\n' + (summary || '(празно)'),
+                'ОТВОРЕНИ ПОЗИЦИИ:\n' + (pos || '(няма)'),
+                'ПОСЛЕДНИ СДЕЛКИ (най-новите първи, до 40):\n' + (recent.length ? recent.join('\n') : '(няма)')
+            ].join('\n');
+        }
         function aiSystemPrompt() {
             const lines = aiSettingsSnapshot().map(s =>
                 '- ' + s.id + ' (' + s.label + ', ' + (s.type === 'checkbox' ? 'bool' : 'text') + '): ' + JSON.stringify(s.value)
@@ -3364,11 +3400,15 @@
                 'Текущи настройки:',
                 lines
             ].join('\n');
+            let out = base;
             if (aiCfg.includeCode) {
                 const code = aiCodeContext();
-                if (code) return base + '\n\nКОД НА КЛЮЧОВИТЕ ФУНКЦИИ (само за справка — не го променяй):\n' + code;
+                if (code) out += '\n\nКОД НА КЛЮЧОВИТЕ ФУНКЦИИ (само за справка — не го променяй):\n' + code;
             }
-            return base;
+            if (aiCfg.includeResult) {
+                out += '\n\nРЕЗУЛТАТ ОТ СИМУЛАЦИЯТА (САМО ЗА ЧЕТЕНЕ — анализирай го, но НЕ го променяй):\n' + aiResultContext();
+            }
+            return out;
         }
         function aiExtractJson(text) {
             if (!text) return null;
