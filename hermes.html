@@ -2459,7 +2459,12 @@
                 // (нотионал) = маржин × ливъридж, затова лотовете се смятат с leverage.
                 if (P.minLotUnit === 'value' && P.refPrice > 0) {
                     const spec = specFor(currentSymbol), fx = fxFor(currentSymbol);
-                    P.minLot = Math.max(1e-8, (P.minLot * P.leverage) / (P.refPrice * spec.contract * fx));
+                    const step = (spec.step > 0) ? spec.step : 0.01;
+                    const rawLots = (P.minLot * P.leverage) / (P.refPrice * spec.contract * fx);
+                    // Закръгляме НАГОРЕ към валидната стъпка на лота (напр. 0.01),
+                    // за да е минималният обем цял брой стъпки и позициите — цели
+                    // кратни на минималния обем.
+                    P.minLot = Math.max(spec.min || step, Math.ceil(rawLots / step - 1e-9) * step);
                 }
                 // Пазим ТОЧНИТЕ параметри на симулацията (с refPrice и превърнатия
                 // minLot) — sweep-ът варира от тях, а не от текущото състояние на UI.
@@ -3041,7 +3046,10 @@
             const px = hintPrice();
             const spec = specFor(currentSymbol), fx = fxFor(currentSymbol);
             const lev = Math.max(1, parseFloat((document.getElementById('inpLev') || {}).value) || 1);
-            return px > 0 ? Math.max(1e-8, raw * lev / (px * spec.contract * fx)) : raw;
+            if (!(px > 0)) return raw;
+            const step = (spec.step > 0) ? spec.step : 0.01;
+            const rawLots = raw * lev / (px * spec.contract * fx);
+            return Math.max(spec.min || step, Math.ceil(rawLots / step - 1e-9) * step);
         }
 
         function updateMinLotSpreadHint() {
