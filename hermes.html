@@ -3772,9 +3772,9 @@
             // Смяна на единицата на мин. обем → преизчислява от Binance (лот/цена).
             const mlUnitSel = document.getElementById('inpMinLotUnit');
             if (mlUnitSel) mlUnitSel.addEventListener('change', () => autoFillInstrument());
-            // Смяната на времевата рамка трябва да преизчисли симулацията с новия
-            // интервал (иначе остава на предния). runSimulation сам спира текущата.
-            iSel.addEventListener('change', () => { updateMinLotSpreadHint(); runSimulation(); });
+            // Смяната на интервала е промяна на настройка — НЕ пускаме автоматично,
+            // само отбелязваме, че трябва „Стартирай“.
+            iSel.addEventListener('change', () => { updateMinLotSpreadHint(); markSettingsDirty(); });
             ensureFxRates();
             updateMinLotSpreadHint();
             aiLoadCfg();
