@@ -904,6 +904,7 @@
             <span class="badge" id="hVersion" title="Версия на приложението (за проверка при кеш)">v—</span>
         </div>
         <div class="hdr-actions">
+            <span id="settingsDirty" title="Настройките са променени — натисни „Стартирай“, за да ги приложиш" style="display:none;color:#ffb37a;font-size:10.5px;font-weight:700;white-space:nowrap">● променени настройки</span>
             <button class="btn start" id="btnStart" onclick="runSimulation()">▶ Стартирай</button>
             <button class="btn stop" id="btnStop" onclick="stopSimulation()">■ Стоп</button>
             <button class="btn" id="btnSweep" onclick="toggleSweepPick()" title="Анализ на чувствителността: цъкни бутона, после цъкни върху настройка">📈 Чувствителност</button>
@@ -979,7 +980,7 @@
         </label>
         <label class="cal-label">Времеви период
             <span class="cal-controls">
-                <input type="checkbox" id="inpUseDates" checked onchange="toggleDates(); scheduleDateRun()">
+                <input type="checkbox" id="inpUseDates" checked onchange="toggleDates()">
                 <span class="cal-dates">
                     <input type="date" id="inpDateFrom" title="Начало на периода">
                     <span class="cal-sep">—</span>
@@ -1336,7 +1337,7 @@
             document.getElementById('inpDateFrom').value = fromStr;
             document.getElementById('inpDateTo').value = toStr;
             datesTouched = true;
-            runSimulation();
+            markSettingsDirty();
         }
 
         // Меню „контра по модели“ се показва само при избран модел „Средна вероятност“ (5).
@@ -1743,6 +1744,26 @@
                     time: timeToLocal(c.time), open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume
                 }));
             } catch (e) { return []; }
+        }
+
+        // Тегли ТОЧЕН локален диапазон [fromLocal, toLocal]. Първо опитва
+        // /data?from&to; ако върне твърде малко (лимити на доставчика), пада към
+        // нормалното пагинирано теглене от сега назад + филтър. Така старите файлове
+        // със запазен диапазон се зареждат правилно.
+        async function fetchExactRange(symbol, interval, fromLocal, toLocal) {
+            const iv = intervalSecs(interval);
+            const nowS = Math.floor(Date.now() / 1000);
+            const off = timeToLocal(nowS) - nowS;
+            let arr = await fetchCandlesRange(symbol, interval, fromLocal - off - 90000, toLocal - off + 90000);
+            arr = (arr || []).filter(c => c.time >= fromLocal && c.time <= toLocal);
+            const expected = Math.floor((toLocal - fromLocal) / iv) + 1;
+            if (arr.length < expected * 0.9) {
+                const need = Math.ceil((nowS - fromLocal) / iv) + 60;
+                const lim = Math.min(MAX_FETCH, Math.max(need, 1000));
+                const all = await fetchCandles(symbol, interval, lim);
+                arr = (all || []).filter(c => c.time >= fromLocal && c.time <= toLocal);
+            }
+            return arr;
         }
 
         // За бар, в който са засегнати и TP, и SL: обхожда 1м свещите в
@@ -2341,6 +2362,7 @@
             running = true;
             cancelFlag = false;
             runPending = false;
+            clearSettingsDirty();
             // Старите данни/вероятности не важат за нова серия (символ, интервал,
             // модел). Ако новата симулация бъде спряна преди да е готова, sweep-ът
             // няма да работи върху остаряла серия.
@@ -2408,19 +2430,12 @@
                     toS = timeToLocal(new Date(toVal + 'T23:59:59').getTime() / 1000);
                 }
 
+                let usedSnap = false;
+                const forceSnap = !!(snap && snap.force);
                 let candles;
-                if (datePeriod) {
-                    // ТОЧЕН период + фиксирана пред-история (lookback бара) → същите
-                    // исторически данни всеки път, независимо кога се зарежда файлът.
-                    const iv = intervalSecs(interval);
-                    const pre = Math.max(300, P.lookback || lbDefault) * iv;
-                    const nowS = Math.floor(Date.now() / 1000);
-                    const off = timeToLocal(nowS) - nowS;
-                    setProgress(2, 'Зареждане на историческите данни за периода...');
-                    candles = await fetchCandlesRange(currentSymbol, interval, fromS - pre - off - 90000, toS - off + 90000);
-                    candles = (candles || []).filter(c => c.time >= fromS - pre && c.time <= toS);
-                } else if (snap && Array.isArray(snap.candles) && snap.candles.length >= 30) {
-                    // (съвместимост) стар файл, който още пази самите свещи.
+                if (snap && Array.isArray(snap.candles) && snap.candles.length >= 30) {
+                    // (съвместимост) стар файл, който още пази самите свещи → точните данни.
+                    usedSnap = true;
                     candles = snap.candles;
                     if (snap.symbol) {
                         currentSymbol = snap.symbol;
@@ -2431,8 +2446,10 @@
                         fxFetchedAt = Date.now();
                     }
                     setProgress(2, 'Зареждане от файла (същите данни)...');
-                } else if (snap && snap.from > 0 && snap.to > snap.from) {
-                    // Без дати: точен запазен диапазон (за възпроизводимост).
+                } else if (snap && snap.from > 0 && snap.to > snap.from && (forceSnap || !datePeriod)) {
+                    // Запазен диапазон: старите файлове (v<4) го ползват ВИНАГИ,
+                    // новите (v4) — само когато няма зададени дати.
+                    usedSnap = true;
                     if (snap.symbol) {
                         currentSymbol = snap.symbol;
                         const sb = document.getElementById('hSymbol'); if (sb) sb.textContent = currentSymbol;
@@ -2442,10 +2459,13 @@
                         fxFetchedAt = Date.now();
                     }
                     setProgress(2, 'Зареждане на историческите данни за диапазона...');
-                    const nowS = Math.floor(Date.now() / 1000);
-                    const off = timeToLocal(nowS) - nowS;
-                    candles = await fetchCandlesRange(currentSymbol, interval, snap.from - off - 90000, snap.to - off + 90000);
-                    candles = (candles || []).filter(c => c.time >= snap.from && c.time <= snap.to);
+                    candles = await fetchExactRange(currentSymbol, interval, snap.from, snap.to);
+                } else if (datePeriod) {
+                    // ТОЧЕН период + фиксирана пред-история (lookback бара).
+                    const iv = intervalSecs(interval);
+                    const pre = Math.max(300, P.lookback || lbDefault) * iv;
+                    setProgress(2, 'Зареждане на историческите данни за периода...');
+                    candles = await fetchExactRange(currentSymbol, interval, fromS - pre, toS);
                 } else {
                     setProgress(2, `Зареждане на исторически данни (${interval}, ${limit} свещи)...`);
                     candles = await fetchCandles(currentSymbol, interval, limit);
@@ -2456,25 +2476,25 @@
                 updateMinLotSpreadHint();
 
                 // Авто-дати само при обикновен run (без зададени дати и без snapshot).
-                if (!datePeriod && !snap && !datesTouched && candles.length) {
+                if (!datePeriod && !usedSnap && !datesTouched && candles.length) {
                     const warm = Math.min(lbDefault, Math.max(0, candles.length - 30));
                     setDateInputs(new Date(candles[warm].time * 1000), new Date(candles[candles.length - 1].time * 1000));
                 }
 
                 let simCandles = candles;
                 let simStartIdx;
-                if (datePeriod) {
+                if (usedSnap && snap.startTime > 0) {
+                    const ix = candles.findIndex(c => c.time >= snap.startTime);
+                    simStartIdx = ix >= 0 ? ix : Math.max(30, snap.startIdx || 30);
+                } else if (usedSnap && snap.startIdx > 0) {
+                    simStartIdx = snap.startIdx;
+                } else if (datePeriod) {
                     const ix = candles.findIndex(c => c.time >= fromS);
                     simStartIdx = ix >= 0 ? ix : Math.min(lbDefault, Math.max(30, candles.length - 30));
                     const periodBars = candles.length - simStartIdx;
                     if (periodBars < 30) {
                         throw new Error(`Избраният период (${fromVal} → ${toVal}) покрива само ${periodBars} свещи (нужни са минимум 30). Удължете периода или изберете по-дребен времеви мащаб.`);
                     }
-                } else if (snap && snap.startTime > 0) {
-                    const ix = candles.findIndex(c => c.time >= snap.startTime);
-                    simStartIdx = ix >= 0 ? ix : Math.max(30, snap.startIdx || 30);
-                } else if (snap && snap.startIdx > 0) {
-                    simStartIdx = snap.startIdx;
                 } else {
                     simStartIdx = Math.min(lbDefault, Math.max(30, candles.length - 30));
                 }
@@ -2559,15 +2579,18 @@
             inpMinLot: 'Мин. обем', inpMinLotSpread: 'Спред на мин. обем', inpLookback: 'Поглед назад'
         };
         let pickingParam = false, sweepCancel = false, sweepMode = false, sweepActive = false, sweepPaused = false, lastSim = null;
-        // След промяна на датите/периода пускаме симулацията автоматично (с малко
-        // закъснение, за да не стартира два пъти при смяна на две полета).
-        let dateRunTimer = null;
-        function scheduleDateRun() {
-            if (dateRunTimer) clearTimeout(dateRunTimer);
-            dateRunTimer = setTimeout(() => {
-                dateRunTimer = null;
-                if (typeof runSimulation === 'function') runSimulation();
-            }, 350);
+        // Промяна на настройка НЕ пуска автоматично симулация — само отбелязваме,
+        // че има неприложени промени (бутонът „Стартирай“ ги прилага).
+        let settingsDirty = false;
+        function markSettingsDirty() {
+            settingsDirty = true;
+            const el = document.getElementById('settingsDirty');
+            if (el) el.style.display = 'inline';
+        }
+        function clearSettingsDirty() {
+            settingsDirty = false;
+            const el = document.getElementById('settingsDirty');
+            if (el) el.style.display = 'none';
         }
         // Еднократен snapshot при зареждане на файл — за да е идентичен резултатът.
         let pendingSimSnapshot = null;
@@ -3374,20 +3397,19 @@
             const fxSnap = (data.fx && typeof data.fx === 'object') ? data.fx
                 : (data.dataRange && data.dataRange.fx);
             if (fxSnap) { fxRates = Object.assign({ EUR: 1 }, fxSnap); fxFetchedAt = Date.now(); }
-            // ВАЖНО: ако файлът има зададени дати, ТЕ са водещи. Не ползваме
-            // запазения диапазон, защото може да е от друг/стар период (иначе
-            // изпълнява стария период вместо този от файла).
-            const useDatesNow = !!((document.getElementById('inpUseDates') || {}).checked
-                && (document.getElementById('inpDateFrom') || {}).value
-                && (document.getElementById('inpDateTo') || {}).value);
-            if (!useDatesNow) {
-                if (data.dataRange && data.dataRange.from > 0 && data.dataRange.to > data.dataRange.from) {
-                    pendingSimSnapshot = data.dataRange;
-                } else if (data.snapshot && Array.isArray(data.snapshot.candles) && data.snapshot.candles.length) {
-                    pendingSimSnapshot = data.snapshot;
+            // Стари файлове (v<4) пазят данните/диапазона, с които са правени → ползваме
+            // ги ВИНАГИ (force), за да работят 1:1. Новите (v4) са с водещи дати.
+            const isOld = !data.version || data.version < 4;
+            pendingSimSnapshot = null;
+            if (data.snapshot && Array.isArray(data.snapshot.candles) && data.snapshot.candles.length) {
+                pendingSimSnapshot = Object.assign({ force: true }, data.snapshot);
+            } else if (data.dataRange && data.dataRange.from > 0 && data.dataRange.to > data.dataRange.from) {
+                const useDatesNow = !!((document.getElementById('inpUseDates') || {}).checked
+                    && (document.getElementById('inpDateFrom') || {}).value
+                    && (document.getElementById('inpDateTo') || {}).value);
+                if (isOld || !useDatesNow) {
+                    pendingSimSnapshot = Object.assign({}, data.dataRange, { force: isOld });
                 }
-            } else {
-                pendingSimSnapshot = null;
             }
             runSimulation();
         }
@@ -3644,6 +3666,7 @@
                 if (mb && modelNames[parseInt(mSel.value, 10)]) mb.textContent = modelNames[parseInt(mSel.value, 10)];
             }
             updateMinLotSpreadHint();
+            if (applied.length) markSettingsDirty();
             return applied;
         }
         async function sendAiMessage() {
@@ -3727,8 +3750,12 @@
             ['inpDateFrom', 'inpDateTo'].forEach(id => {
                 const el = document.getElementById(id);
                 el.addEventListener('input', () => { datesTouched = true; });
-                // След като потребителят зададе дата — пускаме с точно тези дати.
-                el.addEventListener('change', () => { datesTouched = true; scheduleDateRun(); });
+                el.addEventListener('change', () => { datesTouched = true; });
+            });
+            // Всяка промяна на поле/селект в контролите → „променени настройки“.
+            document.querySelectorAll('.controls input, .controls select').forEach(el => {
+                el.addEventListener('input', markSettingsDirty);
+                el.addEventListener('change', markSettingsDirty);
             });
 
             const placeholder = document.querySelector('#ordersList div');
