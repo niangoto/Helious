@@ -152,8 +152,11 @@ async function fetchBinanceKlines(symbol, interval, limit, spot, startSec, endSe
   while (fetched < limit) {
     const want = Math.min(batchSize, limit - fetched);
     let url = `${base}?symbol=${symbol}&interval=${interval}&limit=${want}`;
-    if (startSec) url += `&startTime=${startSec * 1000}`;
+    // Ако имаме endSec — теглим НАЗАД от него (пакети по 1000). НЕ подаваме
+    // startTime, защото Binance тогава връща само първите 1000 от началото и
+    // спираме преждевременно (точно това чупеше зареждането на точен диапазон).
     if (endTime) url += `&endTime=${endTime}`;
+    else if (startSec) url += `&startTime=${startSec * 1000}`;
     let batch;
     try {
       const raw = await fetchFromURL(url);

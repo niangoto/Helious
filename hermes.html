@@ -2398,7 +2398,7 @@
             try {
                 let candles;
                 if (snap && Array.isArray(snap.candles) && snap.candles.length >= 30) {
-                    // Точно данните от файла — за възпроизводим (идентичен) резултат.
+                    // (съвместимост) стар файл, който още пази самите свещи.
                     candles = snap.candles;
                     if (snap.symbol) {
                         currentSymbol = snap.symbol;
@@ -2409,6 +2409,25 @@
                         fxFetchedAt = Date.now();
                     }
                     setProgress(2, 'Зареждане от файла (същите данни)...');
+                } else if (snap && snap.from > 0 && snap.to > snap.from) {
+                    // Нов файл: зареждаме ТОЧНИЯ исторически диапазон от доставчика
+                    // (данните не се пазят във файла). +25ч буфер заради DST, после
+                    // филтрираме до точните времена.
+                    if (snap.symbol) {
+                        currentSymbol = snap.symbol;
+                        const sb = document.getElementById('hSymbol'); if (sb) sb.textContent = currentSymbol;
+                    }
+                    if (snap.fx && typeof snap.fx === 'object') {
+                        fxRates = Object.assign({ EUR: 1 }, snap.fx);
+                        fxFetchedAt = Date.now();
+                    }
+                    setProgress(2, 'Зареждане на историческите данни за диапазона...');
+                    const nowS = Math.floor(Date.now() / 1000);
+                    const off = timeToLocal(nowS) - nowS;
+                    const fromUtc = snap.from - off - 90000;
+                    const toUtc = snap.to - off + 90000;
+                    candles = await fetchCandlesRange(currentSymbol, interval, fromUtc, toUtc);
+                    candles = (candles || []).filter(c => c.time >= snap.from && c.time <= snap.to);
                 } else {
                     setProgress(2, `Зареждане на исторически данни (${interval}, ${limit} свещи)...`);
                     candles = await fetchCandles(currentSymbol, interval, limit);
@@ -2428,8 +2447,16 @@
                 let simCandles = candles;
                 // Търгуваме след `lookback` бара загряваща история (за да е пълен
                 // прозорецът от първия търгуван бар); при по-малко данни — по-рано,
-                // но с поне 30 търгувани бара. При snapshot — точно запазеният старт.
-                let simStartIdx = (snap && snap.startIdx > 0) ? snap.startIdx : Math.min(lbDefault, Math.max(30, candles.length - 30));
+                // но с поне 30 търгувани бара. При зареден файл — точният старт.
+                let simStartIdx;
+                if (snap && snap.startTime > 0) {
+                    const ix = candles.findIndex(c => c.time >= snap.startTime);
+                    simStartIdx = ix >= 0 ? ix : Math.max(30, snap.startIdx || 30);
+                } else if (snap && snap.startIdx > 0) {
+                    simStartIdx = snap.startIdx;
+                } else {
+                    simStartIdx = Math.min(lbDefault, Math.max(30, candles.length - 30));
+                }
                 if (!snap && document.getElementById('inpUseDates').checked) {
                     const fromVal = document.getElementById('inpDateFrom').value;
                     const toVal = document.getElementById('inpDateTo').value;
@@ -3238,28 +3265,33 @@
         }
 
         function saveSettings() {
-            // Включваме и точните данни + FX, за да дава зареденият файл същия резултат
-            // (иначе новите свещи/курсове променят симулацията).
-            let snapshot = null;
+            // Пазим само ТОЧНИЯ исторически диапазон (от/до + старт) и FX — без самите
+            // свещи. При зареждане данните се теглят отново за същия диапазон, така че
+            // резултатът е идентичен, а файлът остава малък.
+            let dataRange = null;
             try {
                 if (typeof lastSim !== 'undefined' && lastSim && Array.isArray(lastSim.candles) && lastSim.candles.length) {
-                    snapshot = {
+                    const cs = lastSim.candles;
+                    const si = Math.max(0, Math.min(cs.length - 1, lastSim.startIdx || 0));
+                    dataRange = {
                         symbol: currentSymbol,
                         interval: lastSim.interval,
-                        startIdx: lastSim.startIdx || 0,
-                        candles: lastSim.candles,
+                        from: cs[0].time,
+                        to: cs[cs.length - 1].time,
+                        startTime: cs[si].time,
+                        startIdx: si,
                         fx: (typeof fxRates === 'object') ? fxRates : null
                     };
                 }
-            } catch (e) { snapshot = null; }
+            } catch (e) { dataRange = null; }
             const data = {
                 app: 'hermes',
                 type: 'settings',
-                version: 2,
+                version: 3,
                 savedAt: new Date().toISOString(),
                 symbol: currentSymbol,
                 fields: collectSettingsFields(),
-                snapshot: snapshot
+                dataRange: dataRange
             };
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
@@ -3318,8 +3350,11 @@
                 applySettingsFields(fields);
             }
             updateMinLotSpreadHint();
-            // Ако файлът носи snapshot — ползваме точно същите данни при пускането.
-            if (data.snapshot && Array.isArray(data.snapshot.candles) && data.snapshot.candles.length) {
+            // Ако файлът носи диапазон — теглим точно него при пускането (без да
+            // пазим свещите във файла). Стар файл със snapshot също се поддържа.
+            if (data.dataRange && data.dataRange.from > 0 && data.dataRange.to > data.dataRange.from) {
+                pendingSimSnapshot = data.dataRange;
+            } else if (data.snapshot && Array.isArray(data.snapshot.candles) && data.snapshot.candles.length) {
                 pendingSimSnapshot = data.snapshot;
             }
             runSimulation();
