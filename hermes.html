@@ -2396,8 +2396,30 @@
             document.getElementById('progBar').classList.remove('err');
 
             try {
+                // Датите от файла/UI са ВОДЕЩИ. Ако има период — теглим точно него
+                // + фиксирана пред-история (lookback), за да е възпроизводимо.
+                const useDatesNow = document.getElementById('inpUseDates').checked;
+                const fromVal = document.getElementById('inpDateFrom').value;
+                const toVal = document.getElementById('inpDateTo').value;
+                const datePeriod = useDatesNow && fromVal && toVal;
+                let fromS = 0, toS = 0;
+                if (datePeriod) {
+                    fromS = timeToLocal(new Date(fromVal + 'T00:00:00').getTime() / 1000);
+                    toS = timeToLocal(new Date(toVal + 'T23:59:59').getTime() / 1000);
+                }
+
                 let candles;
-                if (snap && Array.isArray(snap.candles) && snap.candles.length >= 30) {
+                if (datePeriod) {
+                    // ТОЧЕН период + фиксирана пред-история (lookback бара) → същите
+                    // исторически данни всеки път, независимо кога се зарежда файлът.
+                    const iv = intervalSecs(interval);
+                    const pre = Math.max(300, P.lookback || lbDefault) * iv;
+                    const nowS = Math.floor(Date.now() / 1000);
+                    const off = timeToLocal(nowS) - nowS;
+                    setProgress(2, 'Зареждане на историческите данни за периода...');
+                    candles = await fetchCandlesRange(currentSymbol, interval, fromS - pre - off - 90000, toS - off + 90000);
+                    candles = (candles || []).filter(c => c.time >= fromS - pre && c.time <= toS);
+                } else if (snap && Array.isArray(snap.candles) && snap.candles.length >= 30) {
                     // (съвместимост) стар файл, който още пази самите свещи.
                     candles = snap.candles;
                     if (snap.symbol) {
@@ -2410,9 +2432,7 @@
                     }
                     setProgress(2, 'Зареждане от файла (същите данни)...');
                 } else if (snap && snap.from > 0 && snap.to > snap.from) {
-                    // Нов файл: зареждаме ТОЧНИЯ исторически диапазон от доставчика
-                    // (данните не се пазят във файла). +25ч буфер заради DST, после
-                    // филтрираме до точните времена.
+                    // Без дати: точен запазен диапазон (за възпроизводимост).
                     if (snap.symbol) {
                         currentSymbol = snap.symbol;
                         const sb = document.getElementById('hSymbol'); if (sb) sb.textContent = currentSymbol;
@@ -2424,9 +2444,7 @@
                     setProgress(2, 'Зареждане на историческите данни за диапазона...');
                     const nowS = Math.floor(Date.now() / 1000);
                     const off = timeToLocal(nowS) - nowS;
-                    const fromUtc = snap.from - off - 90000;
-                    const toUtc = snap.to - off + 90000;
-                    candles = await fetchCandlesRange(currentSymbol, interval, fromUtc, toUtc);
+                    candles = await fetchCandlesRange(currentSymbol, interval, snap.from - off - 90000, snap.to - off + 90000);
                     candles = (candles || []).filter(c => c.time >= snap.from && c.time <= snap.to);
                 } else {
                     setProgress(2, `Зареждане на исторически данни (${interval}, ${limit} свещи)...`);
@@ -2437,42 +2455,28 @@
                 lastCandlesKey = currentSymbol + '|' + interval;
                 updateMinLotSpreadHint();
 
-                // Попълване на календара с реалния обхват на ТЪРГУВАНИЯ период
-                // (след `lookback` бара загряваща история), ако не е пипан от потребителя.
-                if (!snap && !datesTouched && candles.length) {
+                // Авто-дати само при обикновен run (без зададени дати и без snapshot).
+                if (!datePeriod && !snap && !datesTouched && candles.length) {
                     const warm = Math.min(lbDefault, Math.max(0, candles.length - 30));
                     setDateInputs(new Date(candles[warm].time * 1000), new Date(candles[candles.length - 1].time * 1000));
                 }
 
                 let simCandles = candles;
-                // Търгуваме след `lookback` бара загряваща история (за да е пълен
-                // прозорецът от първия търгуван бар); при по-малко данни — по-рано,
-                // но с поне 30 търгувани бара. При зареден файл — точният старт.
                 let simStartIdx;
-                if (snap && snap.startTime > 0) {
+                if (datePeriod) {
+                    const ix = candles.findIndex(c => c.time >= fromS);
+                    simStartIdx = ix >= 0 ? ix : Math.min(lbDefault, Math.max(30, candles.length - 30));
+                    const periodBars = candles.length - simStartIdx;
+                    if (periodBars < 30) {
+                        throw new Error(`Избраният период (${fromVal} → ${toVal}) покрива само ${periodBars} свещи (нужни са минимум 30). Удължете периода или изберете по-дребен времеви мащаб.`);
+                    }
+                } else if (snap && snap.startTime > 0) {
                     const ix = candles.findIndex(c => c.time >= snap.startTime);
                     simStartIdx = ix >= 0 ? ix : Math.max(30, snap.startIdx || 30);
                 } else if (snap && snap.startIdx > 0) {
                     simStartIdx = snap.startIdx;
                 } else {
                     simStartIdx = Math.min(lbDefault, Math.max(30, candles.length - 30));
-                }
-                if (!snap && document.getElementById('inpUseDates').checked) {
-                    const fromVal = document.getElementById('inpDateFrom').value;
-                    const toVal = document.getElementById('inpDateTo').value;
-                    if (fromVal && toVal) {
-                        const fromSec = timeToLocal(new Date(fromVal + 'T00:00:00').getTime() / 1000);
-                        const toSec = timeToLocal(new Date(toVal + 'T23:59:59').getTime() / 1000);
-                        // Пазим и историята ПРЕДИ периода (за моделите), но търгуваме
-                        // само от fromSec нататък (pre-history = загряване).
-                        simCandles = candles.filter(c => c.time <= toSec);
-                        const idx = simCandles.findIndex(c => c.time >= fromSec);
-                        simStartIdx = idx < 0 ? simCandles.length : idx;
-                        const periodBars = simCandles.length - simStartIdx;
-                        if (periodBars < 30) {
-                            throw new Error(`Избраният период (${fromVal} → ${toVal}) покрива само ${periodBars} свещи (нужни са минимум 30). Удължете периода или изберете по-дребен времеви мащаб.`);
-                        }
-                    }
                 }
 
                 showRealInterval(simCandles, interval);
@@ -3268,9 +3272,15 @@
             // Пазим само ТОЧНИЯ исторически диапазон (от/до + старт) и FX — без самите
             // свещи. При зареждане данните се теглят отново за същия диапазон, така че
             // резултатът е идентичен, а файлът остава малък.
+            // Ако има зададени дати — те са водещи при зареждане, затова НЕ пазим
+            // диапазон (иначе би подменил периода от файла). Диапазон пазим само
+            // за режима без дати, за да е възпроизводим.
+            const useDatesNow = !!((document.getElementById('inpUseDates') || {}).checked
+                && (document.getElementById('inpDateFrom') || {}).value
+                && (document.getElementById('inpDateTo') || {}).value);
             let dataRange = null;
             try {
-                if (typeof lastSim !== 'undefined' && lastSim && Array.isArray(lastSim.candles) && lastSim.candles.length) {
+                if (!useDatesNow && typeof lastSim !== 'undefined' && lastSim && Array.isArray(lastSim.candles) && lastSim.candles.length) {
                     const cs = lastSim.candles;
                     const si = Math.max(0, Math.min(cs.length - 1, lastSim.startIdx || 0));
                     dataRange = {
@@ -3279,19 +3289,19 @@
                         from: cs[0].time,
                         to: cs[cs.length - 1].time,
                         startTime: cs[si].time,
-                        startIdx: si,
-                        fx: (typeof fxRates === 'object') ? fxRates : null
+                        startIdx: si
                     };
                 }
             } catch (e) { dataRange = null; }
             const data = {
                 app: 'hermes',
                 type: 'settings',
-                version: 3,
+                version: 4,
                 savedAt: new Date().toISOString(),
                 symbol: currentSymbol,
                 fields: collectSettingsFields(),
-                dataRange: dataRange
+                dataRange: dataRange,
+                fx: (typeof fxRates === 'object') ? fxRates : null
             };
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
@@ -3350,12 +3360,24 @@
                 applySettingsFields(fields);
             }
             updateMinLotSpreadHint();
-            // Ако файлът носи диапазон — теглим точно него при пускането (без да
-            // пазим свещите във файла). Стар файл със snapshot също се поддържа.
-            if (data.dataRange && data.dataRange.from > 0 && data.dataRange.to > data.dataRange.from) {
-                pendingSimSnapshot = data.dataRange;
-            } else if (data.snapshot && Array.isArray(data.snapshot.candles) && data.snapshot.candles.length) {
-                pendingSimSnapshot = data.snapshot;
+            // FX от файла (малко числа) — за идентичен резултат и в EUR.
+            const fxSnap = (data.fx && typeof data.fx === 'object') ? data.fx
+                : (data.dataRange && data.dataRange.fx);
+            if (fxSnap) { fxRates = Object.assign({ EUR: 1 }, fxSnap); fxFetchedAt = Date.now(); }
+            // ВАЖНО: ако файлът има зададени дати, ТЕ са водещи. Не ползваме
+            // запазения диапазон, защото може да е от друг/стар период (иначе
+            // изпълнява стария период вместо този от файла).
+            const useDatesNow = !!((document.getElementById('inpUseDates') || {}).checked
+                && (document.getElementById('inpDateFrom') || {}).value
+                && (document.getElementById('inpDateTo') || {}).value);
+            if (!useDatesNow) {
+                if (data.dataRange && data.dataRange.from > 0 && data.dataRange.to > data.dataRange.from) {
+                    pendingSimSnapshot = data.dataRange;
+                } else if (data.snapshot && Array.isArray(data.snapshot.candles) && data.snapshot.candles.length) {
+                    pendingSimSnapshot = data.snapshot;
+                }
+            } else {
+                pendingSimSnapshot = null;
             }
             runSimulation();
         }
