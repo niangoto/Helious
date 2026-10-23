@@ -979,7 +979,7 @@
         </label>
         <label class="cal-label">Времеви период
             <span class="cal-controls">
-                <input type="checkbox" id="inpUseDates" checked onchange="toggleDates()">
+                <input type="checkbox" id="inpUseDates" checked onchange="toggleDates(); scheduleDateRun()">
                 <span class="cal-dates">
                     <input type="date" id="inpDateFrom" title="Начало на периода">
                     <span class="cal-sep">—</span>
@@ -2559,6 +2559,16 @@
             inpMinLot: 'Мин. обем', inpMinLotSpread: 'Спред на мин. обем', inpLookback: 'Поглед назад'
         };
         let pickingParam = false, sweepCancel = false, sweepMode = false, sweepActive = false, sweepPaused = false, lastSim = null;
+        // След промяна на датите/периода пускаме симулацията автоматично (с малко
+        // закъснение, за да не стартира два пъти при смяна на две полета).
+        let dateRunTimer = null;
+        function scheduleDateRun() {
+            if (dateRunTimer) clearTimeout(dateRunTimer);
+            dateRunTimer = setTimeout(() => {
+                dateRunTimer = null;
+                if (typeof runSimulation === 'function') runSimulation();
+            }, 350);
+        }
         // Еднократен snapshot при зареждане на файл — за да е идентичен резултатът.
         let pendingSimSnapshot = null;
 
@@ -3715,8 +3725,10 @@
 
             toggleDates();
             ['inpDateFrom', 'inpDateTo'].forEach(id => {
-                document.getElementById(id).addEventListener('input', () => { datesTouched = true; });
-                document.getElementById(id).addEventListener('change', () => { datesTouched = true; });
+                const el = document.getElementById(id);
+                el.addEventListener('input', () => { datesTouched = true; });
+                // След като потребителят зададе дата — пускаме с точно тези дати.
+                el.addEventListener('change', () => { datesTouched = true; scheduleDateRun(); });
             });
 
             const placeholder = document.querySelector('#ordersList div');
