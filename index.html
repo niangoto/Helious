@@ -1198,7 +1198,8 @@
             <div id="indicator-canvases">
                 <div class="indicator-canvas-row" id="chartIndicatorRow">
                     <span class="indicator-canvas-label" id="chartIndicatorLabel">RSI</span>
-                    <canvas id="chartIndicatorCanvas"></canvas>
+                    <canvas id="chartIndicatorCanvas" onmousemove="onIndicatorHover(event)" onmouseleave="hideIndicatorTip()"></canvas>
+                    <div class="pred-tip" id="indicatorHoverTip"></div>
                 </div>
                 <div class="indicator-canvas-row" id="candlePredictionRow" style="display:none">
                     <span class="indicator-canvas-label" id="candlePredictionLabel">Прогноза %</span>

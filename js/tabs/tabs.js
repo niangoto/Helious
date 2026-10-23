@@ -11,6 +11,8 @@ function registerTab(tab) {
 // при превключване, за да няма фонова работа).
 let ivModelsCache = null;
 let ivPanelCandles = null;
+// Данни за hover върху лентата с вероятности (x, time, value).
+let probLineHover = null;
 
 function updateIvPanel(candles) {
     if (!candles || candles.length < 25) return;
@@ -54,6 +56,7 @@ function drawIndicatorCanvases() {
     if (!indicatorData.rsi.length) return;
 
     const tab = TabRegistry[currentPage];
+    probLineHover = null;   // само drawProbLine го задава (страниците с вероятности)
     if (tab && typeof tab.drawChart === 'function') {
         try {
             tab.drawChart(ctx, w, h, label);
@@ -101,6 +104,12 @@ function drawProbLine(ctx, w, h, probData) {
     if (vis.length < 2) return;
     const pts = vis.map(p => ({ x: chart.timeScale().timeToCoordinate(p.time), y: p.value })).filter(p => p.x !== null);
     if (pts.length < 2) return;
+    // За hover: точка x → дата + стойност (вероятност 0-100 buy%).
+    probLineHover = { w, h, points: [] };
+    for (const p of vis) {
+        const x = chart.timeScale().timeToCoordinate(p.time);
+        if (x !== null) probLineHover.points.push({ x, time: p.time, value: p.value });
+    }
 
     const toY = (v) => h - (v / 100) * (h - 8) - 4;
     const midY = toY(50);
@@ -171,4 +180,26 @@ function getVisibleCandles(candles) {
         }
     } catch (e) {}
     return candles;
+}
+
+// Hover върху лентата с вероятности → дата + Buy/Sell % (за посочената дата).
+function onIndicatorHover(e) {
+    const tip = document.getElementById('indicatorHoverTip');
+    const cvs = document.getElementById('chartIndicatorCanvas');
+    if (!tip || !cvs || !probLineHover || !probLineHover.points.length) { hideIndicatorTip(); return; }
+    const rect = cvs.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    let best = null, bd = Infinity;
+    for (const p of probLineHover.points) { const d = Math.abs(p.x - mx); if (d < bd) { bd = d; best = p; } }
+    if (!best || bd > 18) { tip.style.display = 'none'; return; }
+    const dt = new Date(best.time * 1000);
+    const tstr = dt.toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    const buy = best.value, sell = 100 - buy;
+    tip.style.display = 'block';
+    tip.style.left = Math.max(2, Math.min(Math.max(2, rect.width - 170), best.x - 70)) + 'px';
+    tip.innerHTML = `${tstr}<br>Buy: <b style="color:${buy >= 50 ? '#00ff66' : '#ff0055'}">${buy.toFixed(1)}%</b> · Sell: <b>${sell.toFixed(1)}%</b>`;
+}
+function hideIndicatorTip() {
+    const tip = document.getElementById('indicatorHoverTip');
+    if (tip) tip.style.display = 'none';
 }

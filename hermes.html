@@ -834,6 +834,13 @@
             height: 100%;
         }
 
+        .chart-tip {
+            position: absolute; top: 4px; display: none;
+            background: rgba(10,16,28,0.95); border: 1px solid rgba(0,240,255,0.35);
+            border-radius: 6px; padding: 4px 8px; font-size: 10px;
+            font-family: 'JetBrains Mono', monospace; color: var(--text-main);
+            white-space: nowrap; z-index: 10; pointer-events: none; line-height: 1.5;
+        }
         .pnl-label {
             position: absolute;
             top: 4px;
@@ -1051,7 +1058,8 @@
         </div>
         <div id="simChart"></div>
         <div class="pnl-wrap" id="simPnlWrap">
-            <canvas id="simPnlCanvas"></canvas>
+            <canvas id="simPnlCanvas" onmousemove="onPnlHover(event)" onmouseleave="hidePnlTip()"></canvas>
+            <div class="chart-tip" id="pnlHoverTip"></div>
             <span class="pnl-label" id="simPnlLabel">Печалба/Загуба %</span>
         </div>
     </section>
@@ -1559,6 +1567,27 @@
         // Паралелна графика под свещите: промяната на сметката в % спрямо началото,
         // с център 0 и автоматично осъразмеряваща се рамка. Позиционира се по времевата
         // ос на главната графика, така че се движи/мащабира заедно с нея.
+        let pnlHover = null;
+        function onPnlHover(e) {
+            const tip = document.getElementById('pnlHoverTip');
+            const cvs = document.getElementById('simPnlCanvas');
+            if (!tip || !cvs || !pnlHover || !pnlHover.points.length) { hidePnlTip(); return; }
+            const rect = cvs.getBoundingClientRect();
+            const mx = e.clientX - rect.left;
+            let best = null, bd = Infinity;
+            for (const p of pnlHover.points) { const d = Math.abs(p.x - mx); if (d < bd) { bd = d; best = p; } }
+            if (!best || bd > 18) { tip.style.display = 'none'; return; }
+            const dt = new Date(best.time * 1000);
+            const tstr = dt.toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+            tip.style.display = 'block';
+            tip.style.left = Math.max(2, Math.min(Math.max(2, rect.width - 190), best.x - 80)) + 'px';
+            tip.innerHTML = `${tstr}<br>Печалба/Загуба: <b style="color:${best.v >= 0 ? '#00ff66' : '#ff0055'}">${best.v >= 0 ? '+' : ''}${best.v.toFixed(2)}%</b>`;
+        }
+        function hidePnlTip() {
+            const tip = document.getElementById('pnlHoverTip');
+            if (tip) tip.style.display = 'none';
+        }
+
         function drawPnlChart(upto) {
             const cvs = document.getElementById('simPnlCanvas');
             if (!cvs || !simChart || !simChartCandles.length) return;
@@ -1581,10 +1610,11 @@
                 if (x == null) continue;
                 if (x < -20) continue;
                 if (x > w + 20) break;
-                pts.push({ x, v });
+                pts.push({ x, v, time: simChartCandles[i].time });
                 if (Math.abs(v) > maxAbs) maxAbs = Math.abs(v);
             }
             if (pts.length < 2) return;
+            pnlHover = { w, h, points: pts.map(p => ({ x: p.x, v: p.v, time: p.time })) };
 
             const scale = niceScale(maxAbs || 1);
             const midY = h / 2;
