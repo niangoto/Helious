@@ -2349,7 +2349,10 @@
             currentModel = parseInt(document.getElementById('inpModel').value, 10);
 
             const P = readParams();
-            const interval = document.getElementById('inpInterval').value || '5m';
+            // Ако зареждаме файл със snapshot — ползваме същите данни и интервал.
+            const snap = pendingSimSnapshot;
+            pendingSimSnapshot = null;
+            const interval = (snap && snap.interval) ? snap.interval : (document.getElementById('inpInterval').value || '5m');
             // Теглим базовата серия + още `lookback` свещи допълнителна история
             // ПРЕДИ нея, за да има пълeн прозорец още от първия търгуван бар.
             const lbDefault = Math.max(30, P.lookback || 3000);
@@ -2393,8 +2396,23 @@
             document.getElementById('progBar').classList.remove('err');
 
             try {
-                setProgress(2, `Зареждане на исторически данни (${interval}, ${limit} свещи)...`);
-                const candles = await fetchCandles(currentSymbol, interval, limit);
+                let candles;
+                if (snap && Array.isArray(snap.candles) && snap.candles.length >= 30) {
+                    // Точно данните от файла — за възпроизводим (идентичен) резултат.
+                    candles = snap.candles;
+                    if (snap.symbol) {
+                        currentSymbol = snap.symbol;
+                        const sb = document.getElementById('hSymbol'); if (sb) sb.textContent = currentSymbol;
+                    }
+                    if (snap.fx && typeof snap.fx === 'object') {
+                        fxRates = Object.assign({ EUR: 1 }, snap.fx);
+                        fxFetchedAt = Date.now();
+                    }
+                    setProgress(2, 'Зареждане от файла (същите данни)...');
+                } else {
+                    setProgress(2, `Зареждане на исторически данни (${interval}, ${limit} свещи)...`);
+                    candles = await fetchCandles(currentSymbol, interval, limit);
+                }
                 if (!candles || candles.length < 30) throw new Error('Недостатъчно данни (минимум 30 свещи).');
                 lastCandles = candles;
                 lastCandlesKey = currentSymbol + '|' + interval;
@@ -2402,7 +2420,7 @@
 
                 // Попълване на календара с реалния обхват на ТЪРГУВАНИЯ период
                 // (след `lookback` бара загряваща история), ако не е пипан от потребителя.
-                if (!datesTouched && candles.length) {
+                if (!snap && !datesTouched && candles.length) {
                     const warm = Math.min(lbDefault, Math.max(0, candles.length - 30));
                     setDateInputs(new Date(candles[warm].time * 1000), new Date(candles[candles.length - 1].time * 1000));
                 }
@@ -2410,9 +2428,9 @@
                 let simCandles = candles;
                 // Търгуваме след `lookback` бара загряваща история (за да е пълен
                 // прозорецът от първия търгуван бар); при по-малко данни — по-рано,
-                // но с поне 30 търгувани бара.
-                let simStartIdx = Math.min(lbDefault, Math.max(30, candles.length - 30));
-                if (document.getElementById('inpUseDates').checked) {
+                // но с поне 30 търгувани бара. При snapshot — точно запазеният старт.
+                let simStartIdx = (snap && snap.startIdx > 0) ? snap.startIdx : Math.min(lbDefault, Math.max(30, candles.length - 30));
+                if (!snap && document.getElementById('inpUseDates').checked) {
                     const fromVal = document.getElementById('inpDateFrom').value;
                     const toVal = document.getElementById('inpDateTo').value;
                     if (fromVal && toVal) {
@@ -2510,6 +2528,8 @@
             inpMinLot: 'Мин. обем', inpMinLotSpread: 'Спред на мин. обем', inpLookback: 'Поглед назад'
         };
         let pickingParam = false, sweepCancel = false, sweepMode = false, sweepActive = false, sweepPaused = false, lastSim = null;
+        // Еднократен snapshot при зареждане на файл — за да е идентичен резултатът.
+        let pendingSimSnapshot = null;
 
         function toggleSweepPick() {
             pickingParam = !pickingParam;
@@ -3218,13 +3238,28 @@
         }
 
         function saveSettings() {
+            // Включваме и точните данни + FX, за да дава зареденият файл същия резултат
+            // (иначе новите свещи/курсове променят симулацията).
+            let snapshot = null;
+            try {
+                if (typeof lastSim !== 'undefined' && lastSim && Array.isArray(lastSim.candles) && lastSim.candles.length) {
+                    snapshot = {
+                        symbol: currentSymbol,
+                        interval: lastSim.interval,
+                        startIdx: lastSim.startIdx || 0,
+                        candles: lastSim.candles,
+                        fx: (typeof fxRates === 'object') ? fxRates : null
+                    };
+                }
+            } catch (e) { snapshot = null; }
             const data = {
                 app: 'hermes',
                 type: 'settings',
-                version: 1,
+                version: 2,
                 savedAt: new Date().toISOString(),
                 symbol: currentSymbol,
-                fields: collectSettingsFields()
+                fields: collectSettingsFields(),
+                snapshot: snapshot
             };
             const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
@@ -3283,6 +3318,10 @@
                 applySettingsFields(fields);
             }
             updateMinLotSpreadHint();
+            // Ако файлът носи snapshot — ползваме точно същите данни при пускането.
+            if (data.snapshot && Array.isArray(data.snapshot.candles) && data.snapshot.candles.length) {
+                pendingSimSnapshot = data.snapshot;
+            }
             runSimulation();
         }
 
