@@ -622,6 +622,10 @@
             color: #ffd27a;
         }
 
+        .period-info .ok {
+            color: #00ff66;
+        }
+
         .orders {
             flex: 1 0 auto;
             display: flex;
@@ -1284,37 +1288,67 @@
             return sec + 'с';
         }
 
-        // Показва заявения vs реалния интервал и реалния обхват на използваните свещи.
-        function showRealInterval(simCandles, requestedInterval) {
+        // Показва заявения vs реалния интервал и реалния СИМУЛИРАН обхват.
+        // `opts.from`/`opts.to` са заявеният период (локални сек), `opts.startIdx` е
+        // първият търгуван бар, а `opts.startFound === false` значи, че данните не
+        // стигат до началото на периода (симулацията почва по-късно).
+        function showRealInterval(simCandles, requestedInterval, opts) {
+            opts = opts || {};
             const el = document.getElementById('periodInfo');
             if (!el || !simCandles || !simCandles.length) return;
             const reqLabel = intervalLabels[requestedInterval] || requestedInterval;
             const realSec = detectCandleInterval(simCandles);
             const realLabel = intervalLabelFromSecs(realSec) || '—';
-            const first = simCandles[0].time, last = simCandles[simCandles.length - 1].time;
-            const days = ((last - first) / 86400).toFixed(1);
             const mismatch = realLabel !== reqLabel;
 
-            // Дали реално изтегленото покрива заявения период (иначе е скъсен).
+            const n = simCandles.length;
+            const startIdx = Math.max(0, Math.min((opts.startIdx | 0) || 0, n - 1));
+            // Реалният обхват е от първия ТЪРГУВАН бар, не от пред-историята.
+            const first = simCandles[startIdx].time, last = simCandles[n - 1].time;
+            const days = ((last - first) / 86400).toFixed(1);
+            const bars = n - startIdx;
+
+            const reqFrom = (opts.from > 0) ? opts.from : null;
+            const reqTo = (opts.to > 0) ? opts.to : null;
+            const hasReq = !!(reqFrom && reqTo && reqTo > reqFrom);
+
+            // Заявеният период трябва да е покрит от симулирания обхват; пред-историята
+            // преди стартовия бар НЕ се брои за покритие.
             let shortened = false;
-            const useDatesEl = document.getElementById('inpUseDates');
-            if (useDatesEl && useDatesEl.checked) {
-                const fv = document.getElementById('inpDateFrom').value;
-                const tv = document.getElementById('inpDateTo').value;
-                if (fv && tv) {
-                    const reqFrom = timeToLocal(new Date(fv + 'T00:00:00').getTime() / 1000);
-                    const reqTo = timeToLocal(new Date(tv + 'T23:59:59').getTime() / 1000);
-                    const tol = Math.max(86400, (realSec || 60) * 2);
-                    if (first > reqFrom + tol || last < reqTo - tol) shortened = true;
+            let problem = '';
+            if (hasReq) {
+                const tol = Math.max(86400, (realSec || intervalSecs(requestedInterval)) * 2);
+                const missStart = first > reqFrom + tol;
+                const missEnd = last < reqTo - tol;
+                if (missStart || missEnd) {
+                    shortened = true;
+                    problem = (missStart && missEnd) ? 'данните не покриват целия период'
+                        : missStart ? 'липсва началото на периода'
+                        : 'липсва краят на периода';
+                }
+                if (opts.startFound === false) {
+                    shortened = true;
+                    problem = 'данните не стигат до началото на периода';
                 }
             }
 
+            const reqPeriodHtml = hasReq
+                ? ' · период: <b>' + dateStr(new Date(reqFrom * 1000)) + ' → ' + dateStr(new Date(reqTo * 1000)) + '</b>'
+                : '';
+            const preHtml = startIdx > 0 ? ' · пред-история: <b>' + startIdx + '</b> свещи' : '';
+
             el.innerHTML =
                 'Заявен интервал: <b>' + reqLabel + '</b> · ' +
-                'реален: <b class="' + (mismatch ? 'warn' : '') + '">' + realLabel + '</b> · ' +
-                'обхват: <b>' + dateStr(new Date(first * 1000)) + ' → ' + dateStr(new Date(last * 1000)) + '</b> ' +
-                '(' + days + ' дни · ' + simCandles.length + ' свещи)' +
-                (shortened ? ' · <b class="warn">периодът е скъсен</b>' : '');
+                'реален: <b class="' + (mismatch ? 'warn' : '') + '">' + realLabel + '</b>' +
+                reqPeriodHtml +
+                ' · симулиран: <b>' + dateStr(new Date(first * 1000)) + ' → ' + dateStr(new Date(last * 1000)) + '</b> ' +
+                '(' + days + ' дни · ' + bars + ' свещи)' +
+                preHtml +
+                (hasReq
+                    ? (shortened
+                        ? ' · <b class="warn">⚠ ' + problem + ' — периодът е скъсен (изберете по-едър интервал или по-къс период)</b>'
+                        : ' · <b class="ok">✓ периодът е покрит</b>')
+                    : '');
         }
 
         // Бързи дати: задават периода спрямо последната налична свещ и пускат симулация.
@@ -1500,14 +1534,14 @@
         }
 
         // Подготвя графиката за възпроизвеждане на живо: показва я и позиционира
-        // изгледа в началото на периода, без да показва бъдещите свещи.
-        function prepareSimChart(candles) {
+        // изгледа в началото на СИМУЛИРАНИЯ период (startIdx), без бъдещите свещи.
+        function prepareSimChart(candles, startIdx) {
             simChartCandles = candles || [];
             tradeMarkers = [];
             markersDirty = false;
             renderSimChart(simChartCandles, [], false);
             if (simChart && simChartCandles.length) {
-                const start = Math.min(60, simChartCandles.length - 1);
+                const start = Math.max(0, Math.min((startIdx | 0) || 0, simChartCandles.length - 1));
                 simChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, start - 80), to: start + 2 });
             }
         }
@@ -2513,13 +2547,16 @@
 
                 let simCandles = candles;
                 let simStartIdx;
+                let simStartFound = true;
                 if (usedSnap && snap.startTime > 0) {
                     const ix = candles.findIndex(c => c.time >= snap.startTime);
+                    simStartFound = ix >= 0;
                     simStartIdx = ix >= 0 ? ix : Math.max(30, snap.startIdx || 30);
                 } else if (usedSnap && snap.startIdx > 0) {
                     simStartIdx = snap.startIdx;
                 } else if (datePeriod) {
                     const ix = candles.findIndex(c => c.time >= fromS);
+                    simStartFound = ix >= 0;
                     simStartIdx = ix >= 0 ? ix : Math.min(lbDefault, Math.max(30, candles.length - 30));
                     const periodBars = candles.length - simStartIdx;
                     if (periodBars < 30) {
@@ -2529,7 +2566,12 @@
                     simStartIdx = Math.min(lbDefault, Math.max(30, candles.length - 30));
                 }
 
-                showRealInterval(simCandles, interval);
+                showRealInterval(simCandles, interval, {
+                    from: datePeriod ? fromS : null,
+                    to: datePeriod ? toS : null,
+                    startIdx: simStartIdx,
+                    startFound: simStartFound
+                });
                 setProgress(10, `Изчисляване на вероятностите по модела (${simCandles.length} свещи)...`);
                 await sleep(30);
                 // БЪРЗО и ПРИЧИННО: индикаторите (EMA/RSI/ATR/ADX/MACD) се смятат
@@ -2551,7 +2593,7 @@
                 await sleep(30);
                 // Показва графиката отначало (и при „Мгновено“). През симулацията не се
                 // прерисува всеки бар (само балансът), за да не се бави; накрая се побира.
-                prepareSimChart(simCandles);
+                prepareSimChart(simCandles, simStartIdx);
                 // Референтна цена за спреда = текущата (последна) цена на периода.
                 P.refPrice = simCandles[simCandles.length - 1].close;
                 // „Мин. обем“ в € е МАРЖИНЪТ за един минимален обем. Реалната позиция
@@ -2572,6 +2614,11 @@
                 await simulate(simCandles, atrSeries, probs, P, interval, simStartIdx);
                 if (!cancelFlag) {
                     renderSimChart(simCandles, tradeMarkers);
+                    // Побираме СИМУЛИРАНИЯ период (а не цялата пред-история), за да
+                    // съвпада видимият обхват със заявения период.
+                    if (simChart && simStartIdx > 0) {
+                        simChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, simStartIdx - 40), to: simCandles.length - 1 });
+                    }
                     drawPnlChart();
                 }
             } catch (e) {
@@ -3802,9 +3849,9 @@
             // Смяна на единицата на мин. обем → преизчислява от Binance (лот/цена).
             const mlUnitSel = document.getElementById('inpMinLotUnit');
             if (mlUnitSel) mlUnitSel.addEventListener('change', () => autoFillInstrument());
-            // Смяната на интервала е промяна на настройка — НЕ пускаме автоматично,
-            // само отбелязваме, че трябва „Стартирай“.
-            iSel.addEventListener('change', () => { updateMinLotSpreadHint(); markSettingsDirty(); });
+            // Смяната на интервала трябва веднага да преизчисли симулацията с новия
+            // интервал (иначе остава на предния). runSimulation сам спира текущата.
+            iSel.addEventListener('change', () => { updateMinLotSpreadHint(); runSimulation(); });
             ensureFxRates();
             updateMinLotSpreadHint();
             aiLoadCfg();
