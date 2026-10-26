@@ -1246,11 +1246,11 @@
         let lastCandles = [];
         let lastCandlesKey = '';   // „SYMBOL|интервал“, за който се отнасят lastCandles
 
-        // Дата-помощни функции: свещите са с локално "изместено" време (timeToLocal),
-        // затова датите се четат/пишат в локален вид през new Date.
+        // Дата-помощни функции: свещите са с локално "изместено" време (timeToLocal —
+        // wall-clock стойност, записана като UTC), затова датата се вади в UTC.
         function dateStr(d) {
             const pad = n => String(n).padStart(2, '0');
-            return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+            return `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
         }
 
         function setDateInputs(dFrom, dTo) {
@@ -1714,6 +1714,19 @@
         function timeToLocal(originalTime) {
             const d = new Date(originalTime * 1000);
             return Date.UTC(d.getFullYear(), d.getMonth(), d.getDate(), d.getHours(), d.getMinutes(), d.getSeconds(), d.getMilliseconds()) / 1000;
+        }
+
+        // При връщане на часовника (DST, последната неделя на октомври) два различни
+        // UTC часа дават една и съща локална стойност. Lightweight Charts изисква
+        // строго нарастващи времена — иначе хвърля „Value is null“ при рисуване.
+        // Затова при дубликат добавяме 1 секунда (данните не се губят).
+        function ensureUniqueTimes(candles) {
+            let prev = -Infinity;
+            for (const c of (candles || [])) {
+                if (c.time <= prev) c.time = prev + 1;
+                prev = c.time;
+            }
+            return candles;
         }
 
         function fmt(n) {
@@ -2535,6 +2548,7 @@
                     candles = await fetchCandles(currentSymbol, interval, limit);
                 }
                 if (!candles || candles.length < 30) throw new Error('Недостатъчно данни (минимум 30 свещи).');
+                candles = ensureUniqueTimes(candles);
                 lastCandles = candles;
                 lastCandlesKey = currentSymbol + '|' + interval;
                 updateMinLotSpreadHint();
