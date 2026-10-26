@@ -751,6 +751,46 @@
             display: none;
             flex-direction: column;
             overflow: hidden;
+            position: relative;
+        }
+
+        /* Индикация върху графиката при динамичен „Поглед назад“. */
+        .auto-lb-badge {
+            display: none;
+            position: absolute;
+            top: 40px;
+            right: 14px;
+            z-index: 8;
+            max-width: calc(100% - 28px);
+            padding: 4px 9px;
+            border-radius: 6px;
+            border: 1px solid rgba(0, 240, 255, 0.35);
+            background: rgba(8, 13, 24, 0.9);
+            color: var(--accent-cyan);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+            font-weight: 700;
+            letter-spacing: 0.2px;
+            pointer-events: none;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .auto-lb-badge.busy {
+            border-color: rgba(255, 210, 122, 0.55);
+            color: #ffd27a;
+            animation: autoLbPulse 0.9s ease-in-out infinite alternate;
+        }
+
+        .auto-lb-badge.ok {
+            border-color: rgba(0, 255, 102, 0.45);
+            color: #00ff66;
+        }
+
+        @keyframes autoLbPulse {
+            from { opacity: 0.55; }
+            to { opacity: 1; }
         }
 
         .chart-head {
@@ -1014,8 +1054,8 @@
         <label>Поглед назад (свещи)
             <input type="number" id="inpLookback" value="3000" min="30" max="50000" step="100" title="Колко свещи назад да гледат моделите (статистика/прозорци). По подразбиране 3000.">
         </label>
-        <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0.2px" title="При включване: първоначално се ползва зададеният поглед назад, а след това прозорецът расте с всеки изминал бар и включва цялата изминала история.">
-            <input type="checkbox" id="inpLookbackGrow" style="width:auto"> разширявай
+        <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0.2px" title="При включване: на всеки 10 свещи от симулирания период се прави чувствителност с 500 точки САМО върху изминалата част от периода (без по-стари данни и без бъдеще) и се избира най-добрият „Поглед назад“. За дълги периоди оценката се прави върху последните 300 бара от периода.">
+            <input type="checkbox" id="inpLookbackGrow" style="width:auto"> променлив поглед
         </label>
         <div class="contra-box" id="contraBox" style="display:none">
             <span class="contra-title">Контра по модели (при „Средна вероятност“)</span>
@@ -1060,6 +1100,7 @@
                 <span><i class="legend-dot" style="background:var(--accent-cyan)"></i>● затваряне (печалба/загуба)</span>
             </span>
         </div>
+        <div class="auto-lb-badge" id="autoLbBadge"></div>
         <div id="simChart"></div>
         <div class="pnl-wrap" id="simPnlWrap">
             <canvas id="simPnlCanvas" onmousemove="onPnlHover(event)" onmouseleave="hidePnlTip()"></canvas>
@@ -1847,7 +1888,8 @@
         // прозореца [t, t+ivSec) по ред и връща кое ниво е първо. Ако една 1м
         // свещ покрие и двете → SL (песимистично). Няма ли 1м данни → SL.
         async function resolveAmbiguousExit(symbol, candle, pos, ivSec) {
-            if (sweepMode) return { exitPrice: pos.sl, reason: 'SL' };   // при sweep: без мрежа, песимистично
+            // При sweep и авто-оптимизация на lookback: без 1м мрежа, песимистично SL.
+            if (sweepMode || autoLbOptActive) return { exitPrice: pos.sl, reason: 'SL' };
             const from = candle.time, to = candle.time + ivSec;
             const key = symbol + '|' + from;
             let arr = oneMinCache.get(key);
@@ -2011,6 +2053,85 @@
             `;
         }
 
+        // ── Динамичен „Поглед назад“ ─────────────────────────────────
+        // На всеки AUTO_LB_EVERY свещи от симулирания период се прави
+        // чувствителност с AUTO_LB_POINTS точки САМО върху изминалата част от
+        // периода (без пред-история и без бъдеще) и се избира най-добрият
+        // lookback по крайна печалба. Оценката се ограничава до последните
+        // AUTO_LB_EVAL_MAX бара от периода, за да остане симулацията отзивчива.
+        const AUTO_LB_EVERY = 10;
+        const AUTO_LB_POINTS = 500;
+        const AUTO_LB_MIN = 30;
+        const AUTO_LB_EVAL_MAX = 300;
+        let autoLbOptActive = false;
+
+        function setAutoLbBadge(text, cls) {
+            const el = document.getElementById('autoLbBadge');
+            if (!el) return;
+            if (!text) {
+                el.style.display = 'none';
+                el.textContent = '';
+                el.className = 'auto-lb-badge';
+                return;
+            }
+            el.style.display = 'block';
+            el.textContent = text;
+            el.className = 'auto-lb-badge' + (cls ? ' ' + cls : '');
+        }
+
+        // Връща { W, profit, trades } за най-добрия lookback или null.
+        // `fromIdx`/`toIdx` са границите на симулирания период; използваме само
+        // [fromIdx..toIdx] (никакви по-стари или по-нови свещи).
+        async function optimizeLookbackForPeriod(candles, interval, fromIdx, toIdx, P, onProgress) {
+            const fullLen = toIdx - fromIdx + 1;
+            if (fullLen < AUTO_LB_MIN + 30) return null;
+            const evalStart = Math.max(fromIdx, toIdx - AUTO_LB_EVAL_MAX + 1);
+            const seg = candles.slice(evalStart, toIdx + 1);
+            const L = seg.length;
+            if (L < AUTO_LB_MIN + 30) return null;
+            const atr = computeATR(seg, 14);
+            const baseOpts = { invert: contraFlags(), intervalSec: intervalSecs(interval), lookbackGrow: false };
+
+            // 500 уникални стойности между 30 и дължината на периода.
+            const vals = [];
+            for (let k = 0; k < AUTO_LB_POINTS; k++) {
+                const v = Math.round(AUTO_LB_MIN + (L - AUTO_LB_MIN) * k / (AUTO_LB_POINTS - 1));
+                if (vals.length === 0 || vals[vals.length - 1] !== v) vals.push(v);
+            }
+
+            let best = null;
+            autoLbOptActive = true;
+            try {
+                for (let k = 0; k < vals.length; k++) {
+                    if (cancelFlag) return null;
+                    const W = vals[k];
+                    let r = null;
+                    try {
+                        const probsSeg = computeModelProbSeries(seg, currentModel, Object.assign({}, baseOpts, { lookback: W }));
+                        const P2 = Object.assign({}, P, { lookback: W, lookbackGrow: false });
+                        r = await simulate(seg, atr, probsSeg, P2, interval, AUTO_LB_MIN, true);
+                    } catch (e) { r = null; }
+                    if (r && r.cancelled) return null;
+                    if (r && r.tradeCount > 0) {
+                        const profit = P.budget > 0 ? ((r.equity - P.budget) / P.budget) * 100 : 0;
+                        if (!best || profit > best.profit + 1e-9
+                            || (Math.abs(profit - best.profit) <= 1e-9 && r.tradeCount > best.trades)) {
+                            best = { W, profit, trades: r.tradeCount };
+                        }
+                    }
+                    if ((k % 5 === 0) || k === vals.length - 1) {
+                        if (typeof onProgress === 'function') {
+                            onProgress(k + 1, vals.length, W, best, L, evalStart > fromIdx);
+                        }
+                        await sleep(0);
+                    }
+                }
+            } finally {
+                autoLbOptActive = false;
+            }
+            return best;
+        }
+
         async function simulate(candles, atrSeries, probs, P, interval, startIdx, silent) {
             ensureFxRates();   // валутни курсове към EUR (кеширани; не блокира)
             const ivSec = intervalSecs(interval || '5m');
@@ -2030,6 +2151,17 @@
             const minLotUnit = Math.max(1e-9, P.minLot || 1);
             let minLotsSum = 0;
             const n = candles.length;
+            // При динамичен „Поглед назад“ вероятностите се преизчисляват при
+            // всяка нова избрана стойност (без стария режим „расте с +1 на бар“).
+            let curProbs = probs;
+            const autoLbEnabled = !silent && !!P.lookbackGrow && !sweepMode;
+            if (!silent) {
+                if (autoLbEnabled) {
+                    setAutoLbBadge('Поглед назад: ' + P.lookback + ' · динамичен (на всеки ' + AUTO_LB_EVERY + ' свещи)', '');
+                } else {
+                    setAutoLbBadge('');
+                }
+            }
             if (!silent) {
                 tradeMarkers = [];
                 markersDirty = false;
@@ -2040,8 +2172,51 @@
             }
             for (let i = i0; i < n; i++) {
                 // При тих (sweep) режим гледаме sweepCancel; иначе — cancelFlag.
-                if (silent ? sweepCancel : cancelFlag) return silent ? { equity, tradeCount, winsCount, maxDD, cancelled: true } : undefined;
-                const prScaled = probs[i];
+                // Вътрешните кандидати на динамичния lookback също трябва да
+                // реагират на „Стоп“/смяна на интервала (cancelFlag).
+                if (silent ? (sweepCancel || (autoLbOptActive && cancelFlag)) : cancelFlag) {
+                    return silent ? { equity, tradeCount, winsCount, maxDD, cancelled: true } : undefined;
+                }
+
+                // Динамичен „Поглед назад“: на всеки 10 свещи от периода правим
+                // 500-точкова чувствителност само върху изминалата част от периода
+                // (до предходния бар) и избираме най-добрия lookback за напред.
+                if (autoLbEnabled && (i - i0) >= AUTO_LB_MIN + 30 && (i - i0) % AUTO_LB_EVERY === 0) {
+                    setAutoLbBadge('⟳ Чувствителност за поглед назад… 0/' + AUTO_LB_POINTS, 'busy');
+                    await sleep(0);
+                    const best = await optimizeLookbackForPeriod(
+                        candles, interval, i0, i - 1, P,
+                        (done, total, w, b, L, capped) => {
+                            setAutoLbBadge(
+                                '⟳ Поглед назад: търсене ' + done + '/' + total + ' · W=' + w +
+                                (capped ? ' · последните ' + L + ' от периода' : ''),
+                                'busy'
+                            );
+                        }
+                    );
+                    if (cancelFlag) return;
+                    if (best && best.W) {
+                        const changed = best.W !== P.lookback;
+                        if (changed) {
+                            P.lookback = best.W;
+                            const lbEl = document.getElementById('inpLookback');
+                            if (lbEl) lbEl.value = best.W;
+                            try {
+                                curProbs = computeModelProbSeries(candles, currentModel, {
+                                    invert: contraFlags(), intervalSec: intervalSecs(interval),
+                                    lookback: best.W, lookbackGrow: false
+                                });
+                            } catch (e) { /* оставаме със старите вероятности */ }
+                        }
+                        setAutoLbBadge('Поглед назад' + (changed ? ' → ' : ': ') + best.W + ' · избран за периода (' + best.profit.toFixed(2) + '%)', 'ok');
+                    } else {
+                        setAutoLbBadge('Поглед назад: ' + P.lookback + ' · няма достатъчно сделки за избор', 'ok');
+                    }
+                    if (typeof lastSim !== 'undefined' && lastSim) lastSim.params = P;
+                    await sleep(0);
+                }
+
+                const prScaled = curProbs[i];
 
                 if (legs.length) {
                     const c = candles[i];
@@ -2358,6 +2533,12 @@
             }
 
             if (silent) return { equity, tradeCount, winsCount, maxDD };
+            // Запазваме избраните по време на симулацията вероятности/параметри,
+            // за да ползва „Чувствителност“ същата база (вкл. динамичния lookback).
+            if (typeof lastSim !== 'undefined' && lastSim) {
+                lastSim.probs = curProbs;
+                lastSim.params = P;
+            }
             renderSummary(P, equity, tradeCount, winsCount, maxDD, pnlExSum, minLotsSum);
             if (tradeCount === 0) {
                 setProgress(100, '0 сделки — провери: „Мин. обем“ (твърде голям за бюджета → няма вход), праговете Buy/Sell, и че пазарът е отворен (не-крипто не търгува събота/неделя).');
@@ -2597,7 +2778,7 @@
                 await sleep(0);
                 const probs = computeModelProbSeries(simCandles, currentModel, {
                     invert: contraFlags(), intervalSec: intervalSecs(interval),
-                    lookback: P.lookback, lookbackGrow: P.lookbackGrow, growFrom: simStartIdx
+                    lookback: P.lookback, lookbackGrow: false
                 });
                 if (cancelFlag) return;
 
@@ -2787,7 +2968,9 @@
         // предварително сметнатите probs от базовата симулация.
         async function computeSweepProbs(candles, interval, lookback, progressCb, fromIdx, grow) {
             // Същото бързо причинно изчисление (без пре-изчисляване по бар).
-            const opts = { invert: contraFlags(), intervalSec: intervalSecs(interval), lookback: lookback, lookbackGrow: grow, growFrom: fromIdx };
+            // „Променлив поглед“ вече се управлява от auto-оптимизацията, затова
+            // при ръчна чувствителност ползваме фиксиран lookback.
+            const opts = { invert: contraFlags(), intervalSec: intervalSecs(interval), lookback: lookback, lookbackGrow: false };
             return computeModelProbSeries(candles, currentModel, opts);
         }
 
