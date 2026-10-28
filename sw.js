@@ -1,4 +1,4 @@
-const CACHE = 'helious-v32';
+const CACHE = 'helious-v33';
 const URLS = [
     '/index.html',
     '/manifest.json',
@@ -41,8 +41,34 @@ self.addEventListener('activate', e => {
 self.addEventListener('fetch', e => {
   const req = e.request;
   if (req.method !== 'GET') return;
-  // Network-first за всичко (за да не сервираме стари JS/HTML), с кеш само
-  // като offline fallback.
+
+  const url = new URL(req.url);
+  const isApi = url.origin === self.location.origin && (
+    url.pathname === '/data' || url.pathname === '/news' ||
+    url.pathname === '/symbols' || url.pathname === '/ticker' ||
+    url.pathname === '/fx' || url.pathname === '/instrument' ||
+    url.pathname === '/binance' || url.pathname === '/yahoo' ||
+    url.pathname === '/version' || url.pathname === '/health' ||
+    url.pathname.startsWith('/api/')
+  );
+
+  // API заявките НЕ се кешират и при offline връщат JSON (за да не чупи
+  // r.json() с HTML/text „Офлайн...“).
+  if (isApi) {
+    e.respondWith(
+      fetch(req).catch(() => new Response(JSON.stringify({
+        ok: false,
+        error: 'Офлайн — сървърът не е достъпен. Опитай отново.'
+      }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json; charset=utf-8' }
+      }))
+    );
+    return;
+  }
+
+  // Network-first за всичко останало (за да не сервираме стари JS/HTML), с кеш
+  // само като offline fallback.
   e.respondWith(
     fetch(req).then(res => {
       try {
