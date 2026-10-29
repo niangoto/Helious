@@ -4085,34 +4085,74 @@
             return payload;
         }
 
-        // Дали заредените от файл данни отговарят на ТЕКУЩИТЕ символ, интервал и
-        // период (датите). Ако да — симулацията ги ползва без теглене от сървъра.
-        function loadedDataMatches(payload, symbol, interval, P, useDates, dateFrom, dateTo, fromS, toS) {
-            if (!payload || !Array.isArray(payload.candles) || payload.candles.length < 30) return false;
-            if (String(payload.symbol || '').toUpperCase() !== String(symbol || '').toUpperCase()) return false;
-            if (payload.interval && payload.interval !== interval) return false;
+        // Строи snapshot от заредения файл с данни за ТЕКУЩИТЕ символ/интервал/
+        // период. За дати може да отреже само нужния прозорец (вкл. пред-история),
+        // така файлът се ползва и при промяна на датите в рамките му.
+        function buildSnapFromLoadedData(P, interval, datePeriod, fromS, toS) {
+            const data = loadedFileData;
+            if (!data || !Array.isArray(data.candles) || data.candles.length < 30) return null;
+            if (String(data.symbol || '').toUpperCase() !== String(currentSymbol || '').toUpperCase()) return null;
+            if (data.interval && data.interval !== interval) return null;
+            const cs = data.candles;
             const iv = intervalSecs(interval);
-            if (useDates) {
-                if (payload.useDates && payload.dateFrom && payload.dateTo) {
-                    if (payload.dateFrom !== dateFrom || payload.dateTo !== dateTo) return false;
-                } else {
-                    // Стар файл без записани дати — сравняваме реалните времена.
-                    if (!(payload.startTime > 0 && Math.abs(payload.startTime - fromS) <= Math.max(iv * 2, 86400))) return false;
-                    if (!(payload.to > 0 && payload.to >= toS - Math.max(iv * 3, 3 * 86400))) return false;
-                }
-                // Нужна е достатъчна пред-история за новия „Поглед назад“.
-                const pre = Math.max(300, P.lookback || 3000) * iv;
-                if (payload.from > fromS - pre + iv) return false;
-            } else if (payload.useDates) {
-                // Файлът е правен за конкретен период, а сега датите са изключени.
-                return false;
+            const lb = Math.max(30, P.lookback || 3000);
+
+            if (!datePeriod) {
+                // Без дати: ползваме файла такъв, какъвто е; стартът е като при
+                // нормално теглене (последните n−30 бара, с до lb пред-история).
+                const startIdx = Math.min(lb, Math.max(30, cs.length - 30));
+                const startCandle = cs[startIdx] || cs[0];
+                return Object.assign({}, data, {
+                    force: true,
+                    candles: cs,
+                    startIdx,
+                    startTime: startCandle ? startCandle.time : 0,
+                    from: cs[0].time,
+                    to: cs[cs.length - 1].time
+                });
             }
-            return true;
+
+            if (!(toS > fromS)) return null;
+            const endTol = Math.max(iv * 3, 3 * 86400);
+            // Данните трябва да стигат поне до края на искания период (с толеранс
+            // за уикенд/сесия).
+            if (cs[cs.length - 1].time < toS - endTol) return null;
+            const startIdxFull = cs.findIndex(c => c.time >= fromS);
+            if (startIdxFull < 0) return null;
+            let endIdxFull = -1;
+            for (let i = cs.length - 1; i >= 0; i--) {
+                if (cs[i].time <= toS) { endIdxFull = i; break; }
+            }
+            if (endIdxFull < startIdxFull) return null;
+            // Колкото пред-история има във файла, толкова (без твърдо изискване
+            // за пълния lookback — иначе уикендите правят файла „неактивен“).
+            const needStart = fromS - lb * iv;
+            let fromIdx = 0;
+            for (let i = 0; i < cs.length; i++) {
+                if (cs[i].time >= needStart) { fromIdx = i; break; }
+            }
+            const slice = cs.slice(fromIdx, endIdxFull + 1);
+            const startIdx = startIdxFull - fromIdx;
+            if (startIdx < 0 || startIdx >= slice.length) return null;
+            return Object.assign({}, data, {
+                force: true,
+                candles: slice,
+                startIdx,
+                startTime: slice[startIdx].time,
+                from: slice[0].time,
+                to: slice[slice.length - 1].time
+            });
         }
 
-        function isLoadedDataUsable() {
-            if (!loadedFileData) return false;
+        function loadedDataState() {
+            if (!loadedFileData) return { usable: false, reason: '' };
             const interval = (document.getElementById('inpInterval') || {}).value || '5m';
+            if (String(loadedFileData.symbol || '').toUpperCase() !== String(currentSymbol || '').toUpperCase()) {
+                return { usable: false, reason: 'друг символ' };
+            }
+            if (loadedFileData.interval && loadedFileData.interval !== interval) {
+                return { usable: false, reason: 'друг интервал' };
+            }
             const useDatesNow = !!((document.getElementById('inpUseDates') || {}).checked
                 && (document.getElementById('inpDateFrom') || {}).value
                 && (document.getElementById('inpDateTo') || {}).value);
@@ -4123,20 +4163,20 @@
                 fromS = timeToLocal(new Date(fromVal + 'T00:00:00').getTime() / 1000);
                 toS = timeToLocal(new Date(toVal + 'T23:59:59').getTime() / 1000);
             }
-            return loadedDataMatches(loadedFileData, currentSymbol, interval, readParams(), useDatesNow, fromVal, toVal, fromS, toS);
+            const snap = buildSnapFromLoadedData(readParams(), interval, useDatesNow, fromS, toS);
+            if (!snap) return { usable: false, reason: useDatesNow ? 'периодът не е покрит' : 'данните не са достатъчни' };
+            return { usable: true, reason: '', snap };
         }
 
         // Избира кой snapshot да ползва стартът: еднократния (нов файл/диапазон)
-        // или постоянните данни от зареден файл, ако съвпадат с текущия период.
+        // или постоянните данни от зареден файл, ако покриват текущия период.
         function resolveSnapForRun(pending, P, interval, datePeriod, fromVal, toVal, fromS, toS) {
             let snap = pending;
             let fromCache = false;
             const pendingHasCandles = !!(snap && Array.isArray(snap.candles) && snap.candles.length >= 30);
-            if (!pendingHasCandles && loadedFileData && loadedDataMatches(
-                loadedFileData, currentSymbol, interval, P, !!datePeriod, fromVal, toVal, fromS, toS
-            )) {
-                snap = Object.assign({ force: true }, loadedFileData);
-                fromCache = true;
+            if (!pendingHasCandles) {
+                const cached = buildSnapFromLoadedData(P, interval, !!datePeriod, fromS, toS);
+                if (cached) { snap = cached; fromCache = true; }
             }
             return { snap, fromCache };
         }
@@ -4167,17 +4207,19 @@
             }
 
             if (hasData) {
-                const usable = isLoadedDataUsable();
+                const state = loadedDataState();
+                const usable = state.usable;
                 const chip = document.createElement('span');
                 chip.className = 'loaded-file-chip' + (usable ? '' : ' inactive');
                 chip.title = usable
-                    ? 'Данните са за текущия символ/интервал/период и се ползват без теглене от сървъра.'
-                    : 'Данните са за друг символ/интервал/период — при старт ще се теглят наново.';
+                    ? 'Данните покриват текущия символ/интервал/период и се ползват без теглене от сървъра.'
+                    : ('Данните не се ползват: ' + (state.reason || 'несъвместими') + '. При старт ще се теглят наново.');
                 const icon = document.createElement('span'); icon.textContent = '📦';
                 const name = document.createElement('span'); name.className = 'lf-name'; name.textContent = loadedDataFile.name;
                 const meta = document.createElement('span'); meta.className = 'lf-meta';
                 meta.textContent = (loadedFileData.symbol || '?') + ' · ' + (loadedFileData.interval || '?') +
-                    ' · ' + loadedFileData.candles.length + ' свещи' + (usable ? '' : ' · неактивни');
+                    ' · ' + loadedFileData.candles.length + ' свещи' +
+                    (usable ? '' : ' · неактивни' + (state.reason ? ' (' + state.reason + ')' : ''));
                 const x = document.createElement('button'); x.type = 'button'; x.className = 'lf-x'; x.textContent = '✕';
                 x.title = 'Махни данните — следващото стартиране ще тегли от сървъра';
                 x.addEventListener('click', clearLoadedDataFile);
@@ -4348,6 +4390,21 @@
                     // период, следващите промени по настройките стартират без теглене.
                     loadedFileData = simData;
                     loadedDataFile = { name: (meta && meta.dataName) || 'данни.json' };
+                    // Периодът се води от файла с данни — така той веднага е активен
+                    // и смяна на настройки (напр. скорост) не изисква теглене.
+                    if (simData.useDates && simData.dateFrom && simData.dateTo) {
+                        const useEl = document.getElementById('inpUseDates');
+                        const df = document.getElementById('inpDateFrom');
+                        const dt = document.getElementById('inpDateTo');
+                        if (useEl) useEl.checked = true;
+                        if (df) df.value = simData.dateFrom;
+                        if (dt) dt.value = simData.dateTo;
+                        datesTouched = true;
+                    } else {
+                        const useEl = document.getElementById('inpUseDates');
+                        if (useEl) useEl.checked = false;
+                    }
+                    if (typeof toggleDates === 'function') toggleDates();
                 } else {
                     alert('Файлът с данни е за ' + (simData.symbol || '?') + ' / ' + (simData.interval || '?') +
                         ', а настройките са за ' + currentSymbol + ' / ' + (formIv || '?') +
