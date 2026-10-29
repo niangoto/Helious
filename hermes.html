@@ -167,6 +167,63 @@
             flex-shrink: 0;
         }
 
+        /* Заредени файлове (настройки / данни) — показват се и се махат с ✕. */
+        #loadedFilesBar {
+            display: none;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 8px;
+            padding: 5px 14px;
+            border-bottom: 1px solid var(--panel-border);
+            background: rgba(0, 255, 102, 0.035);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10px;
+        }
+
+        .loaded-file-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            padding: 2px 7px;
+            border: 1px solid rgba(0, 255, 102, 0.3);
+            border-radius: 999px;
+            background: rgba(0, 255, 102, 0.06);
+            color: var(--text-main);
+        }
+
+        .loaded-file-chip.inactive {
+            border-color: rgba(255, 180, 80, 0.5);
+            background: rgba(255, 180, 80, 0.07);
+            color: #ffcf8a;
+        }
+
+        .loaded-file-chip .lf-name {
+            max-width: 260px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .loaded-file-chip .lf-meta {
+            opacity: 0.75;
+            white-space: nowrap;
+        }
+
+        .loaded-file-chip .lf-x {
+            border: 0;
+            background: transparent;
+            color: inherit;
+            cursor: pointer;
+            font: inherit;
+            padding: 0 0 0 2px;
+            opacity: 0.8;
+        }
+
+        .loaded-file-chip .lf-x:hover {
+            opacity: 1;
+            color: #ff5577;
+        }
+
         .btn {
             padding: 8px 14px;
             border-radius: 7px;
@@ -1042,14 +1099,19 @@
             <button class="btn start" id="btnStart" onclick="runSimulation()">▶ Стартирай</button>
             <button class="btn stop" id="btnStop" onclick="stopSimulation()">■ Стоп</button>
             <button class="btn" id="btnSweep" onclick="toggleSweepPick()" title="Анализ на чувствителността: цъкни бутона, после цъкни върху настройка">📈 Чувствителност</button>
-            <button class="btn" onclick="saveSettings()" title="Запази всички настройки във файл (.json)">💾 Запази</button>
-            <label class="btn" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="Зареди настройки от файл (.json)">📂 Зареди
-                <input type="file" id="settingsFile" accept=".json,application/json" style="display:none" onchange="loadSettings(event)">
+            <label style="display:inline-flex;align-items:center;gap:4px;font-size:10.5px;color:var(--text-dim);white-space:nowrap" title="При „Запази“ записва ВТОРИ отделен файл с точните свещи от последната симулация. При „Зареди“ избери двата файла заедно (настройки + данни) — няма да се теглят данни от сървъра.">
+                <input type="checkbox" id="inpSaveData" style="width:auto"> данни
+            </label>
+            <button class="btn" onclick="saveSettings()" title="Запази всички настройки във файл (.json); при отметка „данни“ — и втори файл със свещите">💾 Запази</button>
+            <label class="btn" style="display:inline-flex;align-items:center;gap:4px;cursor:pointer" title="Зареди настройки (и по избор файла с данни) — двата .json могат да се изберат заедно">📂 Зареди
+                <input type="file" id="settingsFile" accept=".json,application/json" multiple style="display:none" onchange="loadSettings(event)">
             </label>
             <button class="btn" id="btnAi" onclick="toggleAiPanel()" title="ИИ чат за настройки — променя само полетата, без да пипа текущата симулация">🤖 ИИ</button>
             <button class="btn close" onclick="window.close()">✕</button>
         </div>
     </header>
+
+    <div id="loadedFilesBar"></div>
 
     <div id="sweepPanel" style="display:none; position:fixed; right:12px; bottom:12px; width:470px; max-width:96vw; background:#0b0f18; border:1px solid var(--panel-border); border-radius:10px; padding:8px 10px; z-index:9999; box-shadow:0 10px 34px rgba(0,0,0,0.55)">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
@@ -1589,6 +1651,7 @@
             currentSymbol = sym;
             const badge = document.getElementById('hSymbol');
             if (badge) badge.textContent = sym;
+            updateLoadedFilesBar();
             updateMinLotSpreadHint();
             toggleSymbolSearch(false);
             // Взема мин. обем/спред от Binance (ако има), после пуска симулацията.
@@ -2104,43 +2167,55 @@
             }
         }
 
-        async function fetchCandles(symbol, interval, limit) {
-            let firstErr = null;
-            try {
-                const r = await fetch(`/data?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}`);
-                const resp = await readJsonResponse(r);
-                if (resp && resp.ok && resp.candles && resp.candles.length > 0) {
-                    return resp.candles.map(c => ({
-                        time: timeToLocal(c.time),
-                        open: c.open,
-                        high: c.high,
-                        low: c.low,
-                        close: c.close,
-                        volume: c.volume
-                    }));
+        async function fetchCandles(symbol, interval, limit, opts) {
+            const attempt = async (nocache) => {
+                let firstErr = null;
+                const fresh = nocache ? '&nocache=1' : '';
+                try {
+                    const r = await fetch(`/data?symbol=${encodeURIComponent(symbol)}&interval=${interval}&limit=${limit}${fresh}`);
+                    const resp = await readJsonResponse(r);
+                    if (resp && resp.ok && resp.candles && resp.candles.length > 0) {
+                        return resp.candles.map(c => ({
+                            time: timeToLocal(c.time),
+                            open: c.open,
+                            high: c.high,
+                            low: c.low,
+                            close: c.close,
+                            volume: c.volume
+                        }));
+                    }
+                    const detail = resp?.details ? ' (' + resp.details + ')' : '';
+                    throw new Error((resp?.error || 'Няма данни за ' + symbol) + detail);
+                } catch (e) {
+                    firstErr = e;
                 }
-                const detail = resp?.details ? ' (' + resp.details + ')' : '';
-                throw new Error((resp?.error || 'Няма данни за ' + symbol) + detail);
-            } catch (e) {
-                firstErr = e;
-            }
-            // Резервният Binance път е САМО за крипто — не за XAUUSD/индекси.
-            if (!/(USDT|USDC|BUSD|FDUSD|TUSD)$/.test(String(symbol).toUpperCase())) throw firstErr;
+                // Резервният Binance път е САМО за крипто — не за XAUUSD/индекси.
+                if (!/(USDT|USDC|BUSD|FDUSD|TUSD)$/.test(String(symbol).toUpperCase())) throw firstErr;
+                try {
+                    const r = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
+                    if (!r.ok) throw firstErr;
+                    const d = await r.json();
+                    if (!Array.isArray(d) || !d.length) throw firstErr;
+                    return d.map(k => ({
+                        time: timeToLocal(Math.floor(k[0] / 1000)),
+                        open: parseFloat(k[1]),
+                        high: parseFloat(k[2]),
+                        low: parseFloat(k[3]),
+                        close: parseFloat(k[4]),
+                        volume: parseFloat(k[5])
+                    }));
+                } catch (e) {
+                    throw firstErr;
+                }
+            };
             try {
-                const r = await fetch(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
-                if (!r.ok) throw firstErr;
-                const d = await r.json();
-                if (!Array.isArray(d) || !d.length) throw firstErr;
-                return d.map(k => ({
-                    time: timeToLocal(Math.floor(k[0] / 1000)),
-                    open: parseFloat(k[1]),
-                    high: parseFloat(k[2]),
-                    low: parseFloat(k[3]),
-                    close: parseFloat(k[4]),
-                    volume: parseFloat(k[5])
-                }));
+                return await attempt(!!(opts && opts.nocache));
             } catch (e) {
-                throw firstErr;
+                // Транзиентна грешка или негативен кеш на сървъра — един повторен
+                // опит веднага, този път с nocache=1.
+                setProgress(3, 'Повторен опит за зареждане на данните...');
+                await sleep(1200);
+                return attempt(true);
             }
         }
 
@@ -2172,14 +2247,37 @@
             const off = timeToLocal(nowS) - nowS;
             let arr = await fetchCandlesRange(symbol, interval, fromLocal - off - 90000, toLocal - off + 90000);
             arr = (arr || []).filter(c => c.time >= fromLocal && c.time <= toLocal);
-            const expected = Math.floor((toLocal - fromLocal) / iv) + 1;
-            if (arr.length < expected * 0.9) {
-                const need = Math.ceil((nowS - fromLocal) / iv) + 60;
-                const lim = Math.min(MAX_FETCH, Math.max(need, 1000));
-                const all = await fetchCandles(symbol, interval, lim);
-                arr = (all || []).filter(c => c.time >= fromLocal && c.time <= toLocal);
+            arr.sort((a, b) => a.time - b.time);
+            // 90% от календарното време е недостижимо за инструменти с паузи
+            // (XAUUSD през уикенда, индекси само в сесия). Затова проверяваме
+            // реалния обхват на върнатите свещи, а не само броя им.
+            const span = Math.max(1, toLocal - fromLocal);
+            const isCrypto = /(USDT|USDC|BUSD|FDUSD|TUSD)$/.test(String(symbol).toUpperCase())
+                || /^(BTC|ETH|SOL)(USD)?$/.test(String(symbol).toUpperCase());
+            const tol = isCrypto ? Math.max(iv * 2, 1800) : Math.max(iv * 3, 3 * 86400);
+            const coverage = arr.length ? (arr[arr.length - 1].time - arr[0].time) / span : 0;
+            const covers = arr.length >= 30 && coverage >= 0.35
+                && arr[0].time <= fromLocal + tol
+                && arr[arr.length - 1].time >= toLocal - tol;
+            if (covers) return arr;
+
+            const need = Math.ceil((nowS - fromLocal) / iv) + 60;
+            const lim = Math.min(MAX_FETCH, Math.max(need, 1000));
+            let all = null, fallbackErr = null;
+            try {
+                all = await fetchCandles(symbol, interval, lim);
+            } catch (e) {
+                // fetchCandles вече прави повторен опит с nocache=1.
+                fallbackErr = e;
             }
-            return arr;
+            const fallback = (all || []).filter(c => c.time >= fromLocal && c.time <= toLocal);
+            fallback.sort((a, b) => a.time - b.time);
+            // Ако fallback-ът не даде достатъчно, но диапазонът има поне 30 бара —
+            // ползваме тях, вместо да губим валидните данни.
+            if (fallback.length >= 30) return fallback;
+            if (arr.length >= 30) return arr;
+            if (fallbackErr) throw fallbackErr;
+            return fallback;
         }
 
         // За бар, в който са засегнати и TP, и SL: обхожда 1м свещите в
@@ -2962,7 +3060,7 @@
 
             const P = readParams();
             // Ако зареждаме файл със snapshot — ползваме същите данни и интервал.
-            const snap = pendingSimSnapshot;
+            let snap = pendingSimSnapshot;
             pendingSimSnapshot = null;
             const interval = (snap && snap.interval) ? snap.interval : (document.getElementById('inpInterval').value || '5m');
             // Теглим базовата серия + още `lookback` свещи допълнителна история
@@ -3020,6 +3118,15 @@
                     toS = timeToLocal(new Date(toVal + 'T23:59:59').getTime() / 1000);
                 }
 
+                // Ако няма еднократен snapshot със свещи, но има зареден файл с данни,
+                // който отговаря на текущите символ/интервал/период — ползваме него
+                // наготово (без теглене). Така смяна само на бюджет/TP/SL/модел/
+                // прагове и т.н. стартира мигновено.
+                const resolvedSnap = resolveSnapForRun(snap, P, interval, datePeriod, fromVal, toVal, fromS, toS);
+                snap = resolvedSnap.snap;
+                const snapFromCache = resolvedSnap.fromCache;
+                updateLoadedFilesBar();
+
                 let usedSnap = false;
                 const forceSnap = !!(snap && snap.force);
                 let candles;
@@ -3035,7 +3142,9 @@
                         fxRates = Object.assign({ EUR: 1 }, snap.fx);
                         fxFetchedAt = Date.now();
                     }
-                    setProgress(2, 'Зареждане от файла (същите данни)...');
+                    setProgress(2, snapFromCache
+                        ? 'Зареждане от паметта (файл с данни) — без теглене...'
+                        : 'Зареждане от файла (същите данни)...');
                 } else if (snap && snap.from > 0 && snap.to > snap.from && (forceSnap || !datePeriod)) {
                     // Запазен диапазон: старите файлове (v<4) го ползват ВИНАГИ,
                     // новите (v4) — само когато няма зададени дати.
@@ -3093,9 +3202,11 @@
                     simStartIdx = Math.min(lbDefault, Math.max(30, candles.length - 30));
                 }
 
+                const snapRange = (usedSnap && snap && snap.from > 0 && snap.to > snap.from)
+                    ? { from: snap.from, to: snap.to } : null;
                 showRealInterval(simCandles, interval, {
-                    from: datePeriod ? fromS : null,
-                    to: datePeriod ? toS : null,
+                    from: snapRange ? snapRange.from : (datePeriod ? fromS : null),
+                    to: snapRange ? snapRange.to : (datePeriod ? toS : null),
                     startIdx: simStartIdx,
                     startFound: simStartFound
                 });
@@ -3191,6 +3302,7 @@
             settingsDirty = true;
             const el = document.getElementById('settingsDirty');
             if (el) el.style.display = 'inline';
+            updateLoadedFilesBar();
         }
         function clearSettingsDirty() {
             settingsDirty = false;
@@ -3199,6 +3311,11 @@
         }
         // Еднократен snapshot при зареждане на файл — за да е идентичен резултатът.
         let pendingSimSnapshot = null;
+        // Постоянно заредени от файл настройки/данни (показват се с ✕; данните се
+        // ползват наготово, докато съвпадат символът/интервалът/периодът).
+        let loadedSettingsFile = null;
+        let loadedDataFile = null;
+        let loadedFileData = null;
 
         function toggleSweepPick() {
             pickingParam = !pickingParam;
@@ -3909,10 +4026,185 @@
             }
         }
 
+        // Записва JSON обект като файл за изтегляне. `pretty === false` е за
+        // големите файлове с данни (без нови редове на всяко число).
+        function downloadJsonFile(obj, filename, pretty) {
+            const text = (pretty === false) ? JSON.stringify(obj) : JSON.stringify(obj, null, 2);
+            const blob = new Blob([text], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 2000);
+        }
+
+        // Точните свещи от последната симулация (вкл. пред-историята) — отделен
+        // файл, за да не се теглят отново при зареждане. Компактни масиви:
+        // [time, open, high, low, close, volume].
+        function buildSimDataPayload() {
+            try {
+                if (typeof lastSim === 'undefined' || !lastSim || !Array.isArray(lastSim.candles) || lastSim.candles.length < 30) return null;
+                const cs = lastSim.candles;
+                const si = Math.max(0, Math.min(cs.length - 1, lastSim.startIdx || 0));
+                const useDates = !!((document.getElementById('inpUseDates') || {}).checked
+                    && (document.getElementById('inpDateFrom') || {}).value
+                    && (document.getElementById('inpDateTo') || {}).value);
+                return {
+                    app: 'hermes',
+                    type: 'data',
+                    version: 1,
+                    format: 'arrays',
+                    savedAt: new Date().toISOString(),
+                    symbol: currentSymbol,
+                    interval: lastSim.interval,
+                    useDates,
+                    dateFrom: useDates ? document.getElementById('inpDateFrom').value : null,
+                    dateTo: useDates ? document.getElementById('inpDateTo').value : null,
+                    from: cs[0].time,
+                    to: cs[cs.length - 1].time,
+                    startTime: cs[si].time,
+                    startIdx: si,
+                    fx: (typeof fxRates === 'object') ? fxRates : null,
+                    candles: cs.map(c => [c.time, c.open, c.high, c.low, c.close, c.volume])
+                };
+            } catch (e) { return null; }
+        }
+
+        // Връща данните към формата, който runSimulation очаква (обекти със свещи).
+        function expandDataPayload(payload) {
+            if (!payload || !Array.isArray(payload.candles)) return payload;
+            const cs = payload.candles;
+            if (cs.length && Array.isArray(cs[0])) {
+                payload.candles = cs.map(a => ({
+                    time: a[0], open: a[1], high: a[2], low: a[3], close: a[4], volume: a[5]
+                }));
+            }
+            return payload;
+        }
+
+        // Дали заредените от файл данни отговарят на ТЕКУЩИТЕ символ, интервал и
+        // период (датите). Ако да — симулацията ги ползва без теглене от сървъра.
+        function loadedDataMatches(payload, symbol, interval, P, useDates, dateFrom, dateTo, fromS, toS) {
+            if (!payload || !Array.isArray(payload.candles) || payload.candles.length < 30) return false;
+            if (String(payload.symbol || '').toUpperCase() !== String(symbol || '').toUpperCase()) return false;
+            if (payload.interval && payload.interval !== interval) return false;
+            const iv = intervalSecs(interval);
+            if (useDates) {
+                if (payload.useDates && payload.dateFrom && payload.dateTo) {
+                    if (payload.dateFrom !== dateFrom || payload.dateTo !== dateTo) return false;
+                } else {
+                    // Стар файл без записани дати — сравняваме реалните времена.
+                    if (!(payload.startTime > 0 && Math.abs(payload.startTime - fromS) <= Math.max(iv * 2, 86400))) return false;
+                    if (!(payload.to > 0 && payload.to >= toS - Math.max(iv * 3, 3 * 86400))) return false;
+                }
+                // Нужна е достатъчна пред-история за новия „Поглед назад“.
+                const pre = Math.max(300, P.lookback || 3000) * iv;
+                if (payload.from > fromS - pre + iv) return false;
+            } else if (payload.useDates) {
+                // Файлът е правен за конкретен период, а сега датите са изключени.
+                return false;
+            }
+            return true;
+        }
+
+        function isLoadedDataUsable() {
+            if (!loadedFileData) return false;
+            const interval = (document.getElementById('inpInterval') || {}).value || '5m';
+            const useDatesNow = !!((document.getElementById('inpUseDates') || {}).checked
+                && (document.getElementById('inpDateFrom') || {}).value
+                && (document.getElementById('inpDateTo') || {}).value);
+            const fromVal = (document.getElementById('inpDateFrom') || {}).value || '';
+            const toVal = (document.getElementById('inpDateTo') || {}).value || '';
+            let fromS = 0, toS = 0;
+            if (useDatesNow) {
+                fromS = timeToLocal(new Date(fromVal + 'T00:00:00').getTime() / 1000);
+                toS = timeToLocal(new Date(toVal + 'T23:59:59').getTime() / 1000);
+            }
+            return loadedDataMatches(loadedFileData, currentSymbol, interval, readParams(), useDatesNow, fromVal, toVal, fromS, toS);
+        }
+
+        // Избира кой snapshot да ползва стартът: еднократния (нов файл/диапазон)
+        // или постоянните данни от зареден файл, ако съвпадат с текущия период.
+        function resolveSnapForRun(pending, P, interval, datePeriod, fromVal, toVal, fromS, toS) {
+            let snap = pending;
+            let fromCache = false;
+            const pendingHasCandles = !!(snap && Array.isArray(snap.candles) && snap.candles.length >= 30);
+            if (!pendingHasCandles && loadedFileData && loadedDataMatches(
+                loadedFileData, currentSymbol, interval, P, !!datePeriod, fromVal, toVal, fromS, toS
+            )) {
+                snap = Object.assign({ force: true }, loadedFileData);
+                fromCache = true;
+            }
+            return { snap, fromCache };
+        }
+
+        function updateLoadedFilesBar() {
+            const bar = document.getElementById('loadedFilesBar');
+            if (!bar) return;
+            bar.innerHTML = '';
+            const hasSettings = !!(loadedSettingsFile && loadedSettingsFile.name);
+            const hasData = !!(loadedDataFile && loadedFileData && Array.isArray(loadedFileData.candles));
+            if (!hasSettings && !hasData) {
+                bar.style.display = 'none';
+                return;
+            }
+            bar.style.display = 'flex';
+
+            if (hasSettings) {
+                const chip = document.createElement('span');
+                chip.className = 'loaded-file-chip';
+                chip.title = 'Зареден файл с настройки. Настройките остават приложени и след ✕.';
+                const icon = document.createElement('span'); icon.textContent = '⚙️';
+                const name = document.createElement('span'); name.className = 'lf-name'; name.textContent = loadedSettingsFile.name;
+                const x = document.createElement('button'); x.type = 'button'; x.className = 'lf-x'; x.textContent = '✕';
+                x.title = 'Махни файла от списъка (настройките не се променят)';
+                x.addEventListener('click', clearLoadedSettingsFile);
+                chip.appendChild(icon); chip.appendChild(name); chip.appendChild(x);
+                bar.appendChild(chip);
+            }
+
+            if (hasData) {
+                const usable = isLoadedDataUsable();
+                const chip = document.createElement('span');
+                chip.className = 'loaded-file-chip' + (usable ? '' : ' inactive');
+                chip.title = usable
+                    ? 'Данните са за текущия символ/интервал/период и се ползват без теглене от сървъра.'
+                    : 'Данните са за друг символ/интервал/период — при старт ще се теглят наново.';
+                const icon = document.createElement('span'); icon.textContent = '📦';
+                const name = document.createElement('span'); name.className = 'lf-name'; name.textContent = loadedDataFile.name;
+                const meta = document.createElement('span'); meta.className = 'lf-meta';
+                meta.textContent = (loadedFileData.symbol || '?') + ' · ' + (loadedFileData.interval || '?') +
+                    ' · ' + loadedFileData.candles.length + ' свещи' + (usable ? '' : ' · неактивни');
+                const x = document.createElement('button'); x.type = 'button'; x.className = 'lf-x'; x.textContent = '✕';
+                x.title = 'Махни данните — следващото стартиране ще тегли от сървъра';
+                x.addEventListener('click', clearLoadedDataFile);
+                chip.appendChild(icon); chip.appendChild(name); chip.appendChild(meta); chip.appendChild(x);
+                bar.appendChild(chip);
+            }
+        }
+
+        function clearLoadedSettingsFile() {
+            loadedSettingsFile = null;
+            updateLoadedFilesBar();
+            setProgress(0, 'Файлът с настройки е махнат от списъка (настройките остават приложени).');
+        }
+
+        function clearLoadedDataFile() {
+            loadedFileData = null;
+            loadedDataFile = null;
+            // Ако още не е стартирано, махаме и чакащия snapshot.
+            if (pendingSimSnapshot && Array.isArray(pendingSimSnapshot.candles)) pendingSimSnapshot = null;
+            updateLoadedFilesBar();
+            setProgress(0, 'Данните от файла са махнати — следващото стартиране ще тегли от сървъра.');
+        }
+
         function saveSettings() {
-            // Пазим само ТОЧНИЯ исторически диапазон (от/до + старт) и FX — без самите
-            // свещи. При зареждане данните се теглят отново за същия диапазон, така че
-            // резултатът е идентичен, а файлът остава малък.
+            // Пазим само ТОЧНИЯ исторически диапазон (от/до + старт) и FX. Ако е
+            // отметнато „данни“, свещите отиват в ОТДЕЛЕН файл (по избор), за да
+            // може при нов старт да се заредят на момента, без теглене от сървъра.
             // Ако има зададени дати — те са водещи при зареждане, затова НЕ пазим
             // диапазон (иначе би подменил периода от файла). Диапазон пазим само
             // за режима без дати, за да е възпроизводим.
@@ -3934,6 +4226,12 @@
                     };
                 }
             } catch (e) { dataRange = null; }
+            const includeData = !!((document.getElementById('inpSaveData') || {}).checked);
+            const simData = includeData ? buildSimDataPayload() : null;
+            const sym = String(currentSymbol || 'hermes').replace(/[^A-Za-z0-9._-]+/g, '');
+            const dataFilename = simData
+                ? ('hermes-data-' + sym + '-' + String(simData.interval || 'tf').replace(/[^A-Za-z0-9._-]+/g, '') + '.json')
+                : null;
             const data = {
                 app: 'hermes',
                 type: 'settings',
@@ -3942,40 +4240,66 @@
                 symbol: currentSymbol,
                 fields: collectSettingsFields(),
                 dataRange: dataRange,
+                dataFile: simData ? {
+                    filename: dataFilename,
+                    symbol: simData.symbol,
+                    interval: simData.interval,
+                    from: simData.from,
+                    to: simData.to,
+                    startTime: simData.startTime,
+                    startIdx: simData.startIdx,
+                    candles: simData.candles.length
+                } : null,
                 fx: (typeof fxRates === 'object') ? fxRates : null
             };
-            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            const sym = String(currentSymbol || 'hermes').replace(/[^A-Za-z0-9._-]+/g, '');
-            a.href = url;
-            a.download = 'hermes-settings-' + sym + '.json';
-            document.body.appendChild(a);
-            a.click();
-            a.remove();
-            setTimeout(() => URL.revokeObjectURL(url), 1000);
+            downloadJsonFile(data, 'hermes-settings-' + sym + '.json');
+            if (simData) {
+                // Втори отделен файл — в същия клик, за да е в рамките на
+                // потребителското действие (браузърите ограничават авто-сваляния).
+                downloadJsonFile(simData, dataFilename, false);
+            } else if (includeData) {
+                setProgress(0, 'Няма данни от завършена симулация — запазих само настройките.');
+            }
         }
 
         function loadSettings(ev) {
             const input = ev && ev.target;
-            const file = input && input.files && input.files[0];
-            if (!file) return;
-            const reader = new FileReader();
-            reader.onload = () => {
+            const files = input && input.files ? Array.from(input.files) : [];
+            if (!files.length) return;
+            Promise.all(files.map(f => new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve({ name: f.name, text: reader.result });
+                reader.onerror = () => reject(reader.error);
+                reader.readAsText(f);
+            }))).then((entries) => {
                 if (input) input.value = '';
-                let data;
-                try { data = JSON.parse(reader.result); } catch (e) { alert('Файлът не е валиден JSON.'); return; }
-                if (!data || !data.fields || typeof data.fields !== 'object') {
-                    alert('Това не е файл с настройки на HERMES (липсва „fields“).');
+                const parsed = [];
+                for (const e of entries) {
+                    try { parsed.push({ name: e.name, data: JSON.parse(e.text) }); }
+                    catch (err) { alert('Файлът „' + e.name + '“ не е валиден JSON.'); return; }
+                }
+                const isSettings = p => p && p.fields && typeof p.fields === 'object';
+                const isData = p => p && Array.isArray(p.candles) && p.candles.length >= 30;
+                const settingsEntry = parsed.find(p => isSettings(p.data));
+                const dataEntry = parsed.find(p => isData(p.data) && !isSettings(p.data));
+                if (!settingsEntry) {
+                    alert(dataEntry
+                        ? 'Избери и файла с настройки — двата файла могат да се изберат заедно (Ctrl/Shift).'
+                        : 'Това не е файл с настройки на HERMES (липсва „fields“).');
                     return;
                 }
-                applyHermesSettings(data);
-            };
-            reader.onerror = () => { if (input) input.value = ''; alert('Грешка при четене на файла.'); };
-            reader.readAsText(file);
+                applyHermesSettings(settingsEntry.data, dataEntry ? dataEntry.data : null, {
+                    settingsName: settingsEntry.name,
+                    dataName: dataEntry ? dataEntry.name : null
+                });
+            }).catch(() => {
+                if (input) input.value = '';
+                alert('Грешка при четене на файла.');
+            });
         }
 
-        async function applyHermesSettings(data) {
+        async function applyHermesSettings(data, dataPayload, meta) {
+            const simData = expandDataPayload(dataPayload || null);
             const fields = data.fields;
             const dateLoaded = ('inpDateFrom' in fields) || ('inpDateTo' in fields);
             const symChanged = (typeof data.symbol === 'string' && data.symbol && data.symbol !== currentSymbol);
@@ -4003,22 +4327,49 @@
             updateMinLotSpreadHint();
             // FX от файла (малко числа) — за идентичен резултат и в EUR.
             const fxSnap = (data.fx && typeof data.fx === 'object') ? data.fx
-                : (data.dataRange && data.dataRange.fx);
+                : ((data.dataRange && data.dataRange.fx)
+                    || (simData && simData.fx && typeof simData.fx === 'object' ? simData.fx : null));
             if (fxSnap) { fxRates = Object.assign({ EUR: 1 }, fxSnap); fxFetchedAt = Date.now(); }
             // Стари файлове (v<4) пазят данните/диапазона, с които са правени → ползваме
             // ги ВИНАГИ (force), за да работят 1:1. Новите (v4) са с водещи дати.
             const isOld = !data.version || data.version < 4;
             pendingSimSnapshot = null;
-            if (data.snapshot && Array.isArray(data.snapshot.candles) && data.snapshot.candles.length) {
-                pendingSimSnapshot = Object.assign({ force: true }, data.snapshot);
-            } else if (data.dataRange && data.dataRange.from > 0 && data.dataRange.to > data.dataRange.from) {
-                const useDatesNow = !!((document.getElementById('inpUseDates') || {}).checked
-                    && (document.getElementById('inpDateFrom') || {}).value
-                    && (document.getElementById('inpDateTo') || {}).value);
-                if (isOld || !useDatesNow) {
-                    pendingSimSnapshot = Object.assign({}, data.dataRange, { force: isOld });
+            let usedFileData = false;
+            // Отделен файл с точните свещи (по избор) — зарежда се без теглене от
+            // сървъра. Ползва се само ако символът и интервалът съвпадат с настройките.
+            if (simData && Array.isArray(simData.candles) && simData.candles.length >= 30) {
+                const formIv = (document.getElementById('inpInterval') || {}).value;
+                const symOk = !simData.symbol || simData.symbol === currentSymbol;
+                const ivOk = !simData.interval || !formIv || simData.interval === formIv;
+                if (symOk && ivOk) {
+                    pendingSimSnapshot = Object.assign({ force: true }, simData);
+                    usedFileData = true;
+                    // Пазим ги и след първия старт — докато съвпадат символ/интервал/
+                    // период, следващите промени по настройките стартират без теглене.
+                    loadedFileData = simData;
+                    loadedDataFile = { name: (meta && meta.dataName) || 'данни.json' };
+                } else {
+                    alert('Файлът с данни е за ' + (simData.symbol || '?') + ' / ' + (simData.interval || '?') +
+                        ', а настройките са за ' + currentSymbol + ' / ' + (formIv || '?') +
+                        '. Данните от файла няма да се ползват — ще се теглят наново.');
                 }
             }
+            if (!usedFileData) {
+                if (data.snapshot && Array.isArray(data.snapshot.candles) && data.snapshot.candles.length) {
+                    pendingSimSnapshot = Object.assign({ force: true }, data.snapshot);
+                } else if (data.dataRange && data.dataRange.from > 0 && data.dataRange.to > data.dataRange.from) {
+                    const useDatesNow = !!((document.getElementById('inpUseDates') || {}).checked
+                        && (document.getElementById('inpDateFrom') || {}).value
+                        && (document.getElementById('inpDateTo') || {}).value);
+                    if (isOld || !useDatesNow) {
+                        pendingSimSnapshot = Object.assign({}, data.dataRange, { force: isOld });
+                    }
+                }
+            } else {
+                setProgress(0, 'Заредени настройки и данни от файловете — без теглене от сървъра.');
+            }
+            if (meta && meta.settingsName) loadedSettingsFile = { name: meta.settingsName };
+            updateLoadedFilesBar();
             runSimulation();
         }
 

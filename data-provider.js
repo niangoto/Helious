@@ -414,15 +414,22 @@ const FAIL_TTL = 60000; // 1 минута (транзиентните грешк
 async function fetchData(symbol, interval, limit, opts) {
   const sFrom = (opts && opts.from) ? opts.from : null;
   const sTo = (opts && opts.to) ? opts.to : null;
+  const noFailCache = !!(opts && opts.noFailCache);
   // При поискан времеви диапазон не ползваме негативния кеш (той е за „няма данни“).
   const canonical = resolveSymbol(symbol);
   const cacheKey = canonical + '_' + interval;
   const failed = failCache[cacheKey];
-  if (!sFrom && !sTo && failed && Date.now() - failed.time < FAIL_TTL) {
+  if (!sFrom && !sTo && !noFailCache && failed && Date.now() - failed.time < FAIL_TTL) {
     throw { message: `Няма данни за ${canonical} (кеширана грешка)`, errors: failed.errors };
   }
   const sources = getSources(symbol);
   const errors = [];
+  // Успешно теглене изчиства старата негативна грешка (иначе 60s блокира
+  // повторен опит дори когато данните вече са налични).
+  const done = (data, source) => {
+    delete failCache[cacheKey];
+    return { symbol: canonical, interval, candles: data, source };
+  };
 
   for (const src of sources) {
     try {
@@ -430,25 +437,25 @@ async function fetchData(symbol, interval, limit, opts) {
 
       if (provider === 'yahoo') {
         const data = await fetchYahoo(sym, interval);
-        if (data.length > 10) return { symbol: canonical, interval, candles: data, source: 'yahoo:' + sym };
+        if (data.length > 10) return done(data, 'yahoo:' + sym);
       }
       if (provider === 'forex') {
         const data = await fetchForex(sym);
-        if (data.length > 10) return { symbol: canonical, interval, candles: data, source: 'forex:' + sym };
+        if (data.length > 10) return done(data, 'forex:' + sym);
       }
       if (provider === 'twelvedata') {
         if (!KEYS.twelvedata) throw new Error('TwelveData key not set; use TWELVEDATA_KEY env var');
         const data = await fetchTwelvedata(sym, interval, limit, sFrom, sTo);
-        if (data.length > 10) return { symbol: canonical, interval, candles: data, source: 'twelvedata:' + sym };
+        if (data.length > 10) return done(data, 'twelvedata:' + sym);
       }
       if (provider === 'binance') {
         const data = await fetchBinanceKlines(sym, interval, limit, false, sFrom, sTo);
-        if (data.length > 10) return { symbol: canonical, interval, candles: data, source: 'binance:' + sym };
+        if (data.length > 10) return done(data, 'binance:' + sym);
       }
       if (provider === 'mt5') {
         // MT5 bridge — spawn Python script
         const data = await fetchMT5(sym, interval);
-        if (data && data.length > 10) return { symbol: canonical, interval, candles: data, source: 'mt5:' + sym };
+        if (data && data.length > 10) return done(data, 'mt5:' + sym);
       }
     } catch (e) {
       errors.push(`${src}: ${e.message}`);
@@ -459,12 +466,13 @@ async function fetchData(symbol, interval, limit, opts) {
   if (!symbol.includes('USDT')) {
     try {
       const data = await fetchBinanceKlines(symbol, interval, limit, true, sFrom, sTo);
-      if (data.length > 10) return { symbol: canonical, interval, candles: data, source: 'binance:' + symbol };
+      if (data.length > 10) return done(data, 'binance:' + symbol);
     } catch (e) { errors.push(`binance:${symbol}: ${e.message}`); }
   }
 
-  // Cache failure so we don't spam APIs for dead symbols
-  failCache[cacheKey] = { time: Date.now(), errors };
+  // Cache failure so we don't spam APIs for dead symbols. Само за заявки без
+  // диапазон — иначе провал на конкретен диапазон трови следващия fallback.
+  if (!sFrom && !sTo) failCache[cacheKey] = { time: Date.now(), errors };
   throw { message: `Няма данни за ${canonical}`, errors };
 }
 
@@ -527,6 +535,8 @@ async function handleDataRequest(urlParams) {
   let limit = parseInt(urlParams.get('limit')) || 500;
   const from = parseInt(urlParams.get('from'), 10) || null;
   const to = parseInt(urlParams.get('to'), 10) || null;
+  // nocache=1 — принудително нов опит без негативния кеш (при транзиентна грешка).
+  const noFailCache = urlParams.get('nocache') === '1' || urlParams.get('retry') === '1';
 
   // Диапазон [from, to] (unix сек) — теглим само този прозорец (напр. 1м за
   // конкретен бар), вместо „от сега назад N свещи“.
@@ -536,7 +546,7 @@ async function handleDataRequest(urlParams) {
   log('INFO', `Fetching ${symbol} @ ${interval}${from && to ? ' [' + from + '..' + to + ']' : ''}`);
 
   try {
-    const result = await fetchData(symbol, interval, limit, { from, to });
+    const result = await fetchData(symbol, interval, limit, { from, to, noFailCache });
     const candles = (from && to)
       ? result.candles.filter(c => c.time >= from && c.time <= to)
       : result.candles.slice(-limit);
