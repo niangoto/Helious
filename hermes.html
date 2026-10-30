@@ -1209,9 +1209,9 @@
             <input type="number" id="inpLookback" value="3000" min="30" max="50000" step="100" title="Колко свещи назад да гледат моделите (статистика/прозорци). По подразбиране 3000.">
         </label>
         <label>Период (свещи)
-            <input type="number" id="inpDynPeriod" value="200" min="60" max="50000" step="10" title="На колко свещи се прави проверката на динамичния „Поглед назад“. Самата проверка обхваща заявения период (от началото на симулацията), но не по-дълбоко от 20× текущия „Поглед назад“.">
+            <input type="number" id="inpDynPeriod" value="200" min="60" max="50000" step="10" title="На колко свещи се прави проверката на динамичния „Поглед назад“. Чувствителността и оптимизацията по двойки гледат последните 10 дни назад, независимо от периода и интервала на свещите. Проверките започват, когато има 10 дни данни.">
         </label>
-        <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0.2px" title="При включване: на всеки „Период (свещи)“ се прави чувствителност върху заявения период (от началото на симулацията) до 20× текущия „Поглед назад“, и се избира най-добрият „Поглед назад“.">
+        <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0.2px" title="При включване: проверките започват, когато има 10 дни история назад. После на всеки „Период (свещи)“ се прави чувствителност на lookback и се оптимизират по двойки BUY/SELL прагове и TP/SL (по 20 стойности) върху последните 10 дни.">
             <input type="checkbox" id="inpLookbackGrow" style="width:auto"> променлив поглед
         </label>
         <div class="contra-box" id="contraBox" style="display:none">
@@ -1674,6 +1674,7 @@
         let equityPct = [];
         let simI0 = 30;   // първи търгуван бар (за прогреса)
         let lookbackChanges = [];   // { time, from, to } — смени на „Поглед назад“
+        let lastLookbackOpt = null; // последната валидна оптимизация (за мини-графиката)
 
         function sortedMarkers() {
             return tradeMarkers.slice().sort((a, b) => a.time - b.time);
@@ -1752,6 +1753,7 @@
             tradeMarkers = [];
             markersDirty = false;
             lookbackChanges = [];
+            lastLookbackOpt = null;
             closeLookbackChart();
             renderSimChart(simChartCandles, [], false);
             if (simChart && simChartCandles.length) {
@@ -1904,13 +1906,18 @@
         }
 
         function openLastLookbackChart() {
-            if (lookbackChanges.length) openLookbackChart(lookbackChanges.length - 1);
+            const ch = lastLookbackOpt || (lookbackChanges.length ? lookbackChanges[lookbackChanges.length - 1] : null);
+            if (ch) showLookbackChart(ch);
         }
 
         // Малка графика с точките (lookback → крайна печалба %) от конкретната
         // оптимизация, при клик върху етикета на чертата.
         function openLookbackChart(idx) {
             const ch = lookbackChanges[idx];
+            if (ch) showLookbackChart(ch);
+        }
+
+        function showLookbackChart(ch) {
             if (!ch) return;
             const panel = document.getElementById('lbChartPanel');
             const title = document.getElementById('lbChartTitle');
@@ -1920,6 +1927,35 @@
             }
             if (panel) panel.style.display = 'block';
             drawLookbackMini(ch);
+        }
+
+        // Прозорец за изглаждане на точките от чувствителността (нечетен).
+        function smoothWindowFor(n) {
+            return Math.min(41, Math.max(3, Math.round(n * 0.05) | 1));
+        }
+
+        // Центрирана средна линия по точките {x, y}. Пази и оригиналната точка
+        // в `raw`, за да може изборът да ползва реалния брой сделки/печалба.
+        function movingAveragePoints(points, window) {
+            const pts = (points || [])
+                .filter(p => p && isFinite(p.x) && isFinite(p.y))
+                .slice()
+                .sort((a, b) => a.x - b.x);
+            if (pts.length < 2) return pts.map(p => ({ x: p.x, y: p.y, raw: p }));
+            const win = Math.max(1, Math.min(pts.length, window || 3));
+            const half = Math.floor(win / 2);
+            const out = [];
+            for (let i = 0; i < pts.length; i++) {
+                let sum = 0, cnt = 0;
+                for (let k = i - half; k <= i + half; k++) {
+                    if (k < 0 || k >= pts.length) continue;
+                    const w = 1 / (1 + Math.abs(k - i));
+                    sum += pts[k].y * w;
+                    cnt += w;
+                }
+                out.push({ x: pts[i].x, y: cnt ? sum / cnt : pts[i].y, raw: pts[i] });
+            }
+            return out;
         }
 
         function drawLookbackMini(ch) {
@@ -1972,6 +2008,18 @@
                 }
             }
 
+            // средна линия между точките (изглаждане по съседни стойности)
+            const smoothPts = movingAveragePoints(pts, smoothWindowFor(pts.length));
+            ctx.strokeStyle = 'rgba(0,240,255,0.9)';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            smoothPts.forEach((p, i) => {
+                const x = X(p.x), y = Y(p.y);
+                if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+            });
+            ctx.stroke();
+            ctx.lineWidth = 1;
+
             // всички точки
             for (const p of pts) {
                 ctx.fillStyle = p.y >= 0 ? 'rgba(0,255,102,0.9)' : 'rgba(255,0,85,0.9)';
@@ -1981,15 +2029,19 @@
             // избраната стойност
             let sel = pts[0];
             for (const p of pts) if (Math.abs(p.x - ch.to) < Math.abs(sel.x - ch.to)) sel = p;
+            let smSel = smoothPts[0];
+            for (const p of smoothPts) if (Math.abs(p.x - ch.to) < Math.abs(smSel.x - ch.to)) smSel = p;
             const sx = X(sel.x), sy = Y(sel.y);
             ctx.fillStyle = '#fff';
             ctx.beginPath(); ctx.arc(sx, sy, 3, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = 'rgba(0,240,255,0.95)';
+            ctx.beginPath(); ctx.arc(X(smSel.x), Y(smSel.y), 2.8, 0, Math.PI * 2); ctx.fill();
             ctx.strokeStyle = 'rgba(255,210,122,0.85)';
             ctx.lineWidth = 1;
             ctx.beginPath(); ctx.moveTo(sx, padT); ctx.lineTo(sx, h - padB); ctx.stroke();
 
             ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-            ctx.fillText('Поглед назад → печалба %', padL + 4, padT + 4);
+            ctx.fillText('Поглед назад → печалба % · линия: средна', padL + 4, padT + 4);
 
             if (info) {
                 const periodTxt = (ch.evalFromTime != null && ch.evalToTime != null)
@@ -1997,7 +2049,8 @@
                     : '';
                 info.textContent = 'Точки: ' + pts.length + periodTxt +
                     ' · база ' + (isFinite(ch.base) ? ch.base : '—') + ' → избрана ' + sel.x +
-                    ' (' + (sel.y >= 0 ? '+' : '') + sel.y.toFixed(2) + '%)';
+                    ' (точка ' + (sel.y >= 0 ? '+' : '') + sel.y.toFixed(2) + '%' +
+                    ' · средна ' + (smSel.y >= 0 ? '+' : '') + smSel.y.toFixed(2) + '%)';
             }
         }
 
@@ -2452,9 +2505,8 @@
 
         // ── Динамичен „Поглед назад“ ─────────────────────────────────
         // „Период (свещи)“ (P.dynPeriod, напр. 200) задава на колко свещи се
-        // прави проверката. Самата проверка обхваща ЗАЯВЕНИЯ период (от началото
-        // на симулацията до текущия бар), но не по-дълбоко от 20× текущия
-        // „Поглед назад“ — без бъдеще.
+        // прави проверката. Самата проверка гледа фиксирано 10 дни назад
+        // (независимо от периода и интервала на свещите), без бъдеще.
         const AUTO_LB_PERIODS = 1;
         const AUTO_LB_POINTS = 500;
         const AUTO_LB_MIN = 30;
@@ -2533,12 +2585,24 @@
             } finally {
                 autoLbOptActive = false;
             }
-            // Гарантираме, че стойността реално се сменя — ако най-добрият съвпада
-            // с текущия, взимаме най-добрия различен.
+            // Избираме по изгладената средна линия, а не по единичния най-висок
+            // връх — така един шумен бар не определя lookback-а.
             let choice = null;
-            if (best && best.W !== base) choice = best;
-            else if (bestOther) choice = bestOther;
-            else choice = best;
+            if (points.length >= 2) {
+                const smoothPts = movingAveragePoints(points, smoothWindowFor(points.length));
+                let smoothBest = null;
+                for (const p of smoothPts) {
+                    const raw = p.raw;
+                    if (!smoothBest
+                        || p.y > smoothBest.smoothProfit + 1e-9
+                        || (Math.abs(p.y - smoothBest.smoothProfit) <= 1e-9 && raw.trades > smoothBest.trades)) {
+                        smoothBest = { W: raw.x, profit: raw.y, trades: raw.trades, smoothProfit: p.y };
+                    }
+                }
+                choice = smoothBest;
+            } else {
+                choice = best || bestOther || null;
+            }
             if (choice) {
                 choice.points = points;
                 choice.base = base;
@@ -2546,6 +2610,127 @@
                 choice.evalTo = toIdx;
             }
             return choice;
+        }
+
+        // ── Оптимизация по двойки фактори (при „променлив поглед“) ────
+        // BUY/SELL прагове: 20×20; TP/SL: 20×20. Оценява се върху последните
+        // 10 дни (независимо от периода и интервала), за да остане поносимо.
+        const AUTO_FACTOR_POINTS = 20;
+
+        function factorGrid(n, lo, hi, log) {
+            const out = [];
+            for (let k = 0; k < n; k++) {
+                const t = n > 1 ? k / (n - 1) : 0;
+                out.push(log ? lo * Math.pow(hi / lo, t) : lo + (hi - lo) * t);
+            }
+            return out;
+        }
+
+        function factorUniq(vals, decimals) {
+            const out = [], seen = new Set();
+            for (const v of vals) {
+                const x = Number(v.toFixed(decimals));
+                if (!seen.has(x)) { seen.add(x); out.push(x); }
+            }
+            return out;
+        }
+
+        function setInputValue(id, v) {
+            const el = document.getElementById(id);
+            if (el) el.value = v;
+        }
+
+        async function optimizeFactorPairs(candles, interval, fromIdx, toIdx, P, onProgress) {
+            const winLen = toIdx - fromIdx + 1;
+            if (winLen < 30) return null;
+            const lb = Math.max(30, P.lookback || 3000);
+            const dataStart = Math.max(0, fromIdx - lb - 60);
+            const data = candles.slice(dataStart, toIdx + 1);
+            const start = fromIdx - dataStart;
+            if (start < AUTO_LB_MIN || data.length - start < 5) return null;
+            const atr = computeATR(data, 14);
+            let probs = null;
+            try {
+                probs = computeModelProbSeries(data, currentModel, {
+                    invert: contraFlags(), intervalSec: intervalSecs(interval),
+                    lookback: lb, lookbackGrow: false
+                });
+            } catch (e) { return null; }
+            if (!probs || !probs.length) return null;
+
+            const buyVals = factorUniq(factorGrid(AUTO_FACTOR_POINTS, 1, 99, false), 0);
+            const sellVals = buyVals.slice();
+            // TP/SL са ATR-множители — логаритмична мрежа 0.1..5.
+            const tpVals = factorUniq(factorGrid(AUTO_FACTOR_POINTS, 0.1, 5, true), 2);
+            const slVals = tpVals.slice();
+            const total = buyVals.length * sellVals.length + tpVals.length * slVals.length + 2;
+            let done = 0;
+            let best = null;
+            let phase = 'BUY/SELL';
+            const better = (a, b) => !b
+                || a.profit > b.profit + 1e-9
+                || (Math.abs(a.profit - b.profit) <= 1e-9 && a.trades > b.trades);
+
+            const evalOne = async (buyTh, sellTh, tpMult, slMult) => {
+                if (cancelFlag || sweepCancel) return 'cancel';
+                const P2 = Object.assign({}, P, {
+                    buyTh, sellTh, tpMult, slMult, lookbackGrow: false
+                });
+                let r = null;
+                try { r = await simulate(data, atr, probs, P2, interval, start, true); } catch (e) { r = null; }
+                done++;
+                if (r && r.cancelled) return 'cancel';
+                if (r) {
+                    const profit = P.budget > 0 ? ((r.equity - P.budget) / P.budget) * 100 : 0;
+                    const item = { buyTh, sellTh, tpMult, slMult, profit, trades: r.tradeCount };
+                    if (better(item, best)) best = item;
+                }
+                if (done % 5 === 0 || done === total) {
+                    if (typeof onProgress === 'function') onProgress(done, total, best, phase);
+                    await sleep(0);
+                }
+                return null;
+            };
+
+            autoLbOptActive = true;
+            try {
+                // Базовата (текущата) комбинация — за да не влошим, ако мрежата е по-зле.
+                if (await evalOne(P.buyTh, P.sellTh, P.tpMult, P.slMult) === 'cancel') return null;
+
+                phase = 'BUY/SELL прагове';
+                for (const b of buyVals) {
+                    for (const s of sellVals) {
+                        if (await evalOne(b, s, P.tpMult, P.slMult) === 'cancel') return null;
+                    }
+                }
+                const bestBS = best;
+                if (bestBS) {
+                    P.buyTh = bestBS.buyTh;
+                    P.sellTh = bestBS.sellTh;
+                    setInputValue('inpBuyTh', P.buyTh);
+                    setInputValue('inpSellTh', P.sellTh);
+                }
+
+                phase = 'TP/SL';
+                best = null;
+                if (await evalOne(P.buyTh, P.sellTh, P.tpMult, P.slMult) === 'cancel') return null;
+                for (const tp of tpVals) {
+                    for (const sl of slVals) {
+                        if (await evalOne(P.buyTh, P.sellTh, tp, sl) === 'cancel') return null;
+                    }
+                }
+                const bestTpSl = best;
+                if (bestTpSl) {
+                    P.tpMult = bestTpSl.tpMult;
+                    P.slMult = bestTpSl.slMult;
+                    setInputValue('inpTp', P.tpMult);
+                    setInputValue('inpSl', P.slMult);
+                }
+                updateMinLotSpreadHint();
+                return { buySell: bestBS, tpSl: bestTpSl };
+            } finally {
+                autoLbOptActive = false;
+            }
         }
 
         async function simulate(candles, atrSeries, probs, P, interval, startIdx, silent) {
@@ -2575,7 +2760,7 @@
             const autoLbEnabled = !silent && !!P.lookbackGrow && !sweepMode;
             if (!silent) {
                 if (autoLbEnabled) {
-                    setAutoLbBadge('Поглед назад: ' + P.lookback + ' · динамичен (проверка на всеки ' + dynSpan + ' свещи, до 20× текущия поглед)', '');
+                    setAutoLbBadge('Поглед назад: ' + P.lookback + ' · динамичен (проверка на всеки ' + dynSpan + ' свещи, 10 дни назад)', '');
                 } else {
                     setAutoLbBadge('');
                 }
@@ -2597,13 +2782,23 @@
                 }
 
                 // Динамичен „Поглед назад“: на всеки dynSpan свещи правим
-                // чувствителност върху ЗАЯВЕНИЯ период до текущия бар, но не
-                // по-дълбоко от 20× текущия lookback.
+                // чувствителност върху последните 10 ДНИ (независимо от периода
+                // и интервала на свещите).
                 if (autoLbEnabled && (i - i0) >= dynStep && (i - i0) % dynStep === 0) {
-                    // Заявеният период до текущия бар, но не по-дълбоко от 20×
-                    // ТЕКУЩИЯ lookback (той може да се е сменил между проверките).
-                    const maxEvalBars = Math.max(dynSpan, Math.max(30, P.lookback || 3000) * 20);
-                    const evalFrom = Math.max(i0, i - maxEvalBars);
+                    const cutoff = candles[i].time - 10 * 86400;
+                    if (candles[0].time > cutoff) {
+                        // Още няма 10 дни история назад — изчакваме.
+                        const haveDays = (candles[i].time - candles[0].time) / 86400;
+                        setAutoLbBadge('Поглед назад: чака 10 дни данни (' + haveDays.toFixed(1) + '/10 дни)', '');
+                    } else {
+                    let evalFrom = 0;
+                    for (let k = 0; k <= i; k++) {
+                        if (candles[k].time >= cutoff) { evalFrom = k; break; }
+                    }
+                    if (i - evalFrom < 30) {
+                        const haveDays = (candles[i].time - candles[evalFrom].time) / 86400;
+                        setAutoLbBadge('Поглед назад: чака 10 дни данни (' + haveDays.toFixed(1) + '/10 дни)', '');
+                    } else {
                     setAutoLbBadge('⟳ Чувствителност за поглед назад… 0/' + AUTO_LB_POINTS, 'busy');
                     await sleep(0);
                     const best = await optimizeLookbackForPeriod(
@@ -2619,6 +2814,16 @@
                     if (best && best.W) {
                         const oldLb = P.lookback;
                         const changed = best.W !== oldLb;
+                        const opt = {
+                            time: candles[i].time,
+                            from: oldLb,
+                            to: best.W,
+                            base: (best.base != null ? best.base : oldLb),
+                            evalFromTime: candles[evalFrom] ? candles[evalFrom].time : null,
+                            evalToTime: candles[i - 1] ? candles[i - 1].time : null,
+                            points: best.points || []
+                        };
+                        lastLookbackOpt = opt;
                         if (changed) {
                             P.lookback = best.W;
                             const lbEl = document.getElementById('inpLookback');
@@ -2630,23 +2835,43 @@
                                 });
                             } catch (e) { /* оставаме със старите вероятности */ }
                             // Черта върху графиката в бара на смяната.
-                            lookbackChanges.push({
-                                time: candles[i].time,
-                                from: oldLb,
-                                to: best.W,
-                                base: (best.base != null ? best.base : oldLb),
-                                evalFromTime: candles[evalFrom] ? candles[evalFrom].time : null,
-                                evalToTime: candles[i - 1] ? candles[i - 1].time : null,
-                                points: best.points || []
-                            });
+                            lookbackChanges.push(opt);
                             drawLookbackLines();
                         }
-                        setAutoLbBadge('Поглед назад' + (changed ? ' → ' : ': ') + best.W + ' · избран за периода (' + best.profit.toFixed(2) + '%)', 'ok');
+                        const bestPct = (best.smoothProfit != null) ? best.smoothProfit : best.profit;
+                        setAutoLbBadge('Поглед назад' + (changed ? ' → ' : ': ') + best.W + ' · средна ' + bestPct.toFixed(2) + '%', 'ok');
                     } else {
                         setAutoLbBadge('Поглед назад: ' + P.lookback + ' · няма валиден резултат за избор (кратък период/прекъсване)', 'ok');
                     }
+                    // Допълнителна оптимизация по двойки: BUY/SELL прагове и TP/SL.
+                    // Оценява се върху последните 10 дни (същия прозорец).
+                    setAutoLbBadge('⟳ Оптимизация на BUY/SELL и TP/SL…', 'busy');
+                    const factorRes = await optimizeFactorPairs(
+                        candles, interval, evalFrom, i - 1, P,
+                        (done, total, b, phase) => {
+                            setAutoLbBadge(
+                                '⟳ ' + phase + ': ' + done + '/' + total +
+                                (b ? ' · BUY/SELL ' + fmtParam(b.buyTh) + '/' + fmtParam(b.sellTh) +
+                                     ' · TP/SL ' + fmtParam(b.tpMult) + '/' + fmtParam(b.slMult) : ''),
+                                'busy'
+                            );
+                        }
+                    );
+                    if (cancelFlag || sweepCancel) return;
+                    if (factorRes) {
+                        setAutoLbBadge(
+                            'Оптимизирано: W ' + P.lookback +
+                            ' · BUY/SELL ' + fmtParam(P.buyTh) + '/' + fmtParam(P.sellTh) +
+                            ' · TP/SL ' + fmtParam(P.tpMult) + '/' + fmtParam(P.slMult),
+                            'ok'
+                        );
+                    } else {
+                        setAutoLbBadge('Поглед назад: ' + P.lookback + ' · твърде кратък период за оптимизация на факторите', 'ok');
+                    }
                     if (typeof lastSim !== 'undefined' && lastSim) lastSim.params = P;
                     await sleep(0);
+                    }
+                    }
                 }
 
                 const prScaled = curProbs[i];
@@ -2932,7 +3157,7 @@
                         setProgress(Math.round(((i - i0) / Math.max(1, n - i0)) * 100), `Обработка на свещ ${i}/${n} — ${tradeCount} сделки`);
                         await sleep(0);
                     }
-                } else if (i % 500 === 0 || sweepPaused) {
+                } else if (!autoLbOptActive && (i % 500 === 0 || sweepPaused)) {
                     await sleep(0);   // не блокираме UI при sweep
                     while (sweepPaused && !sweepCancel) await sleep(50);   // пауза
                 }
@@ -3723,7 +3948,8 @@
             if (!(xmax > xmin)) xmax = xmin + 1;
             ymin = Math.min(ymin, 0); ymax = Math.max(ymax, 0);
             if (!(ymax > ymin)) ymax = ymin + 1;
-            sweepState = { points, baseVal, label, w, h, padL, padR, padT, padB, xmin, xmax, ymin, ymax };
+            sweepState = { points, baseVal, label, w, h, padL, padR, padT, padB, xmin, xmax, ymin, ymax,
+                smooth: movingAveragePoints(points, smoothWindowFor(points.length)) };
             renderSweep(null);
         }
 
@@ -3731,7 +3957,7 @@
             const cvs = document.getElementById('sweepCanvas');
             const s = sweepState;
             if (!cvs || !s) return;
-            const { points, baseVal, label, w, h, padL, padR, padT, padB, xmin, xmax, ymin, ymax } = s;
+            const { points, baseVal, label, w, h, padL, padR, padT, padB, xmin, xmax, ymin, ymax, smooth } = s;
             const ctx = cvs.getContext('2d');
             ctx.clearRect(0, 0, w, h);
             const X = v => padL + (v - xmin) / (xmax - xmin) * (w - padL - padR);
@@ -3755,12 +3981,24 @@
                 ctx.strokeStyle = 'rgba(0,240,255,0.35)';
                 ctx.beginPath(); ctx.moveTo(xb, padT); ctx.lineTo(xb, h - padB); ctx.stroke();
             }
+            // средна линия между точките
+            if (smooth && smooth.length > 1) {
+                ctx.strokeStyle = 'rgba(0,240,255,0.9)';
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                smooth.forEach((p, i) => {
+                    const x = X(p.x), y = Y(p.y);
+                    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                });
+                ctx.stroke();
+                ctx.lineWidth = 1;
+            }
             for (const p of points) {
                 ctx.fillStyle = p.y >= 0 ? 'rgba(0,255,102,0.9)' : 'rgba(255,0,85,0.9)';
                 ctx.beginPath(); ctx.arc(X(p.x), Y(p.y), 1.6, 0, Math.PI * 2); ctx.fill();
             }
             ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.textAlign = 'left'; ctx.textBaseline = 'top';
-            ctx.fillText(label + ' → печалба %', padL + 4, padT + 4);
+            ctx.fillText(label + ' → печалба % · линия: средна', padL + 4, padT + 4);
 
             if (hover) {
                 const { mx, my, best } = hover;
