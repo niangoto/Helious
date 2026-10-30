@@ -668,6 +668,56 @@
 
         .iv-page-dot.active { background: var(--accent-cyan); }
 
+        /* Page 10: Производна на кривата (без вероятност). */
+        .derivative-controls {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+            font-size: 11px;
+            color: var(--text-dim);
+        }
+
+        .derivative-controls select {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--panel-border);
+            color: var(--text-main);
+            border-radius: 6px;
+            padding: 3px 6px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 11px;
+        }
+
+        .derivative-info {
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 10.5px;
+            color: var(--text-main);
+        }
+
+        .derivative-canvas-wrap {
+            position: relative;
+            width: 100%;
+            height: 620px;
+            min-height: 360px;
+            flex-shrink: 0;
+        }
+
+        #derivativeCanvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        .derivative-legend {
+            font-size: 10px;
+            color: var(--text-dim);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        @media (max-width: 768px) {
+            .derivative-canvas-wrap { height: 480px; }
+        }
+
         /* Desktop arrows for page navigation */
         .iv-nav-arrow {
             display: none;
@@ -1441,6 +1491,33 @@
                         </div>
                         <div class="iv-fft-bins" id="candleForecastRows"></div>
                     </div>
+
+                    <!-- Page 10: Производна на кривата (без вероятност) -->
+                    <div class="iv-page">
+                        <div class="iv-model-label" style="margin-bottom:8px">ПРОИЗВОДНА НА КРИВАТА</div>
+                        <div class="derivative-controls">
+                            <label>Изглаждане (SMA)
+                                <select id="derivativePeriod">
+                                    <option value="5">5</option>
+                                    <option value="10">10</option>
+                                    <option value="20" selected>20</option>
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                </select>
+                            </label>
+                            <label>Производна
+                                <select id="derivativeOrder">
+                                    <option value="1" selected>1-ва</option>
+                                    <option value="2">2-ра</option>
+                                </select>
+                            </label>
+                            <span class="derivative-info" id="derivativeInfo">---</span>
+                        </div>
+                        <div class="derivative-legend">Свещи · SMA(N) крива · производна (%/бар)</div>
+                        <div class="derivative-canvas-wrap">
+                            <canvas id="derivativeCanvas"></canvas>
+                        </div>
+                    </div>
                 </div>
                 <button class="iv-nav-arrow next" id="ivArrowNext" onclick="scrollIvPage(1)">›</button>
             </div>
@@ -1545,6 +1622,7 @@
     <script src="js/tabs/fourier.js"></script>
     <script src="js/tabs/rsi-phase.js"></script>
     <script src="js/tabs/candle-forecast.js"></script>
+    <script src="js/tabs/derivative.js"></script>
     <script src="js/indicators.js"></script>
     <script src="js/app.js"></script>
 </body>

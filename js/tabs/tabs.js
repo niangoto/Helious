@@ -17,9 +17,25 @@ let probLineHover = null;
 function updateIvPanel(candles) {
     if (!candles || candles.length < 25) return;
     if (typeof indicatorViewVisible === 'function' && !indicatorViewVisible()) return;
+    // Страница 10 (Производна) не показва вероятности — не смятаме модели.
+    if (typeof currentPage === 'number' && currentPage === 10) {
+        ivModelsCache = {};
+        ivPanelCandles = candles;
+        renderCurrentTabPanel();
+        return;
+    }
     ivModelsCache = computeAllModels(candles, { lookback: analysisLookback });
     ivPanelCandles = candles;
     renderCurrentTabPanel();
+}
+
+// Лениво изчисляване на моделите при превключване към страница, която ги иска
+// (след като сме били на страница 10, където не са смятани).
+function ensureIvModels() {
+    if (ivModelsCache && ivModelsCache.models) return true;
+    if (!ivPanelCandles) return false;
+    ivModelsCache = computeAllModels(ivPanelCandles, { lookback: analysisLookback });
+    return !!(ivModelsCache && ivModelsCache.models);
 }
 
 function renderCurrentTabPanel() {

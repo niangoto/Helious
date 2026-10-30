@@ -81,7 +81,7 @@ function init() {
     // Build page dots
     const dotContainer = document.getElementById('ivPageDots');
     if (dotContainer) {
-        for (let i = 0; i < 10; i++) {
+        for (let i = 0; i < 11; i++) {
             const dot = document.createElement('div');
             dot.className = 'iv-page-dot' + (i === 0 ? ' active' : '');
             dot.id = 'ivDot' + i;
@@ -355,7 +355,8 @@ function updatePageChrome(idx) {
     const predRow = document.getElementById('candlePredictionRow');
     const betaCtl = document.getElementById('betaControl');
     const isCandlePage = (idx === 9);
-    if (fftRow) fftRow.style.display = isCandlePage ? 'none' : '';
+    const isDerivativePage = (idx === 10);
+    if (fftRow) fftRow.style.display = (isCandlePage || isDerivativePage) ? 'none' : '';
     if (predRow) predRow.style.display = isCandlePage ? '' : 'none';
     if (betaCtl) betaCtl.style.display = isCandlePage ? 'flex' : 'none';
 }
@@ -363,12 +364,14 @@ function updatePageChrome(idx) {
 function onIvPageScroll() {
     const pages = document.getElementById('ivPages');
     if (!pages) return;
-    const count = 10;
+    const count = 11;
     const idx = Math.round(pages.scrollLeft / pages.clientWidth);
     updatePageChrome(idx);
     if (currentPage !== idx) {
         currentPage = idx;
-        // Рендираме панела на новоотворената страница (лениво).
+        // Рендираме панела на новоотворената страница (лениво). Ако сме били на
+        // „Производна“ (10), моделите може да не са смятани — смятаме ги сега.
+        if (idx !== 10 && typeof ensureIvModels === 'function') ensureIvModels();
         if (typeof renderCurrentTabPanel === 'function') renderCurrentTabPanel();
         // Опресняваме overlay-ите на графиката само ако тя е реално отворена.
         if (chartViewVisible() && latestCandles && latestCandles.length) {
@@ -384,7 +387,7 @@ function onIvPageScroll() {
     const next = document.getElementById('ivArrowNext');
     if (prev) prev.style.display = 'flex';
     if (next) {
-        const labels = ['›', '›', '›', '›', '›', '›', '›', '›', '›', 'A'];
+        const labels = ['›', '›', '›', '›', '›', '›', '›', '›', '›', '›', 'A'];
         next.textContent = labels[idx] || '›';
     }
 }
@@ -396,7 +399,7 @@ function scrollIvPage(dir) {
     const idx = Math.round(pages.scrollLeft / w);
     const target = idx + dir;
     if (dir < 0 && target < 0) return;
-    const maxPage = 9;
+    const maxPage = 10;
     if (dir > 0 && target > maxPage) {
         showNotification('Модел A — активен модел', 'success');
         return;

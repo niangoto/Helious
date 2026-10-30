@@ -1,4 +1,4 @@
-const CACHE = 'helious-v33';
+const CACHE = 'helious-v34';
 const URLS = [
     '/index.html',
     '/manifest.json',
@@ -22,7 +22,8 @@ const URLS = [
     '/js/tabs/wavelet.js',
     '/js/tabs/fourier.js',
     '/js/tabs/rsi-phase.js',
-    '/js/tabs/candle-forecast.js'
+    '/js/tabs/candle-forecast.js',
+    '/js/tabs/derivative.js'
 ];
 
 self.addEventListener('install', e => {
