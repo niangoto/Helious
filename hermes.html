@@ -1209,9 +1209,9 @@
             <input type="number" id="inpLookback" value="3000" min="30" max="50000" step="100" title="Колко свещи назад да гледат моделите (статистика/прозорци). По подразбиране 3000.">
         </label>
         <label>Период (свещи)
-            <input type="number" id="inpDynPeriod" value="200" min="60" max="50000" step="10" title="Дължина на един период за динамичния „Поглед назад“. Оптимизацията се прави всеки такъв период, а проверката обхваща 1 период (напр. 200 свещи) — без бъдеще.">
+            <input type="number" id="inpDynPeriod" value="200" min="60" max="50000" step="10" title="На колко свещи се прави проверката на динамичния „Поглед назад“. Самата проверка обхваща заявения период (от началото на симулацията), но не по-дълбоко от 20× текущия „Поглед назад“.">
         </label>
-        <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0.2px" title="При включване: на всеки период („Период (свещи)“, напр. 200) се прави чувствителност с 500 точки върху последния 1 период и се избира най-добрият „Поглед назад“.">
+        <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0.2px" title="При включване: на всеки „Период (свещи)“ се прави чувствителност върху заявения период (от началото на симулацията) до 20× текущия „Поглед назад“, и се избира най-добрият „Поглед назад“.">
             <input type="checkbox" id="inpLookbackGrow" style="width:auto"> променлив поглед
         </label>
         <div class="contra-box" id="contraBox" style="display:none">
@@ -2451,10 +2451,10 @@
         }
 
         // ── Динамичен „Поглед назад“ ─────────────────────────────────
-        // „Период (свещи)“ (P.dynPeriod, напр. 200) е един период. На всеки
-        // AUTO_LB_PERIODS такива периода се прави чувствителност с
-        // AUTO_LB_POINTS точки върху последния 1 период, без бъдеще, и се
-        // избира най-добрият lookback.
+        // „Период (свещи)“ (P.dynPeriod, напр. 200) задава на колко свещи се
+        // прави проверката. Самата проверка обхваща ЗАЯВЕНИЯ период (от началото
+        // на симулацията до текущия бар), но не по-дълбоко от 20× текущия
+        // „Поглед назад“ — без бъдеще.
         const AUTO_LB_PERIODS = 1;
         const AUTO_LB_POINTS = 500;
         const AUTO_LB_MIN = 30;
@@ -2575,7 +2575,7 @@
             const autoLbEnabled = !silent && !!P.lookbackGrow && !sweepMode;
             if (!silent) {
                 if (autoLbEnabled) {
-                    setAutoLbBadge('Поглед назад: ' + P.lookback + ' · динамичен (проверка на всеки период, прозорец ' + dynSpan + ' свещи)', '');
+                    setAutoLbBadge('Поглед назад: ' + P.lookback + ' · динамичен (проверка на всеки ' + dynSpan + ' свещи, до 20× текущия поглед)', '');
                 } else {
                     setAutoLbBadge('');
                 }
@@ -2596,11 +2596,14 @@
                     return silent ? { equity, tradeCount, winsCount, maxDD, cancelled: true } : undefined;
                 }
 
-                // Динамичен „Поглед назад“: на всеки период (dynSpan свещи)
-                // гледаме назад 1 период (dynSpan свещи), правим 500-точкова
-                // чувствителност в този прозорец и избираме най-добрия lookback.
+                // Динамичен „Поглед назад“: на всеки dynSpan свещи правим
+                // чувствителност върху ЗАЯВЕНИЯ период до текущия бар, но не
+                // по-дълбоко от 20× текущия lookback.
                 if (autoLbEnabled && (i - i0) >= dynStep && (i - i0) % dynStep === 0) {
-                    const evalFrom = Math.max(i0, i - dynSpan);
+                    // Заявеният период до текущия бар, но не по-дълбоко от 20×
+                    // ТЕКУЩИЯ lookback (той може да се е сменил между проверките).
+                    const maxEvalBars = Math.max(dynSpan, Math.max(30, P.lookback || 3000) * 20);
+                    const evalFrom = Math.max(i0, i - maxEvalBars);
                     setAutoLbBadge('⟳ Чувствителност за поглед назад… 0/' + AUTO_LB_POINTS, 'busy');
                     await sleep(0);
                     const best = await optimizeLookbackForPeriod(
@@ -2640,7 +2643,7 @@
                         }
                         setAutoLbBadge('Поглед назад' + (changed ? ' → ' : ': ') + best.W + ' · избран за периода (' + best.profit.toFixed(2) + '%)', 'ok');
                     } else {
-                        setAutoLbBadge('Поглед назад: ' + P.lookback + ' · няма достатъчно сделки за избор', 'ok');
+                        setAutoLbBadge('Поглед назад: ' + P.lookback + ' · няма валиден резултат за избор (кратък период/прекъсване)', 'ok');
                     }
                     if (typeof lastSim !== 'undefined' && lastSim) lastSim.params = P;
                     await sleep(0);
@@ -3049,6 +3052,11 @@
             }
             running = true;
             cancelFlag = false;
+            // Изчистваме и евентуални остатъци от предишен sweep — иначе вътрешните
+            // кандидати на динамичния „Поглед назад“ се отменят и изглежда, че
+            // „няма сделки за избор“.
+            sweepCancel = false;
+            sweepPaused = false;
             runPending = false;
             clearSettingsDirty();
             // Старите данни/вероятности не важат за нова серия (символ, интервал,
@@ -3257,6 +3265,12 @@
                     if (simChart && simStartIdx > 0) {
                         simChart.timeScale().setVisibleLogicalRange({ from: Math.max(0, simStartIdx - 40), to: simCandles.length - 1 });
                     }
+                    drawLookbackLines();
+                    drawPnlChart();
+                } else if (!runPending && simCandles && simCandles.length) {
+                    // Спряно по средата (без нов старт): показваме вече натрупаните
+                    // сделки, вместо празна графика.
+                    renderSimChart(simCandles, tradeMarkers);
                     drawLookbackLines();
                     drawPnlChart();
                 }
