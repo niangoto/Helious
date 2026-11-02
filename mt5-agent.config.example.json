@@ -1,0 +1,9 @@
+{
+  "server_url": "https://твоят-домейн-или-ip:порт",
+  "token": "hmt_...  (от HEROS → панел „MT5 връзка“ → Нов агент)",
+  "max_volume": 1.0,
+  "max_positions": 10,
+  "allowed_symbols": [],
+  "deviation": 20,
+  "server_utc_offset_hours": null
+}

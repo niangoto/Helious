@@ -1,14 +1,13 @@
 // Чиста стратегия (вход/изход/размер) — огледало на логиката в hermes.html.
-// Ползва се от paper двигателя. Без DOM/мрежа — само математика.
+// Ползва се от MT5 сесията. Без DOM/мрежа — само математика.
 
-const { specFor } = require('./symbolSpec');
 
 // Нормализира параметрите като readParams() в hermes.html.
 function normalizeParams(p) {
   p = p || {};
   const num = (v, d) => (isFinite(parseFloat(v)) ? parseFloat(v) : d);
   return {
-    budget: Math.max(1, num(p.budget, 1000)),
+    budget: Math.max(0, num(p.budget, 0)),   // 0 = риск върху целия капитал; >0 = таван на капитала за оразмеряване
     leverage: Math.max(1, num(p.leverage, 1)),
     alpha: Math.min(10, Math.max(0.1, num(p.alpha, 1.0))),
     buyTh: num(p.buyTh, 75),
@@ -19,9 +18,9 @@ function normalizeParams(p) {
     holdBars: Math.max(1, parseInt(p.holdBars, 10) || 200),
     kellyF: Math.min(1, Math.max(0.01, num(p.kellyF, 0.25))),
     maxKelly: Math.min(1, Math.max(0.01, num(p.maxKelly, 0.05))),
-    minLot: Math.max(0.00001, num(p.minLot, 0.01)),
-    minLotSpread: Math.max(0, num(p.minLotSpread, 0)),
-    spreadUnit: (p.spreadUnit === 'pct') ? 'pct' : 'eur', // 'eur' = € за мин. обем; 'pct' = % от сумата на мин. лот
+    maxSpreadFrac: Math.min(1, Math.max(0, num(p.maxSpreadFrac, 0.5))), // макс. спред като дял от по-близкото ниво (TP/SL); 0 = без проверка
+    skipNegSwap: !!p.skipNegSwap,                                       // не отваряй, ако суапът за посоката е отрицателен
+    maxPositions: Math.max(1, parseInt(p.maxPositions, 10) || 5),
     reverse: !!p.reverse
   };
 }
@@ -31,7 +30,7 @@ function normalizeParams(p) {
 // equity = общ капитал (за рисковото правило); freeMargin = свободен маржин
 // (equity − вече заетия маржин) — позицията никога не надхвърля него.
 // fx = колко EUR е 1 единица от котираната валута (напр. USD→EUR ≈ 0.92).
-function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn) {
+function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn, spec) {
   const fx = (fxIn > 0) ? fxIn : 1;
   if (freeMargin == null) freeMargin = equity;
   if (!prob || !(atr > 0) || !(entry > 0) || !(equity > 0)) return null;
@@ -65,37 +64,19 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn) {
   const f = Math.min(fStar * P.kellyF * alpha, P.maxKelly);
   if (!(f > 0)) return null;
 
-  // Размер по риска (Kelly), ограничен от свободния маржин и ливъриджа.
-  // € риск за 1 единица при движение loss в цена = loss × fx.
-  const spec = specFor(symbol);
-  const minLot = P.minLot || spec.min;
-  // Спредът може да е в € за ЕДИН минимален обем (валиден при референтната
-  // текуща цена и мащабиран с цената) или в % от сумата (нотионала) на мин. лот.
-  const minSpread = Math.max(0, P.minLotSpread || 0);
-  const spreadUnit = (P.spreadUnit === 'pct') ? 'pct' : 'eur';
-  // Разход за 1 единица = маржин + начален спред (€). Свободният маржин трябва
-  // да покрие и двете. Лимвъриджът се отчита чрез маржина (entry×fx/leverage), а
-  // не чрез нотионала — както при реален брокер.
-  let perUnitSpread;
-  if (spreadUnit === 'pct') {
-    // % от сумата, нужна за отваряне на минималната позиция (маржина).
-    perUnitSpread = (minSpread / 100) * (entry * fx) / P.leverage;
-  } else {
-    const refPrice = (P.refPrice > 0) ? P.refPrice : entry;
-    const priceK = refPrice > 0 ? entry / refPrice : 1;
-    perUnitSpread = (minSpread / (minLot * spec.contract)) * priceK;
-  }
-  const perUnitMargin = (entry * fx) / P.leverage;
-  const perUnitCost = perUnitMargin + perUnitSpread;
+  // Размер по риска (Kelly), ограничен от свободния маржин. Всички параметри
+  // идват от MT5: spec = { contract, min, step, max, spread (в цена), marginPerUnit }.
+  // fx = валута на сметката за 1 единица от котираната валута (tick_value/tick_size/contract).
+  if (!spec || !(spec.contract > 0)) return null;
+  const minLot = spec.min;
+  const perUnitMargin = spec.marginPerUnit > 0 ? spec.marginPerUnit : (entry * fx) / P.leverage;
   const riskAmount = f * equity;
   let units = riskAmount / (loss * fx);
-  const maxUnits = perUnitCost > 0 ? freeMargin / perUnitCost : 0;
+  const maxUnits = perUnitMargin > 0 ? freeMargin / perUnitMargin : 0;
   units = Math.min(units, maxUnits);
   if (!(units > 0)) return null;
 
-  // Преобразуване в реален обем (лотове) според спецификацията на инструмента.
-  // Минималният/стъпковият обем се задава (по подразбиране 0.01 лот).
-  let lots = Math.floor((units / spec.contract) / minLot + 1e-9) * minLot;
+  let lots = Math.floor((units / spec.contract) / spec.step + 1e-9) * spec.step;
   lots = Math.min(lots, spec.max);
   if (lots < minLot) lots = minLot;
   lots = Math.round(lots * 1e8) / 1e8;
@@ -103,23 +84,18 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn) {
 
   if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
 
-  // Спредът (€) се взима ДИРЕКТНО от сметката при отваряне (пропорционален на
-  // обема). Входът остава реалната пазарна цена.
-  const spreadCost = perUnitSpread * finalUnits;
+  // Реален спред (ask−bid) — разход при отваряне; ако е голям спрямо TP/SL, пропускаме.
+  const spread = Math.max(0, spec.spread || 0);
+  if (P.maxSpreadFrac > 0 && spread > P.maxSpreadFrac * Math.min(tpDist, slDist)) return null;
+  const spreadCost = spread * finalUnits * fx;
 
-  // Състоянието на сметката и маржинът се смятат по пазарната цена `entry`.
-  const notionalQuote = finalUnits * entry;      // в котираната валута
-  const notional = notionalQuote * fx;           // в EUR
-  const margin = notional / P.leverage;          // в EUR
-  // Нивата (TP/SL) се смятат по ПАЗАРНАТА цена при отваряне.
+  const notionalQuote = finalUnits * entry;
+  const notional = notionalQuote * fx;
+  const margin = perUnitMargin * finalUnits;
   const tp = dir === 'BUY' ? entry + tpDist : entry - tpDist;
   const sl = dir === 'BUY' ? entry - slDist : entry + slDist;
-  // Потенциална загуба до SL (спредът вече е отделен разход от сметката).
   const riskCost = slDist * finalUnits * fx;
-  // Отваряме само ако свободният маржин покрива маржина + спреда, и загубата до
-  // SL (както при реален брокер — не се изисква нотионалът да е под свободния).
-  if (!(lots >= minLot && margin > 0
-        && margin + spreadCost <= freeMargin + 1e-9 && riskCost <= freeMargin + 1e-9 && notional >= 1)) return null;
+  if (!(lots >= minLot && margin > 0 && margin <= freeMargin + 1e-9 && riskCost <= freeMargin + 1e-9)) return null;
 
   const probPct = (dir === 'BUY' ? pRise : pFall) * 100;
 
@@ -159,21 +135,4 @@ function floatingPnl(pos, price) {
   return (pos.dir === 'BUY' ? (price - pos.entry) * pos.units : (pos.entry - price) * pos.units) * fx;
 }
 
-// Крипто инструментите се търгуват 24/7; при тях няма почивка.
-function isCrypto(symbol) {
-  const s = String(symbol || '').toUpperCase().trim();
-  if (/(USDT|USDC|BUSD|FDUSD|TUSD)$/.test(s)) return true;
-  return /^(BTC|ETH|SOL)(USD)?$/.test(s);
-}
-
-// Пазарът отворен ли е за нови поръчки: крипто — винаги; останалите (индекси,
-// форекс, метали, суровини) — само в делнични дни (без събота/неделя).
-// Ползва локално (българско) време — сървърът работи с TZ=Europe/Sofia.
-function marketOpen(symbol, timeSec) {
-  if (isCrypto(symbol)) return true;
-  const t = (timeSec && isFinite(timeSec)) ? timeSec : Math.floor(Date.now() / 1000);
-  const day = new Date(t * 1000).getDay();   // 0 = неделя, 6 = събота (локално)
-  return day !== 0 && day !== 6;
-}
-
-module.exports = { normalizeParams, entryDecision, exitDecision, floatingPnl, isCrypto, marketOpen };
+module.exports = { normalizeParams, entryDecision, exitDecision, floatingPnl };

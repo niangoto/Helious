@@ -173,7 +173,7 @@
     <header>
         <div class="brand">
             <span class="logo">HEROS</span>
-            <span class="sub">Търговия · демо (Binance Testnet)</span>
+            <span class="sub">Търговия · MetaTrader 5 (демо или реална)</span>
             <span class="status-badge" id="statusBadge">не е стартирано</span>
         </div>
         <div class="hdr-actions">
@@ -189,9 +189,12 @@
     <div class="layout">
         <aside>
             <div class="group">
-                <div class="gtitle">Инструменти</div>
-                <label class="f">Символи (разделени със запетая)
-                    <input id="inpSymbols" value="BTCUSDT" placeholder="BTCUSDT, XAUUSD, DAX">
+                <div class="gtitle">Инструменти (MT5)</div>
+                <label class="f">Символи — точните имена от MT5 Market Watch, със запетая
+                    <input id="inpSymbols" value="" placeholder="напр. BTCUSD, GER40, XAUUSD">
+                </label>
+                <label class="f">Търсене в MT5 на избрания агент
+                    <input id="symSearch" placeholder="пиши част от името (BTC, GER, NAS...)" autocomplete="off">
                 </label>
                 <div class="chips" id="symChips"></div>
                 <div class="grid2">
@@ -229,8 +232,7 @@
             <div class="group">
                 <div class="gtitle">Параметри (както в HERMES)</div>
                 <div class="grid2">
-                    <label class="f">Бюджет (€)<input id="inpBudget" type="number" value="1000" min="10" step="100"></label>
-                    <label class="f">Леверидж<input id="inpLev" type="number" value="1" min="1" step="1"></label>
+                    <label class="f" title="Максимален капитал, върху който се смята рискът (0 = целият капитал на сметката)">Таван на капитала (0 = без)<input id="inpBudget" type="number" value="0" min="0" step="100"></label>
                     <label class="f">Риск (α)<input id="inpAlpha" type="number" value="1.0" min="0.1" step="0.1"></label>
                     <label class="f">Buy праг (%)<input id="inpBuyTh" type="number" value="75" min="1" max="99"></label>
                     <label class="f">Sell праг (%)<input id="inpSellTh" type="number" value="75" min="1" max="99"></label>
@@ -240,38 +242,31 @@
                     <label class="f">Затв. (барове)<input id="inpHold" type="number" value="200" min="1"></label>
                     <label class="f">Кели (част)<input id="inpKelly" type="number" value="0.25" min="0.01" step="0.05"></label>
                     <label class="f">Кели макс.<input id="inpMaxKelly" type="number" value="0.05" min="0.01" max="1" step="0.05"></label>
-                    <label class="f">Мин. обем<select id="inpMinLotUnit" style="width:auto"><option value="lot">лот</option><option value="value">цена (€)</option></select><input id="inpMinLot" type="number" value="0.01" min="0.00001" step="any"></label>
-                    <label class="f" title="Разход за ЕДИН минимален обем (спред + комисиона при авто-попълване от Binance). Единица: € (валидна при ТЕКУЩАТА цена, мащабира се с нея) или % от сумата, нужна за отваряне на мин. позиция (маржина = нотионал/ливъридж). Пропорционален на броя минимални обеми. Взима се директно от сметката при отваряне.">Спред/такса на мин. обем<select id="inpSpreadUnit" style="width:auto"><option value="eur">€</option><option value="pct">%</option></select><input id="inpMinLotSpread" type="number" value="0" min="0" step="any"></label>
+                    <label class="f" title="Макс. спред (ask−bid) като дял от по-близкото ниво TP/SL. Над него не се отваря. 0 = без проверка">Макс. спред (дял от TP/SL)<input id="inpMaxSpread" type="number" value="0.5" min="0" max="1" step="0.05"></label>
+                    <label class="f">Макс. позиции<input id="inpMaxPos" type="number" value="5" min="1" step="1"></label>
                 </div>
-                <div class="note" id="minLotSpreadHint" style="color:var(--text-dim)"></div>
+                <div class="note" style="color:var(--text-dim)">Обемът, спредът, суапът, маржинът и леверидж идват директно от MT5 (реални стойности на брокера).</div>
+                <div class="row"><input type="checkbox" id="inpSkipNegSwap"> Не отваряй при отрицателен суап за посоката</div>
                 <div class="row"><input type="checkbox" id="inpReverse"> Обърната посока (контра със същия обем)</div>
                 <button class="btn primary" id="btnStart" onclick="startSession()" style="margin-top:4px">▶ Започни търговия</button>
             </div>
 
             <div class="group">
-                <div class="gtitle">Демо сметка (Binance Testnet)</div>
-                <label class="f">Пазар
-                    <select id="inpBrokerMarket">
-                        <option value="futures" selected>Фючърси — testnet.binancefuture.com</option>
-                        <option value="spot">Спот — testnet.binance.vision</option>
-                    </select>
+                <div class="gtitle">MT5 връзка</div>
+                <label class="f">Агент (Windows компютър с MT5)
+                    <select id="inpAgent" onchange="onAgentChange()"></select>
                 </label>
-                <label class="f">API Key<input id="inpBrokerKey" placeholder="testnet API key" autocomplete="off"></label>
-                <label class="f">API Secret<input id="inpBrokerSecret" type="password" placeholder="testnet secret" autocomplete="off"></label>
-                <div class="row"><input type="checkbox" id="inpBrokerRemember" checked onchange="saveBrokerKeys()"> Запомни ключовете (само в този браузър)</div>
-                <button class="btn" id="btnBrokerTest" onclick="testBroker()">Провери връзката</button>
+                <div class="note" id="agentStatus" style="color:var(--text-dim)"></div>
                 <div class="row" style="display:flex;gap:8px;flex-wrap:wrap">
-                    <button class="btn" id="btnBrokerSave" onclick="saveBrokerServer()">Запази в акаунта (криптирано)</button>
-                    <button class="btn danger" id="btnBrokerDel" onclick="deleteBrokerServer()">Изтрий</button>
+                    <button class="btn" onclick="newAgent()">+ Нов агент</button>
+                    <button class="btn" onclick="regenToken()">Нов токен</button>
+                    <button class="btn danger" onclick="delAgent()">Изтрий</button>
                 </div>
-                <div class="note" id="brokerStatus" style="color:var(--text-dim)"></div>
-                <div class="note" id="brokerResult" style="color:var(--text-dim)"></div>
-                <div class="note">Ключовете са за Binance Testnet (демо, фалшиви пари). „Запомни“ ги пази в браузъра (localStorage); „Запази в акаунта“ — криптирано на сървъра (за автоматичната търговия, достъпна и без браузър).</div>
+                <div class="note" id="agentToken" style="word-break:break-all;display:none;border-left:2px solid var(--accent-cyan);padding-left:8px"></div>
                 <div class="note" style="border-left:2px solid var(--accent-cyan);padding-left:8px">
-                    <b>Откъде идва балансът:</b> начален капитал НЕ се въвежда — Binance Testnet зарежда демо сметката.
-                    <b>Фючърси</b> (<a href="https://testnet.binancefuture.com" target="_blank" rel="noopener">testnet.binancefuture.com</a>): новите акаунти имат подразбиращ се баланс; ако е 0 → бутон <b>Reset</b> в Wallet.
-                    <b>Спот</b> (<a href="https://testnet.binance.vision" target="_blank" rel="noopener">testnet.binance.vision</a>): зареди от <b>Faucet</b>.
-                    Балансът се вижда след „Провери връзката“ тук и в панела „Демо сметка“. (Binance Testnet няма API за създаване на акаунт/баланс.)
+                    <b>Как се свързва:</b> натисни „+ Нов агент“ → копирай токена (показва се само веднъж) заедно с адреса на този сайт в
+                    <code>mt5-agent.config.json</code> на Windows компютъра → пусни <code>python mt5-agent.py</code> при отворен и логнат MT5 (с включен „Algo Trading“).
+                    Статусът по-горе става „онлайн“. Инструкция: <code>heros/PLAN-MT5.md</code>.
                 </div>
             </div>
 
@@ -309,7 +304,6 @@
     </div>
 
     <script>
-        const SYMBOLS = ['BTCUSDT', 'ETHUSDT', 'XAUUSD', 'WTI', 'BRENT', 'DAX', 'NDX', 'SPX', 'EURUSD', 'GBPUSD'];
         let sessionId = null, es = null, chart = null, candleSeries = null, activeSymbol = null, lastState = null;
 
         // ── Профил ──
@@ -324,367 +318,105 @@
             toLogin();
         }
 
-        // ── Инициализация на контролите ──
+        // ── MT5 агенти ──
+        let agents = [];
+        const cur = () => (lastState && lastState.account && lastState.account.currency) || (curAgent() && curAgent().info && curAgent().info.account && curAgent().info.account.currency) || '';
+        function curAgent() { return agents.find(a => a.id === document.getElementById('inpAgent').value) || null; }
+        async function loadAgents() {
+            try { agents = (await fetch('/api/mt5/agents').then(x => x.json())).agents || []; } catch (e) { agents = []; }
+            const sel = document.getElementById('inpAgent');
+            const keep = sel.value;
+            sel.innerHTML = agents.length ? agents.map(a => `<option value="${a.id}">${a.name} ${a.online ? '● онлайн' : '○ офлайн'}</option>`).join('') : '<option value="">— няма агенти —</option>';
+            if (agents.some(a => a.id === keep)) sel.value = keep;
+            onAgentChange(true);
+        }
+        function onAgentChange(quiet) {
+            const a = curAgent(), el = document.getElementById('agentStatus');
+            if (!a) { el.style.color = 'var(--text-dim)'; el.textContent = 'Няма агент. Натисни „+ Нов агент“.'; return; }
+            const ac = a.info && a.info.account;
+            el.style.color = a.online ? 'var(--accent-green)' : 'var(--accent-red)';
+            el.textContent = a.online
+                ? ('● Онлайн' + (ac ? ' · ' + (ac.demo ? 'ДЕМО' : 'РЕАЛНА') + ' сметка ' + ac.login + ' @ ' + ac.server + ' · ' + ac.currency + ' · ' + ac.margin_mode + ' · 1:' + ac.leverage : ''))
+                : '○ Офлайн — стартирай mt5-agent.py на Windows компютъра';
+        }
+        async function newAgent() {
+            const name = prompt('Име на агента (напр. Домашен PC):', 'MT5 ' + (agents.length + 1));
+            if (name === null) return;
+            const r = await fetch('/api/mt5/agents', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) }).then(x => x.json());
+            if (r.ok) { await loadAgents(); document.getElementById('inpAgent').value = r.id; showToken(r.token); onAgentChange(); }
+        }
+        async function regenToken() {
+            const a = curAgent(); if (!a) return;
+            if (!confirm('Старият токен ще спре да работи. Продължи?')) return;
+            const r = await fetch('/api/mt5/agents/' + a.id + '/token', { method: 'POST' }).then(x => x.json());
+            if (r.ok) showToken(r.token);
+        }
+        async function delAgent() {
+            const a = curAgent(); if (!a || !confirm('Да се изтрие ли агентът „' + a.name + '“?')) return;
+            await fetch('/api/mt5/agents/' + a.id, { method: 'DELETE' });
+            document.getElementById('agentToken').style.display = 'none';
+            loadAgents();
+        }
+        function showToken(t) {
+            const el = document.getElementById('agentToken');
+            el.style.display = 'block';
+            el.innerHTML = '<b>Токен (запиши го сега — повече няма да се покаже):</b><br><code>' + t + '</code><br>Адрес на сайта: <code>' + location.origin + '</code>';
+        }
+        setInterval(loadAgents, 10000);
+
+        // ── Символи и контроли ──
         (function initControls() {
             const chips = document.getElementById('symChips');
             const symEl = document.getElementById('inpSymbols');
-            const curSyms = () => symEl.value.split(',').map(x => x.trim().toUpperCase()).filter(Boolean);
+            const curSyms = () => symEl.value.split(',').map(x => x.trim()).filter(Boolean);
             const syncChips = () => {
                 const cur = curSyms();
                 chips.querySelectorAll('.chip').forEach(c => c.classList.toggle('active', cur.includes(c.textContent)));
             };
-            SYMBOLS.forEach(s => {
-                const c = document.createElement('span');
-                c.className = 'chip'; c.textContent = s;
-                // Клик включва/изключва символа (за да може да се смени стоката,
-                // а не само да се добавят нови към BTC по подразбиране).
-                c.onclick = () => {
-                    let cur = curSyms();
-                    if (cur.includes(s)) cur = cur.filter(x => x !== s); else cur.push(s);
-                    symEl.value = cur.join(', ');
+            let t = null, seq = 0;
+            document.getElementById('symSearch').addEventListener('input', e => {
+                clearTimeout(t);
+                const q = e.target.value.trim();
+                t = setTimeout(async () => {
+                    const a = curAgent();
+                    if (!a || !a.online || !q) { chips.innerHTML = ''; return; }
+                    const my = ++seq;
+                    const r = await fetch('/api/mt5/agents/' + a.id + '/symbols?query=' + encodeURIComponent(q)).then(x => x.json()).catch(() => null);
+                    if (my !== seq) return;
+                    chips.innerHTML = '';
+                    ((r && r.symbols) || []).slice(0, 30).forEach(s => {
+                        const c = document.createElement('span');
+                        c.className = 'chip'; c.textContent = s.name; c.title = s.description || s.path || '';
+                        c.onclick = () => {
+                            let cs = curSyms();
+                            if (cs.includes(s.name)) cs = cs.filter(x => x !== s.name); else cs.push(s.name);
+                            symEl.value = cs.join(', ');
+                            syncChips();
+                        };
+                        chips.appendChild(c);
+                    });
                     syncChips();
-                    updateMinLotSpreadHint();
-                };
-                chips.appendChild(c);
+                }, 300);
             });
             symEl.addEventListener('input', syncChips);
-            syncChips();
             const mSel = document.getElementById('inpModel');
             const updateContra = () => { document.getElementById('contraBox').style.display = parseInt(mSel.value, 10) === 5 ? 'grid' : 'none'; };
             mSel.addEventListener('change', updateContra); updateContra();
-            ['inpMinLotSpread', 'inpSpreadUnit', 'inpMinLot', 'inpMinLotUnit', 'inpAlpha', 'inpLev', 'inpTp', 'inpSl', 'inpSymbols', 'inpInterval'].forEach(id => {
-                const el = document.getElementById(id);
-                if (el) el.addEventListener('input', updateMinLotSpreadHint);
-                if (el) el.addEventListener('change', updateMinLotSpreadHint);
-            });
-            symEl.addEventListener('change', autoFillInstrument);
-            const mlUnitEl = document.getElementById('inpMinLotUnit');
-            if (mlUnitEl) mlUnitEl.addEventListener('change', autoFillInstrument);
         })();
-
-        // Contract size по инструмент (както engine/symbolSpec.js) — за пресмятане
-        // на номинала на мин. обем още преди да има стартирана сесия.
-        const CONTRACTS = {
-            EURUSD: 100000, GBPUSD: 100000, USDJPY: 100000, USDCHF: 100000, EURJPY: 100000,
-            GBPJPY: 100000, AUDUSD: 100000, NZDUSD: 100000, USDCAD: 100000, EURGBP: 100000,
-            EURAUD: 100000, GBPCHF: 100000, XAUUSD: 100, XAGUSD: 5000, WTI: 1000, BRENT: 1000,
-            DAX: 1, NDX: 1, SPX: 1, DJI: 1, CAC: 1, UK100: 1, NI225: 1,
-            BTCUSDT: 1, ETHUSDT: 1, SOLUSDT: 1
-        };
-        function contractFor(sym) { return CONTRACTS[String(sym || '').toUpperCase().trim()] || 1; }
-
-        // Валутна конверсия към EUR (сметката е в EUR). Повечето инструменти са в USD.
-        const INDEX_CCY = { DAX: 'EUR', CAC: 'EUR', UK100: 'GBP', NI225: 'JPY', NDX: 'USD', SPX: 'USD', DJI: 'USD' };
-        function quoteCurrency(sym) {
-            const s = String(sym || '').toUpperCase().trim();
-            if (INDEX_CCY[s]) return INDEX_CCY[s];
-            if (['XAUUSD', 'XAGUSD', 'WTI', 'BRENT'].includes(s)) return 'USD';
-            if (/(USDT|USDC|BUSD)$/.test(s) || /^(BTC|ETH|SOL)(USD)?$/.test(s)) return 'USD';
-            if (/^[A-Z]{6}$/.test(s)) return s.slice(3);
-            return 'EUR';
-        }
-        let fxRates = { EUR: 1 }, fxFetchedAt = 0, fxFetching = null;
-        function fxFor(sym) { const r = fxRates[quoteCurrency(sym)]; return (r > 0) ? r : 1; }
-        function ensureFxRates() {
-            if (fxFetchedAt && Date.now() - fxFetchedAt < 300000) return Promise.resolve(fxRates);
-            if (fxFetching) return fxFetching;
-            fxFetching = fetch('/fx').then(r => r.json())
-                .then(j => { if (j && j.ok && j.rates) fxRates = Object.assign({ EUR: 1 }, j.rates); })
-                .catch(() => {})
-                .then(() => { fxFetchedAt = Date.now(); fxFetching = null; updateMinLotSpreadHint(); return fxRates; });
-            return fxFetching;
-        }
-
-        // Кеш на свещи, когато още няма сесия — за „първата известна цена от периода“.
-        let hintCandles = {}, hintPending = {};
-        function ensureHintCandles(sym, iv) {
-            const key = sym + '|' + iv;
-            if (hintCandles[key] || hintPending[key]) return;
-            hintPending[key] = true;
-            fetch('/data?symbol=' + encodeURIComponent(sym) + '&interval=' + encodeURIComponent(iv) + '&limit=200')
-                .then(r => r.json())
-                .then(j => { if (j && j.ok && Array.isArray(j.candles) && j.candles.length) hintCandles[key] = j.candles; })
-                .catch(() => {})
-                .then(() => { hintPending[key] = false; updateMinLotSpreadHint(); });
-        }
-
-        // Форматиране на сума с достатъчна точност (малките стойности не стават 0.00).
-        function fmtAmt(v) {
-            if (!isFinite(v)) return '—';
-            const a = Math.abs(v);
-            if (a === 0) return '0';
-            if (a < 0.000001) return v.toExponential(2);
-            if (a < 0.001) return v.toFixed(6);
-            if (a < 0.01) return v.toFixed(5);
-            if (a < 0.1) return v.toFixed(4);
-            if (a < 1) return v.toFixed(3);
-            return v.toFixed(2);
-        }
-
-        // Последна известна цена за символа (от активната сесия или от hint свещите).
-        function symHintPrice(sym) {
-            const iv = (document.getElementById('inpInterval') || {}).value || '1h';
-            const sd = lastState && lastState.symbols ? lastState.symbols[sym] : null;
-            if (sd && sd.candles && sd.candles.length) return sd.candles[sd.candles.length - 1].close;
-            const c = hintCandles[sym + '|' + iv];
-            return (c && c.length) ? c[c.length - 1].close : 0;
-        }
-
-        // Мин. обем в лотове: директно („лот“) или цената (€) на мин. позиция,
-        // превърната в лотове по текущата цена.
-        function minLotLots() {
-            const raw = Math.max(0.00001, parseFloat((document.getElementById('inpMinLot') || {}).value) || 0.01);
-            const unit = ((document.getElementById('inpMinLotUnit') || {}).value === 'value') ? 'value' : 'lot';
-            if (unit === 'lot') return raw;
-            const sym = (document.getElementById('inpSymbols').value.split(',')[0] || '').trim().toUpperCase();
-            const px = symHintPrice(sym);
-            return px > 0 ? Math.max(0.00001, raw / (px * contractFor(sym) * fxFor(sym))) : raw;
-        }
-
-        // Мин. обем: показва на колко € се равнява при последната (актуална) цена.
-        // Спред: процент от цената (пропорционален на нея), отмества реалния вход
-        // (начална плаваща загуба) и показва отместването в пункта.
-        function updateMinLotSpreadHint() {
-            const el = document.getElementById('minLotSpreadHint');
-            if (!el) return;
-            const spread = Math.max(0, parseFloat(document.getElementById('inpMinLotSpread').value) || 0);
-            const minLot = minLotLots();
-            const sym = (document.getElementById('inpSymbols').value.split(',')[0] || '').trim().toUpperCase();
-            const iv = document.getElementById('inpInterval').value || '1h';
-            const units = minLot * contractFor(sym);
-
-            let c = null;
-            const sd = lastState && lastState.symbols ? lastState.symbols[sym] : null;
-            if (sd && sd.candles && sd.candles.length) c = sd.candles;
-            else {
-                const key = sym + '|' + iv;
-                if (!hintCandles[key]) ensureHintCandles(sym, iv);
-                c = hintCandles[key] || null;
-            }
-            const price = (c && c.length) ? c[c.length - 1].close : 0;   // последна (актуална) цена
-            const dec = price >= 100 ? 2 : 5;
-            const lev = Math.max(1, parseFloat(document.getElementById('inpLev').value) || 30);
-            const fx = fxFor(sym);                             // котирана валута → EUR
-            if (!fxFetchedAt) ensureFxRates();
-
-            let txt;
-            if (price > 0) {
-                const notional = units * price * fx;           // в EUR
-                const margin = notional / lev;
-                txt = minLot.toFixed(2) + ' лот (' + sym + ') = ' + margin.toFixed(2) +
-                    ' € маржин при 1:' + lev + ' (нотионал ' + notional.toFixed(2) +
-                    ' € при последна цена ' + price.toFixed(dec) + ').';
-            } else {
-                txt = minLot.toFixed(2) + ' лот (' + sym + ').';
-            }
-            el.style.color = '';
-            if (spread <= 0) {
-                txt += ' Спредът е 0 — не се взима нищо от сметката.';
-                el.textContent = txt;
-                return;
-            }
-            let atr = 0;
-            if (c && c.length > 1) {
-                let sum = 0, cnt = 0;
-                for (let i = Math.max(1, c.length - 14); i < c.length; i++) {
-                    sum += Math.max(c[i].high - c[i].low, Math.abs(c[i].high - c[i - 1].close), Math.abs(c[i].low - c[i - 1].close));
-                    cnt++;
-                }
-                atr = cnt ? sum / cnt : 0;
-            }
-            const alpha = Math.min(10, Math.max(0.1, parseFloat(document.getElementById('inpAlpha').value) || 1));
-            const slDist = (parseFloat(document.getElementById('inpSl').value) || 1) * alpha * atr;
-            const tpDist = (parseFloat(document.getElementById('inpTp').value) || 1.5) * alpha * atr;
-            // € стойност за 1 мин. обем според избраната единица (€ или % от сумата).
-            const spreadUnit = ((document.getElementById('inpSpreadUnit') || {}).value === 'pct') ? 'pct' : 'eur';
-            // При '%' базата е сумата, нужна за отваряне на мин. позиция (маржина).
-            const spreadEur = (spreadUnit === 'pct') ? (spread / 100) * (units * price * fx / lev) : spread;
-            const spreadTxt = (spreadUnit === 'pct')
-                ? 'Спред ' + spread + '% от сумата за отваряне = ' + fmtAmt(spreadEur) + ' €'
-                : 'Спред ' + fmtAmt(spreadEur) + ' € (при текущата цена)';
-            txt += ' ' + spreadTxt + ' на мин. обем (' + minLot.toFixed(2) + ' лот), взима се от сметката при отваряне (N мин. обема = N×).';
-            if (atr > 0) {
-                const tpEur = tpDist * units * fx;          // потенциална печалба до TP за мин. обем
-                if (spreadEur >= tpEur) {
-                    el.style.color = '#ffb37a';
-                    txt += ' ⚠ Спредът е ≥ печалбата до TP (' + tpEur.toFixed(2) + ' €) — сделката не може да е на печалба.';
-                } else {
-                    txt += ' Безопасно (печалба до TP ~' + tpEur.toFixed(2) + ' € на мин. обем при ATR ' + atr.toFixed(dec) + ').';
-                }
-            }
-            el.textContent = txt;
-        }
-
-        // Автоматично попълване от Binance (мин. обем, спред) за първия символ.
-        let instrumentFetchSeq = 0;
-        async function autoFillInstrument() {
-            const sym = (document.getElementById('inpSymbols').value.split(',')[0] || '').trim().toUpperCase();
-            if (!sym) return;
-            const seq = ++instrumentFetchSeq;
-            try {
-                const r = await fetch('/instrument?symbol=' + encodeURIComponent(sym)).then(x => x.json());
-                if (seq !== instrumentFetchSeq || !r || !r.ok) return;
-                const fx = fxFor(sym);
-                const unit = ((document.getElementById('inpMinLotUnit') || {}).value === 'value') ? 'value' : 'lot';
-                const effQty = (r.effMinQty > 0) ? r.effMinQty : r.minQty;   // реалният минимум (minQty и MIN_NOTIONAL)
-                const units = effQty * contractFor(sym);
-                const ml = document.getElementById('inpMinLot');
-                if (ml && effQty > 0) {
-                    // Единица „цена“: € стойността на мин. обем (= qty × цена); иначе лотове.
-                    ml.value = (unit === 'value' && r.mid > 0) ? fmtAmt(units * r.mid * fx) : effQty;
-                }
-                if (units > 0 && (r.spread > 0 || r.takerFee > 0)) {
-                    // Реална такса: спред + taker комисиона (вход И изход).
-                    const costEur = units * fx * (r.spread + 2 * (r.takerFee || 0) * r.mid);
-                    const su = document.getElementById('inpSpreadUnit');
-                    if (su) su.value = 'eur';
-                    const sp = document.getElementById('inpMinLotSpread');
-                    if (sp) sp.value = fmtAmt(costEur);
-                }
-                updateMinLotSpreadHint();
-            } catch (e) { /* не е Binance или мрежата е недостъпна */ }
-        }
-        updateMinLotSpreadHint();
-        autoFillInstrument();
-
-        // Запазване/зареждане на testnet ключовете локално в браузъра.
-        const BROKER_LS_KEY = 'heros_broker_keys';
-        function saveBrokerKeys() {
-            try {
-                const remember = document.getElementById('inpBrokerRemember');
-                if (!remember || !remember.checked) { localStorage.removeItem(BROKER_LS_KEY); return; }
-                localStorage.setItem(BROKER_LS_KEY, JSON.stringify({
-                    market: document.getElementById('inpBrokerMarket').value,
-                    apiKey: document.getElementById('inpBrokerKey').value.trim(),
-                    apiSecret: document.getElementById('inpBrokerSecret').value.trim()
-                }));
-            } catch (e) { /* ignore */ }
-        }
-        function loadBrokerKeys() {
-            try {
-                const raw = localStorage.getItem(BROKER_LS_KEY);
-                if (!raw) return;
-                const o = JSON.parse(raw);
-                if (o.market) document.getElementById('inpBrokerMarket').value = o.market;
-                if (o.apiKey) document.getElementById('inpBrokerKey').value = o.apiKey;
-                if (o.apiSecret) document.getElementById('inpBrokerSecret').value = o.apiSecret;
-            } catch (e) { /* ignore */ }
-        }
-        ['inpBrokerKey', 'inpBrokerSecret', 'inpBrokerMarket', 'inpBrokerRemember'].forEach(id => {
-            const el = document.getElementById(id);
-            if (el) { el.addEventListener('input', saveBrokerKeys); el.addEventListener('change', saveBrokerKeys); }
-        });
-        loadBrokerKeys();
-
-        // Проверка на връзката към Binance Testnet (демо).
-        // Кратко форматиране на балансите (спотът връща стотици активи — не ги изреждаме).
-        function fmtBalances(balances) {
-            const val = (b) => parseFloat(b.total != null ? b.total : ((b.free || 0) + (b.locked || 0))) || 0;
-            const list = (balances || []).filter(b => val(b) > 0);
-            if (!list.length) return '0 (захрани от faucet/Reset)';
-            const pref = ['USDT', 'USDC', 'FDUSD', 'BUSD', 'BTC', 'ETH', 'BNB', 'SOL'];
-            list.sort((a, b) => {
-                const pa = pref.indexOf(a.asset), pb = pref.indexOf(b.asset);
-                if (pa !== -1 || pb !== -1) return (pa === -1 ? 999 : pa) - (pb === -1 ? 999 : pb);
-                return val(b) - val(a);
-            });
-            const shown = list.slice(0, 6).map(b => b.asset + ' ' + fmt(val(b), 2)).join(' · ');
-            return shown + (list.length > 6 ? ' · +' + (list.length - 6) + ' актива' : '');
-        }
-
-        async function testBroker() {
-            saveBrokerKeys();
-            const el = document.getElementById('brokerResult');
-            if (!el) return;
-            el.style.color = 'var(--text-dim)';
-            el.textContent = 'Проверка...';
-            try {
-                const r = await fetch('/api/broker/test', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        market: document.getElementById('inpBrokerMarket').value,
-                        apiKey: document.getElementById('inpBrokerKey').value.trim(),
-                        apiSecret: document.getElementById('inpBrokerSecret').value.trim()
-                    })
-                }).then(x => x.json());
-                if (r && r.ok) {
-                    el.textContent = '✓ Връзката е OK (' + r.market + (r.canTrade ? ', търговия разрешена' : '') + ') — баланс: ' + fmtBalances(r.balances);
-                    el.style.color = 'var(--accent-green)';
-                } else {
-                    el.textContent = '✗ ' + ((r && r.error) || 'грешка') + (r && r.code ? ' (' + r.code + ')' : '');
-                    el.style.color = 'var(--accent-red)';
-                }
-            } catch (e) {
-                el.textContent = '✗ ' + e.message;
-                el.style.color = 'var(--accent-red)';
-            }
-        }
-
-        // Запазване на ключовете криптирано на сървъра (за автоматичната търговия).
-        async function saveBrokerServer() {
-            const el = document.getElementById('brokerStatus');
-            el.style.color = 'var(--text-dim)';
-            el.textContent = 'Запазване...';
-            try {
-                const r = await fetch('/api/broker/save', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        market: document.getElementById('inpBrokerMarket').value,
-                        apiKey: document.getElementById('inpBrokerKey').value.trim(),
-                        apiSecret: document.getElementById('inpBrokerSecret').value.trim()
-                    })
-                }).then(x => x.json());
-                if (r && r.ok) { el.style.color = 'var(--accent-green)'; el.textContent = '✓ Запазени (' + r.market + ' · ' + r.apiKey + ')'; }
-                else { el.style.color = 'var(--accent-red)'; el.textContent = '✗ ' + ((r && r.error) || 'грешка'); }
-            } catch (e) { el.style.color = 'var(--accent-red)'; el.textContent = '✗ ' + e.message; }
-        }
-        async function deleteBrokerServer() {
-            const el = document.getElementById('brokerStatus');
-            try {
-                await fetch('/api/broker', { method: 'DELETE' }).then(x => x.json());
-                el.style.color = 'var(--text-dim)'; el.textContent = 'Изтрити от сървъра.';
-            } catch (e) { el.style.color = 'var(--accent-red)'; el.textContent = '✗ ' + e.message; }
-        }
-        async function loadBrokerStatus() {
-            const el = document.getElementById('brokerStatus');
-            if (!el) return;
-            try {
-                const r = await fetch('/api/broker/status').then(x => x.json());
-                if (r && r.saved) {
-                    el.style.color = 'var(--accent-green)';
-                    el.textContent = 'Записани на сървъра: ' + r.market + ' · ' + r.apiKey;
-                    showBrokerAccount(el);
-                } else { el.style.color = 'var(--text-dim)'; el.textContent = 'Няма записани ключове на сървъра.'; }
-            } catch (e) { /* ignore */ }
-        }
-        // Показва колко фалшиви пари има в демо сметката (Testnet), ако има ключове.
-        async function showBrokerAccount(el) {
-            try {
-                const a = await fetch('/api/broker/account').then(x => x.json());
-                if (!a || !a.ok) return;
-                if (a.market === 'futures') {
-                    el.textContent += ' · баланс ' + fmt(a.balance, 2) + ' ' + (a.currency || 'USDT') +
-                        ' (' + (a.positions || []).length + ' отв. позиции)';
-                } else {
-                    el.textContent += ' · ' + fmtBalances(a.balances) + ' — спот (за стратегията трябват фючърси)';
-                }
-            } catch (e) { /* ignore */ }
-        }
-        loadBrokerStatus();
+        loadAgents();
 
         function readConfig() {
-            const symbols = document.getElementById('inpSymbols').value.split(',').map(s => s.trim().toUpperCase()).filter(Boolean);
+            const symbols = document.getElementById('inpSymbols').value.split(',').map(s => s.trim()).filter(Boolean);
             const contra = [0, 1, 2, 3, 4].map(i => document.getElementById('c' + i).checked);
             const v = id => document.getElementById(id).value;
             return {
                 symbols,
+                agentId: v('inpAgent'),
                 interval: v('inpInterval'),
                 model: parseInt(v('inpModel'), 10),
                 contra,
                 params: {
                     budget: parseFloat(v('inpBudget')),
-                    leverage: parseFloat(v('inpLev')),
                     alpha: parseFloat(v('inpAlpha')),
                     buyTh: parseFloat(v('inpBuyTh')),
                     sellTh: parseFloat(v('inpSellTh')),
@@ -694,9 +426,9 @@
                     holdBars: parseInt(v('inpHold'), 10),
                     kellyF: parseFloat(v('inpKelly')),
                     maxKelly: parseFloat(v('inpMaxKelly')),
-                    minLot: minLotLots(),   // „цена“ → лотове по текущата цена, ако е избрано
-                    minLotSpread: parseFloat(v('inpMinLotSpread')),
-                    spreadUnit: (v('inpSpreadUnit') === 'pct') ? 'pct' : 'eur',
+                    maxSpreadFrac: parseFloat(v('inpMaxSpread')),
+                    maxPositions: parseInt(v('inpMaxPos'), 10),
+                    skipNegSwap: document.getElementById('inpSkipNegSwap').checked,
                     reverse: document.getElementById('inpReverse').checked
                 }
             };
@@ -706,7 +438,7 @@
         let sessions = [];
         async function loadSessions() {
             try {
-                const r = await fetch('/api/paper/sessions').then(x => x.json());
+                const r = await fetch('/api/trade/sessions').then(x => x.json());
                 sessions = (r && r.sessions) || [];
             } catch (e) { sessions = []; }
             renderSessionList();
@@ -721,14 +453,14 @@
             document.getElementById('sessNote').textContent = sessions.length ? '(' + sessions.length + ')' : '';
             if (!sessions.length) { el.innerHTML = '<div class="empty">Няма сесии</div>'; return; }
             el.innerHTML = sessions.map(s => {
-                const pnl = (s.equity != null && s.params && s.params.budget) ? (s.equity - s.params.budget) : null;
+                const pnl = (s.equity != null && s.initial != null) ? (s.equity - s.initial) : null;
                 return `<div class="sess ${s.id === sessionId ? 'active' : ''}" onclick="attach('${s.id}')">
                     <div class="r1">
                         <span class="sym"><span class="dot ${s.status}"></span> ${s.symbols.join(', ')} · ${s.interval}</span>
                         <span>${pnl == null ? '' : '<span class="' + cls(pnl) + '">' + euro(pnl) + '</span> '}
                         ${s.status === 'stopped' ? '<button class="x" title="Изтрий" onclick="event.stopPropagation();delSession(\'' + s.id + '\')">✕</button>' : ''}</span>
                     </div>
-                    <div class="meta">${s.trades} сделки · капитал ${fmt(s.equity)} €${s.startedAt ? ' · от ' + fmtDate(s.startedAt) : ''}${s.errors && s.errors.length ? ' · ⚠ ' + s.errors[0] : ''}</div>
+                    <div class="meta">${s.trades} сделки · капитал ${fmt(s.equity)} ${cur()}${s.startedAt ? ' · от ' + fmtDate(s.startedAt) : ''}${s.errors && s.errors.length ? ' · ⚠ ' + s.errors[0] : ''}</div>
                 </div>`;
             }).join('');
         }
@@ -739,7 +471,7 @@
 
         async function attach(id) {
             if (!id) return;
-            const r = await fetch('/api/paper/sessions/' + id).then(x => x.json()).catch(() => null);
+            const r = await fetch('/api/trade/sessions/' + id).then(x => x.json()).catch(() => null);
             if (!r || !r.ok) { alert('Сесията не е намерена.'); return loadSessions(); }
             sessionId = id;
             applyConfig(r.state.config);
@@ -747,14 +479,14 @@
             render(r.state);
             renderSessionList();
             if (es) es.close();
-            es = new EventSource('/api/paper/sessions/' + id + '/stream');
+            es = new EventSource('/api/trade/sessions/' + id + '/stream');
             es.onmessage = ev => { try { render(JSON.parse(ev.data)); } catch (e) {} };
             es.onerror = () => { /* EventSource ще опита пак */ };
         }
 
         async function delSession(id) {
             if (!confirm('Да се изтрие ли сесията?')) return;
-            try { await fetch('/api/paper/sessions/' + id, { method: 'DELETE' }); } catch (e) {}
+            try { await fetch('/api/trade/sessions/' + id, { method: 'DELETE' }); } catch (e) {}
             if (sessionId === id) { sessionId = null; if (es) { es.close(); es = null; } setControls(false); }
             loadSessions();
         }
@@ -764,20 +496,17 @@
             const P = cfg.params || {};
             const set = (id, v) => { const el = document.getElementById(id); if (el && v != null) el.value = v; };
             set('inpSymbols', (cfg.symbols || []).join(', '));
-            document.getElementById('inpSymbols').dispatchEvent(new Event('input', { bubbles: true }));
             set('inpInterval', cfg.interval);
             set('inpModel', cfg.model);
             document.getElementById('contraBox').style.display = Number(cfg.model) === 5 ? 'grid' : 'none';
             (cfg.contra || []).forEach((on, i) => { const el = document.getElementById('c' + i); if (el) el.checked = !!on; });
-            set('inpBudget', P.budget); set('inpLev', P.leverage); set('inpAlpha', P.alpha);
+            set('inpBudget', P.budget); set('inpAlpha', P.alpha);
+            set('inpMaxSpread', P.maxSpreadFrac); set('inpMaxPos', P.maxPositions);
+            document.getElementById('inpSkipNegSwap').checked = !!P.skipNegSwap;
+            if (cfg.agentId) { const ag = document.getElementById('inpAgent'); if ([...ag.options].some(o => o.value === cfg.agentId)) ag.value = cfg.agentId; }
             set('inpBuyTh', P.buyTh); set('inpSellTh', P.sellTh); set('inpMinEv', P.minEv);
             set('inpTp', P.tpMult); set('inpSl', P.slMult); set('inpHold', P.holdBars);
-            set('inpKelly', P.kellyF); set('inpMaxKelly', P.maxKelly); set('inpMinLot', P.minLot);
-            set('inpMinLotSpread', P.minLotSpread);
-            const su = document.getElementById('inpSpreadUnit');
-            if (su) su.value = (P.spreadUnit === 'pct') ? 'pct' : 'eur';
-            const mlu = document.getElementById('inpMinLotUnit');
-            if (mlu) mlu.value = 'lot';   // в сесията minLot се пази в лотове
+            set('inpKelly', P.kellyF); set('inpMaxKelly', P.maxKelly);
             document.getElementById('inpReverse').checked = !!P.reverse;
         }
 
@@ -796,30 +525,19 @@
 
         async function startSession() {
             const cfg = readConfig();
-            if (!cfg.symbols.length) { alert('Въведи поне един символ.'); return; }
+            if (!cfg.agentId) { alert('Избери MT5 агент (или създай нов).'); return; }
+            if (!cfg.symbols.length) { alert('Въведи поне един MT5 символ.'); return; }
+            { const a = curAgent(); if (a && !a.info.account.demo && !confirm('Това е РЕАЛНА сметка (' + a.info.account.login + ' @ ' + a.info.account.server + '). Алгоритъмът ще търгува с реални пари. Сигурен ли си?')) return; }
             // Ако вече има активна сесия — спираме я, за да не се дублират.
             const act = sessions.filter(s => s.status === 'running' || s.status === 'paused');
             for (const s of act) {
                 if (!confirm('Има активна сесия (' + s.symbols.join(', ') + '). Да бъде спряна и да започне нова?')) return;
-                try { await fetch('/api/paper/sessions/' + s.id + '/stop', { method: 'POST' }); } catch (e) {}
+                try { await fetch('/api/trade/sessions/' + s.id + '/stop', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); } catch (e) {}
             }
             document.getElementById('btnStart').disabled = true;
             document.getElementById('btnStart').textContent = '⏳ Стартира...';
-            // Авто-запис на Testnet ключовете (ако са попълнени), за да се пазят
-            // криптирано на сървъра и сесията да търгува реално на демо.
             try {
-                const key = (document.getElementById('inpBrokerKey').value || '').trim();
-                const secret = (document.getElementById('inpBrokerSecret').value || '').trim();
-                if (key && secret) {
-                    await fetch('/api/broker/save', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ market: document.getElementById('inpBrokerMarket').value, apiKey: key, apiSecret: secret })
-                    }).then(x => x.json());
-                    loadBrokerStatus();
-                }
-            } catch (e) { /* продължаваме (ще е виртуална) */ }
-            try {
-                const resp = await fetch('/api/paper/sessions', {
+                const resp = await fetch('/api/trade/sessions', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cfg)
                 });
                 if (resp.status === 401) return toLogin();
@@ -837,7 +555,12 @@
         async function doAction(action) {
             if (!sessionId) return;
             try {
-                const r = await fetch('/api/paper/sessions/' + sessionId + '/' + action, { method: 'POST' }).then(x => x.json());
+                let opts = { method: 'POST' };
+                if (action === 'stop') {
+                    const keep = !confirm('Стоп: да се ЗАТВОРЯТ ли отворените позиции на сесията в MT5?\n\nOK = затвори ги · Отказ = остави ги (със SL/TP) и само спри алгоритъма');
+                    opts = { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ keepPositions: keep }) };
+                }
+                const r = await fetch('/api/trade/sessions/' + sessionId + '/' + action, opts).then(x => x.json());
                 if (r.status) setStatus(r.status);
                 if (action === 'pause') document.getElementById('btnPause').textContent = r.status === 'paused' ? '⏵ Продължи' : '⏸ Пауза';
                 if (action === 'stop') setControls(true);
@@ -860,7 +583,7 @@
         }
 
         function fmt(v, d) { if (v == null || isNaN(v)) return '—'; return Number(v).toFixed(d == null ? 2 : d); }
-        function euro(v) { const n = fmt(v, 2); return (v > 0 ? '+' : '') + n + ' €'; }
+        function euro(v) { const n = fmt(v, 2); return (v > 0 ? '+' : '') + n + ' ' + cur(); }
         function cls(v) { return v > 0 ? 'pos' : (v < 0 ? 'neg' : ''); }
 
         function render(state) {
@@ -879,16 +602,18 @@
             const open = state.openPositions || [];
             const usedMargin = open.reduce((a, p) => a + (p.margin || 0), 0);
             const notional = open.reduce((a, p) => a + (p.notional || 0), 0);
-            const freeMargin = Math.max(0, (s.equity || 0) - usedMargin);
+            const acc = state.account || {};
+            const freeMargin = acc.available;
             const cards = [
                 ['Плаваща P/L', euro(s.floating), cls(s.floating)],
                 ['Обща P/L', euro(s.totalPnl) + ' (' + (s.totalPct >= 0 ? '+' : '') + fmt(s.totalPct) + '%)', cls(s.totalPnl)],
-                ['Баланс', fmt(s.balance) + ' €', ''],
-                ['Капитал', fmt(s.equity) + ' €', ''],
+                ['Баланс на сесията', fmt(s.balance) + ' ' + cur(), ''],
+                ['Капитал на сесията', fmt(s.equity) + ' ' + cur(), ''],
                 ['Отворени сега', String(s.openCount), ''],
-                ['Зает маржин', fmt(usedMargin) + ' €', ''],
-                ['Свободен маржин', fmt(freeMargin) + ' €', ''],
-                ['Нотионал', fmt(notional) + ' €', ''],
+                ['Зает маржин', fmt(usedMargin) + ' ' + cur(), ''],
+                ['Свободен маржин (сметка)', fmt(freeMargin) + ' ' + cur(), ''],
+                ['Маржин ниво', acc.marginLevel ? fmt(acc.marginLevel, 0) + '%' : '—', ''],
+                ['Нотионал', fmt(notional) + ' ' + cur(), ''],
                 ['Сделки от начало', String(s.trades), ''],
                 ['Win rate', fmt(s.winRate, 1) + '%', ''],
                 ['За деня', euro(s.dayPnl), cls(s.dayPnl)],
@@ -906,7 +631,6 @@
             renderTabs(keys);
             renderChart(state);
             renderOpenPositions(state.openPositions || []);
-            updateMinLotSpreadHint();
             renderTrades(state.trades || []);
             drawPnl();
             // След презареждане размерите/оста на графиката може да се установят
@@ -914,14 +638,14 @@
             requestAnimationFrame(() => drawPnl());
             const me = sessions.find(x => x.id === state.id);
             if (me) {
-                const eq = (s.equity != null && me.params && me.params.budget) ? s.equity - me.params.budget : null;
+                const eq = (s.equity != null && s.initial != null) ? s.equity - s.initial : null;
                 me.equity = s.equity; me.trades = s.trades; me.status = state.status;
                 const box = document.querySelector('#sessionList .sess.active');
                 if (box && eq != null) {
                     const v = box.querySelector('.r1 > span:last-child');
                     if (v) v.innerHTML = '<span class="' + cls(eq) + '">' + euro(eq) + '</span> ';
                     const m = box.querySelector('.meta');
-                    if (m) m.textContent = s.trades + ' сделки · капитал ' + fmt(s.equity) + ' €';
+                    if (m) m.textContent = s.trades + ' сделки · капитал ' + fmt(s.equity) + ' ' + cur();
                 }
             }
         }
@@ -967,46 +691,40 @@
         function renderOpenPositions(list) {
             const el = document.getElementById('openPos');
             if (!list.length) { el.innerHTML = '<div class="empty">Няма отворени позиции</div>'; return; }
-            el.innerHTML = `<table><thead><tr><th>Символ</th><th>Вид</th><th>Вход (реална цена)</th><th>Обем (лот)</th><th>Нотионал</th><th>Маржин</th><th>Спред</th><th>TP</th><th>SL</th><th>Плаваща</th></tr></thead><tbody>` +
-                list.map(p => `<tr><td>${p.symbol}</td><td class="${p.dir === 'BUY' ? 'pos' : 'neg'}">${p.dir}</td><td>${fmt(p.entry, 5)}</td><td>${fmt(p.lots, 3)}</td><td>${fmt(p.notional, 2)} €</td><td>${fmt(p.margin, 2)} €</td><td class="neg">${p.spread ? fmt(p.spread, 2) + ' €' : '—'}</td><td>${fmt(p.tp, 5)}</td><td>${fmt(p.sl, 5)}</td><td class="${cls(p.floating)}">${euro(p.floating)}</td></tr>`).join('') +
+            el.innerHTML = `<table><thead><tr><th>Символ</th><th>Вид</th><th>Вход</th><th>Обем (лот)</th><th>Нотионал</th><th>Маржин</th><th>Спред</th><th>TP</th><th>SL</th><th>Суап</th><th>Плаваща</th></tr></thead><tbody>` +
+                list.map(p => `<tr><td>${p.symbol}</td><td class="${p.dir === 'BUY' ? 'pos' : 'neg'}">${p.dir}</td><td>${fmt(p.entry, 5)}</td><td>${fmt(p.lots, 3)}</td><td>${fmt(p.notional, 2)} ${cur()}</td><td>${fmt(p.margin, 2)} ${cur()}</td><td class="neg">${p.spread ? fmt(p.spread, 2) + ' ' + cur() : '—'}</td><td>${fmt(p.tp, 5)}</td><td>${fmt(p.sl, 5)}</td><td>${fmt(p.swap, 2)}</td><td class="${cls(p.floating)}">${euro(p.floating)}</td></tr>`).join('') +
                 `</tbody></table>`;
         }
 
-        // Панел с данните на демо сметката (Binance Testnet или виртуална).
+        // Панел с данните на MT5 сметката (реални, от агента).
         function renderAccount(acc) {
             const el = document.getElementById('accountPanel');
             if (!el) return;
             if (!acc) { el.innerHTML = ''; return; }
-            if (acc.mode === 'live') {
-                const cur = acc.currency || 'USDT';
-                const rows = (acc.positions || []).map(p =>
-                    `<tr><td>${p.symbol}</td><td class="${p.dir === 'BUY' ? 'pos' : 'neg'}">${p.dir}</td><td>${fmt(p.qty, 4)}</td><td>${fmt(p.entry, 5)}</td><td class="${cls(p.unrealized)}">${fmt(p.unrealized, 2)} ${cur}</td><td>${p.leverage || ''}</td></tr>`).join('');
-                el.innerHTML = `<h3>Демо сметка — ${acc.broker || 'Binance Testnet'}${acc.market ? ' · ' + acc.market : ''}</h3>
-                    <div style="display:flex;gap:16px;flex-wrap:wrap;margin:6px 0">
-                        <span>Начален капитал: <b>${acc.initial != null ? fmt(acc.initial, 2) + ' ' + cur : '—'}</b></span>
-                        <span>Баланс: <b>${acc.balance != null ? fmt(acc.balance, 2) + ' ' + cur : '—'}</b></span>
-                        <span>Свободни: <b>${acc.available != null ? fmt(acc.available, 2) + ' ' + cur : '—'}</b></span>
-                        <span>Капитал: <b>${acc.equity != null ? fmt(acc.equity, 2) + ' ' + cur : '—'}</b></span>
-                        <span>Плаваща: <b class="${cls(acc.unrealized)}">${acc.unrealized != null ? fmt(acc.unrealized, 2) + ' ' + cur : '—'}</b></span>
-                    </div>
-                    ${!acc.connected ? '<div class="note neg">Няма връзка с Binance Testnet — провери ключовете. Ако балансът е 0, захрани демо сметката от faucet-а (' + (acc.market === 'futures' ? 'testnet.binancefuture.com' : 'testnet.binance.vision') + '); Binance Testnet няма API за създаване на акаунт/баланс.</div>' : ''}
-                    ${rows ? `<table><thead><tr><th>Символ</th><th>Вид</th><th>Количество</th><th>Вход</th><th>Плаваща</th><th>Лив.</th></tr></thead><tbody>${rows}</tbody></table>` : (acc.connected ? '<div class="empty">Няма отворени позиции в Binance Testnet</div>' : '')}`;
-            } else {
-                el.innerHTML = `<h3>Демо сметка — виртуална (paper)</h3>
-                    <div style="display:flex;gap:16px;flex-wrap:wrap;margin:6px 0">
-                        <span>Баланс: <b>${fmt(acc.balance, 2)} €</b></span>
-                        <span>Капитал: <b>${fmt(acc.equity, 2)} €</b></span>
-                    </div>
-                    <div class="note" style="color:var(--text-dim)">Няма записани Binance Testnet ключове — търговията е виртуална. Добави ключове по-долу, за да търгува реално на Testnet.</div>`;
-            }
+            const c = acc.currency || '';
+            el.innerHTML = `<h3>MT5 сметка — ${acc.demo ? 'ДЕМО' : '<span class="neg">РЕАЛНА</span>'} · ${acc.login || '—'} @ ${acc.server || '—'} · ${acc.marginMode || ''} ${acc.leverage ? '· 1:' + acc.leverage : ''}</h3>
+                <div style="display:flex;gap:16px;flex-wrap:wrap;margin:6px 0">
+                    <span>Баланс: <b>${acc.balance != null ? fmt(acc.balance, 2) + ' ' + c : '—'}</b></span>
+                    <span>Капитал: <b>${acc.equity != null ? fmt(acc.equity, 2) + ' ' + c : '—'}</b></span>
+                    <span>Маржин: <b>${acc.margin != null ? fmt(acc.margin, 2) + ' ' + c : '—'}</b></span>
+                    <span>Свободен: <b>${acc.available != null ? fmt(acc.available, 2) + ' ' + c : '—'}</b></span>
+                    <span>Плаваща (цяла сметка): <b class="${cls(acc.unrealized)}">${acc.unrealized != null ? fmt(acc.unrealized, 2) + ' ' + c : '—'}</b></span>
+                </div>
+                ${!acc.agentOnline ? '<div class="note neg">MT5 агентът е офлайн — алгоритъмът не взема решения, докато не се върне. Отворените позиции са защитени от SL/TP в MT5.</div>' : ''}
+                <div id="symQuotes" style="display:flex;gap:14px;flex-wrap:wrap;color:var(--text-dim)"></div>`;
+            const q = document.getElementById('symQuotes');
+            if (q && lastState) q.innerHTML = Object.keys(lastState.symbols).map(k => {
+                const d = lastState.symbols[k];
+                return `<span><b>${k}</b> ${d.bid != null ? fmt(d.bid, 5) + ' / ' + fmt(d.ask, 5) : '—'} · спред ${d.spread != null ? fmt(d.spread, 5) : '—'} · суап L/S ${d.swapLong != null ? fmt(d.swapLong, 2) + ' / ' + fmt(d.swapShort, 2) : '—'} · ${d.marketOpen ? 'пазар отворен' : '<span class="neg">пазар затворен</span>'}${d.error ? ' · <span class="neg">' + d.error + '</span>' : ''}</span>`;
+            }).join('');
         }
 
         function renderTrades(list) {
             const el = document.getElementById('tradesList');
             if (!list.length) { el.innerHTML = '<div class="empty">Още няма сделки</div>'; return; }
             const rows = list.slice().reverse().slice(0, 50).map(t =>
-                `<tr><td>${new Date(t.openedAt * 1000).toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td><td>${t.symbol}</td><td class="${t.dir === 'BUY' ? 'pos' : 'neg'}">${t.dir}</td><td>${fmt(t.lots, 3)}</td><td>${fmt(t.entry, 5)}</td><td>${fmt(t.exit, 5)}</td><td>${t.reason}</td><td class="${cls(t.pnl)}">${euro(t.pnl)}</td><td class="neg">${t.spread ? '-' + fmt(t.spread, 2) + ' €' : '—'}</td></tr>`).join('');
-            el.innerHTML = `<table><thead><tr><th>Отваряне</th><th>Символ</th><th>Вид</th><th>Обем (лот)</th><th>Вход</th><th>Изход</th><th>Причина</th><th>P/L</th><th>Спред</th></tr></thead><tbody>${rows}</tbody></table>`;
+                `<tr><td>${new Date(t.openedAt * 1000).toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td><td>${t.symbol}</td><td class="${t.dir === 'BUY' ? 'pos' : 'neg'}">${t.dir}</td><td>${fmt(t.lots, 3)}</td><td>${fmt(t.entry, 5)}</td><td>${fmt(t.exit, 5)}</td><td>${t.reason}</td><td class="${cls(t.pnl)}">${euro(t.pnl)}</td><td>${fmt(t.swap, 2)}</td></tr>`).join('');
+            el.innerHTML = `<table><thead><tr><th>Отваряне</th><th>Символ</th><th>Вид</th><th>Обем (лот)</th><th>Вход</th><th>Изход</th><th>Причина</th><th>P/L</th><th>Суап</th></tr></thead><tbody>${rows}</tbody></table>`;
         }
 
         // Паралелна графика: промяната на капитала в % спрямо началото.

@@ -6,3 +6,7 @@ graphify-out/
 # Docker / environment
 .env
 data/
+
+# MT5 агент (локален конфиг с токен)
+mt5-agent.config.json
+KILL

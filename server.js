@@ -133,62 +133,30 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // ─── Брокер (Binance Testnet демо) — изисква вход ────────────────
-  if (url.pathname === '/api/broker' || url.pathname.startsWith('/api/broker/')) {
-    const user = authUser(req);
-    if (!user) return sendJson(res, 401, { ok: false, error: 'Изисква вход' });
-    const binance = require('./engine/binance');
-    const store = require('./engine/brokerStore');
-    try {
-      if (url.pathname === '/api/broker/test' && req.method === 'POST') {
-        const body = await readJson(req);
-        const r = await binance.testConnection(body.market, body.apiKey, body.apiSecret);
-        return sendJson(res, 200, r);
-      }
-      if (url.pathname === '/api/broker/status' && req.method === 'GET') {
-        return sendJson(res, 200, store.statusFor(user.id));
-      }
-      if (url.pathname === '/api/broker/account' && req.method === 'GET') {
-        const creds = store.getCredentials(user.id);
-        if (!creds) return sendJson(res, 200, { ok: false, error: 'Няма записани Testnet ключове' });
-        const snap = await require('./engine/broker').account(creds);
-        return sendJson(res, 200, Object.assign({ ok: true, broker: 'Binance Testnet' }, snap));
-      }
-      if (url.pathname === '/api/broker/save' && req.method === 'POST') {
-        const body = await readJson(req);
-        const r = await binance.testConnection(body.market, body.apiKey, body.apiSecret);
-        if (!r.ok) return sendJson(res, 200, r);
-        return sendJson(res, 200, Object.assign({ ok: true, verified: true }, store.setCredentials(user.id, body)));
-      }
-      if (url.pathname === '/api/broker' && req.method === 'DELETE') {
-        return sendJson(res, 200, store.removeCredentials(user.id));
-      }
-      return sendJson(res, 404, { ok: false, error: 'Неизвестен API път' });
-    } catch (e) {
-      return sendJson(res, 200, { ok: false, error: e.message, code: e.code || null });
-    }
+  // ─── MT5 агенти (токени, команди) ────────────────────────────────
+  if (url.pathname.startsWith('/api/mt5/')) {
+    const handled = await require('./engine/mt5').route(req, res, url, { sendJson, readJson, user: authUser(req) });
+    if (handled) return;
   }
 
-  // ─── Paper търговия API (изисква вход) ───────────────────────────
-  if (url.pathname.startsWith('/api/paper/')) {
+  // ─── Търговия през MT5 (изисква вход) ────────────────────────────
+  if (url.pathname.startsWith('/api/trade/')) {
     const user = authUser(req);
     if (!user) return sendJson(res, 401, { ok: false, error: 'Изисква вход' });
     const engine = require('./engine/session');
-    const parts = url.pathname.split('/').filter(Boolean); // api/paper/sessions/:id/:action
+    const parts = url.pathname.split('/').filter(Boolean); // api/trade/sessions/:id/:action
     const method = req.method;
     try {
       if (parts.length === 3 && parts[2] === 'sessions') {
-        // Само сесиите на вписания профил (legacy сесии без owner се виждат на всички).
         if (method === 'GET') return sendJson(res, 200, { ok: true, sessions: engine.listSessions(user.id), active: engine.activeSessions(user.id).map(s => s.id) });
         if (method === 'POST') {
           const body = await readJson(req);
-          // Демо сметката: HEROS търгува САМО на Binance Testnet. Без ключове
-          // сесия не се създава (няма виртуален fallback).
-          let brokerCreds = null;
-          try { brokerCreds = require('./engine/brokerStore').getCredentials(user.id); } catch (e) { brokerCreds = null; }
-          if (!brokerCreds) return sendJson(res, 200, { ok: false, error: 'HEROS търгува само с демо сметка — запиши Binance Testnet ключове и опитай пак.' });
-          const s = await engine.createSession(Object.assign({}, body || {}, { ownerId: user.id, broker: brokerCreds }));
-          return sendJson(res, 201, { ok: true, id: s.id, mode: s.mode, state: s.getState() });
+          try {
+            const s = await engine.createSession(Object.assign({}, body || {}, { ownerId: user.id }));
+            return sendJson(res, 201, { ok: true, id: s.id, mode: s.mode, state: s.getState() });
+          } catch (e) {
+            return sendJson(res, 200, { ok: false, error: e.message });
+          }
         }
       }
       if (parts.length >= 4 && parts[2] === 'sessions') {
@@ -213,8 +181,16 @@ const server = http.createServer(async (req, res) => {
         }
         if (action === 'pause' && method === 'POST') { s.pause(); return sendJson(res, 200, { ok: true, status: s.status }); }
         if (action === 'resume' && method === 'POST') { s.resume(); return sendJson(res, 200, { ok: true, status: s.status }); }
-        if (action === 'stop' && method === 'POST') { s.stop(); return sendJson(res, 200, { ok: true, status: s.status }); }
-        if (!action && method === 'DELETE') { engine.removeSession(parts[3]); return sendJson(res, 200, { ok: true }); }
+        if (action === 'stop' && method === 'POST') {
+          const body = await readJson(req).catch(() => ({}));
+          await s.stop(!!(body && body.keepPositions));
+          return sendJson(res, 200, { ok: true, status: s.status });
+        }
+        if (!action && method === 'DELETE') {
+          if (s.status !== 'stopped') return sendJson(res, 200, { ok: false, error: 'Първо спри сесията.' });
+          engine.removeSession(parts[3]);
+          return sendJson(res, 200, { ok: true });
+        }
       }
       return sendJson(res, 404, { ok: false, error: 'Неизвестен API път' });
     } catch (e) {
@@ -222,7 +198,7 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // Валутни курсове към EUR (за клиента — HERMES/HEROS). Безплатен източник.
+  // Валутни курсове към EUR (за клиента — HERMES). Безплатен източник.
   if (url.pathname === '/fx' && req.method === 'GET') {
     try {
       const fxmod = require('./engine/fx');
@@ -742,9 +718,9 @@ server.listen(PORT, async () => {
   } catch (e) {
     console.error('[db] init/migrate fail:', e.message);
   }
-  // Възстановяване на paper сесиите (продължават да търгуват след рестарт)
+  // Възстановяване на MT5 сесиите (продължават да търгуват след рестарт)
   try { await require('./engine/session').init(); }
-  catch (e) { console.error('[paper] init fail:', e.message); }
+  catch (e) { console.error('[trade] init fail:', e.message); }
   // Check MT5 availability in background
   const dp = require('./data-provider');
   dp.checkMT5().catch(() => {});
