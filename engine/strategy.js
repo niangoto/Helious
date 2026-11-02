@@ -21,6 +21,9 @@ function normalizeParams(p) {
     maxSpreadFrac: Math.min(1, Math.max(0, num(p.maxSpreadFrac, 0.5))), // макс. спред като дял от по-близкото ниво (TP/SL); 0 = без проверка
     skipNegSwap: !!p.skipNegSwap,                                       // не отваряй, ако суапът за посоката е отрицателен
     maxPositions: Math.max(1, parseInt(p.maxPositions, 10) || 5),
+    lookback: Math.min(5000, Math.max(100, parseInt(p.lookback, 10) || 2000)), // свещи назад за модела/ATR
+    pctClose: !!p.pctClose,                                  // процентно затваряне (вероятност срещу позицията)
+    pctCloseLimit: Math.max(0, num(p.pctCloseLimit, 0)),     // лимит на очакваната загуба; 0 = загубата до SL
     reverse: !!p.reverse
   };
 }

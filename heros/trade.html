@@ -91,7 +91,7 @@
             background: rgba(8, 11, 18, 0.6);
         }
         .group { display: flex; flex-direction: column; gap: 8px; }
-        .group > .gtitle {
+        .group > .gtitle, .group summary.gtitle {
             font-size: 10px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
             color: var(--accent-cyan); border-bottom: 1px solid var(--panel-border); padding-bottom: 5px;
         }
@@ -217,6 +217,8 @@
                             <option value="3">Очаквана стойност</option>
                             <option value="4">Уейвлет</option>
                             <option value="5">Средна вероятност</option>
+                            <option value="6">Фурие</option>
+                            <option value="7">RSI анализ</option>
                         </select>
                     </label>
                 </div>
@@ -230,7 +232,14 @@
             </div>
 
             <div class="group">
-                <div class="gtitle">Параметри (както в HERMES)</div>
+                <details id="paramsBox">
+                <summary class="gtitle" style="cursor:pointer">Параметри (както в HERMES) ▾</summary>
+                <div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+                <div class="row" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+                    <button class="btn" type="button" onclick="document.getElementById('hermesFile').click()">⇪ Импорт от HERMES</button>
+                    <input type="file" id="hermesFile" accept=".json,application/json" style="display:none" onchange="importHermes(event)">
+                    <span class="note" id="importNote" style="color:var(--text-dim)"></span>
+                </div>
                 <div class="grid2">
                     <label class="f" title="Максимален капитал, върху който се смята рискът (0 = целият капитал на сметката)">Таван на капитала (0 = без)<input id="inpBudget" type="number" value="0" min="0" step="100"></label>
                     <label class="f">Риск (α)<input id="inpAlpha" type="number" value="1.0" min="0.1" step="0.1"></label>
@@ -243,11 +252,16 @@
                     <label class="f">Кели (част)<input id="inpKelly" type="number" value="0.25" min="0.01" step="0.05"></label>
                     <label class="f">Кели макс.<input id="inpMaxKelly" type="number" value="0.05" min="0.01" max="1" step="0.05"></label>
                     <label class="f" title="Макс. спред (ask−bid) като дял от по-близкото ниво TP/SL. Над него не се отваря. 0 = без проверка">Макс. спред (дял от TP/SL)<input id="inpMaxSpread" type="number" value="0.5" min="0" max="1" step="0.05"></label>
+                    <label class="f" title="Колко свещи назад гледа моделът (HERMES „Поглед назад“)">Поглед назад (свещи)<input id="inpLookback" type="number" value="2000" min="100" max="5000" step="100"></label>
+                    <label class="f" title="Лимит на очакваната загуба за процентното затваряне; 0 = загубата до SL">Лимит проц. затв. (0 = до SL)<input id="inpPctCloseLimit" type="number" value="0" min="0" step="any"></label>
                     <label class="f">Макс. позиции<input id="inpMaxPos" type="number" value="5" min="1" step="1"></label>
                 </div>
                 <div class="note" style="color:var(--text-dim)">Обемът, спредът, суапът, маржинът и леверидж идват директно от MT5 (реални стойности на брокера).</div>
                 <div class="row"><input type="checkbox" id="inpSkipNegSwap"> Не отваряй при отрицателен суап за посоката</div>
                 <div class="row"><input type="checkbox" id="inpReverse"> Обърната посока (контра със същия обем)</div>
+                <div class="row"><input type="checkbox" id="inpPctClose"> Процентно затваряне (вероятност срещу позицията)</div>
+                </div>
+                </details>
                 <button class="btn primary" id="btnStart" onclick="startSession()" style="margin-top:4px">▶ Започни търговия</button>
             </div>
 
@@ -405,6 +419,47 @@
         })();
         loadAgents();
 
+        // ── Импорт на настройки от HERMES (само нужните за реално време) ──
+        // Без период/дати/скорост, символ (имената в MT5 са други), бюджет, леверидж,
+        // мин. обем и спред — те идват от MT5 или не важат в реално време.
+        const HERMES_MAP = {
+            inpAlpha: 'inpAlpha', inpBuyTh: 'inpBuyTh', inpSellTh: 'inpSellTh', inpMinEv: 'inpMinEv',
+            inpTp: 'inpTp', inpSl: 'inpSl', inpHold: 'inpHold', inpKelly: 'inpKelly', inpMaxKelly: 'inpMaxKelly',
+            inpModel: 'inpModel', inpLookback: 'inpLookback', inpInterval: 'inpInterval', inpPctCloseLimit: 'inpPctCloseLimit'
+        };
+        const HERMES_CHECKS = { inpReverse: 'inpReverse', inpPctClose: 'inpPctClose', contraModel0: 'c0', contraModel1: 'c1', contraModel2: 'c2', contraModel3: 'c3', contraModel4: 'c4' };
+        function importHermes(ev) {
+            const input = ev.target, f = input.files && input.files[0];
+            if (!f) return;
+            const note = document.getElementById('importNote');
+            const r = new FileReader();
+            r.onload = () => {
+                input.value = '';
+                let data;
+                try { data = JSON.parse(r.result); } catch (e) { note.textContent = '✗ Невалиден JSON'; return; }
+                const fl = data && data.fields;
+                if (!fl || typeof fl !== 'object') { note.textContent = '✗ Не е файл с настройки на HERMES'; return; }
+                let n = 0; const skipped = [];
+                for (const k in HERMES_MAP) {
+                    if (!(k in fl)) continue;
+                    const el = document.getElementById(HERMES_MAP[k]);
+                    if (!el) continue;
+                    if (el.tagName === 'SELECT' && ![...el.options].some(o => o.value === String(fl[k]))) { skipped.push(k === 'inpInterval' ? 'интервал ' + fl[k] : 'модел ' + fl[k]); continue; }
+                    el.value = fl[k]; n++;
+                }
+                for (const k in HERMES_CHECKS) {
+                    if (!(k in fl)) continue;
+                    const el = document.getElementById(HERMES_CHECKS[k]);
+                    if (el) { el.checked = !!fl[k]; n++; }
+                }
+                document.getElementById('contraBox').style.display = parseInt(document.getElementById('inpModel').value, 10) === 5 ? 'grid' : 'none';
+                note.style.color = 'var(--accent-green)';
+                note.textContent = '✓ Импортирани ' + n + ' настройки' + (data.symbol ? ' (символ ' + data.symbol + ' не се взима — въведи MT5 името)' : '') + (skipped.length ? ' · пропуснати: ' + skipped.join(', ') : '');
+                document.getElementById('paramsBox').open = true;
+            };
+            r.readAsText(f);
+        }
+
         function readConfig() {
             const symbols = document.getElementById('inpSymbols').value.split(',').map(s => s.trim()).filter(Boolean);
             const contra = [0, 1, 2, 3, 4].map(i => document.getElementById('c' + i).checked);
@@ -429,6 +484,9 @@
                     maxSpreadFrac: parseFloat(v('inpMaxSpread')),
                     maxPositions: parseInt(v('inpMaxPos'), 10),
                     skipNegSwap: document.getElementById('inpSkipNegSwap').checked,
+                    lookback: parseInt(v('inpLookback'), 10),
+                    pctClose: document.getElementById('inpPctClose').checked,
+                    pctCloseLimit: parseFloat(v('inpPctCloseLimit')) || 0,
                     reverse: document.getElementById('inpReverse').checked
                 }
             };
@@ -503,6 +561,8 @@
             set('inpBudget', P.budget); set('inpAlpha', P.alpha);
             set('inpMaxSpread', P.maxSpreadFrac); set('inpMaxPos', P.maxPositions);
             document.getElementById('inpSkipNegSwap').checked = !!P.skipNegSwap;
+            set('inpLookback', P.lookback); set('inpPctCloseLimit', P.pctCloseLimit);
+            document.getElementById('inpPctClose').checked = !!P.pctClose;
             if (cfg.agentId) { const ag = document.getElementById('inpAgent'); if ([...ag.options].some(o => o.value === cfg.agentId)) ag.value = cfg.agentId; }
             set('inpBuyTh', P.buyTh); set('inpSellTh', P.sellTh); set('inpMinEv', P.minEv);
             set('inpTp', P.tpMult); set('inpSl', P.slMult); set('inpHold', P.holdBars);

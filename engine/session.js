@@ -67,6 +67,8 @@ class Session {
     this._lastPersist = 0;
   }
 
+  window() { return this.P.lookback || WINDOW; }
+
   on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   emit() { const st = this.getState(); for (const fn of this.listeners) { try { fn(st); } catch (e) {} } }
 
@@ -86,7 +88,7 @@ class Session {
       const st = this.state[name];
       const last = st.candles.length ? st.candles[st.candles.length - 1].time : 0;
       const gap = last > 0 && (now - last) > 4 * iv;      // дупка → тегли отначало
-      return { name, interval: this.interval, count: WINDOW, from: (last > 0 && !gap && st.candles.length >= 30) ? last : 0 };
+      return { name, interval: this.interval, count: this.window(), from: (last > 0 && !gap && st.candles.length >= 30) ? last : 0 };
     });
     return mt5.call(this.agentId, 'snapshot', {
       symbols: req, magic: this.magic, historyFrom: Math.max(0, (this.startedAt || now) - 3600)
@@ -117,7 +119,7 @@ class Session {
         const first = add[0].time;
         let keep = st.candles.filter(c => c.time < first);
         if (d.candles_full) keep = [];
-        st.candles = keep.concat(add).slice(-(WINDOW + 50));
+        st.candles = keep.concat(add).slice(-(this.window() + 50));
         const iv = IV_SEC[this.interval];
         const arr = st.candles, last = arr[arr.length - 1];
         const closed = (last.time + iv) <= nowSec() ? last : (arr[arr.length - 2] || last);
@@ -215,7 +217,7 @@ class Session {
     let prob = null;
     if (arr.length >= 30) {
       try {
-        const probs = models.computeModelProbSeriesLive(arr, this.model, { invert: this.contra, intervalSec: iv }, WINDOW);
+        const probs = models.computeModelProbSeriesLive(arr, this.model, { invert: this.contra, intervalSec: iv }, this.window());
         prob = probs[probs.length - 1] || null;
       } catch (e) { prob = null; }
     }
@@ -225,7 +227,18 @@ class Session {
     for (const pos of [...this.positions.values()]) {
       if (pos.symbol !== symbol) continue;
       const held = Math.max(0, Math.floor((nowSec() - pos.openTime) / iv));
-      if (held >= this.P.holdBars) await this.closeTicket(pos, 'Време');
+      if (held >= this.P.holdBars) { await this.closeTicket(pos, 'Време'); continue; }
+      // Процентно затваряне: вероятност срещу позицията × плаваща загуба ≥ лимит
+      if (this.P.pctClose && prob && st.info) {
+        const i = st.info;
+        const fx = (i.contract > 0 && i.tickSize > 0) ? (i.tickValue / i.tickSize) / i.contract : 1;
+        const units = pos.lots * (i.contract || 1);
+        const loss = Math.max(0, -((pos.profit || 0) + (pos.swap || 0) + (pos.commission || 0)));
+        const slLoss = Math.abs(pos.entry - pos.sl) * units * fx;
+        const limit = this.P.pctCloseLimit > 0 ? this.P.pctCloseLimit : slLoss;
+        const pOpp = (pos.dir === 'BUY' ? prob.sellPct : prob.buyPct) / 100;
+        if (limit > 0 && loss > 0 && pOpp * loss >= limit - 1e-9) await this.closeTicket(pos, 'Процентно');
+      }
     }
 
     // 2) Вход
