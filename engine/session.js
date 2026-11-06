@@ -217,8 +217,13 @@ class Session {
     let prob = null;
     if (arr.length >= 30) {
       try {
-        const probs = models.computeModelProbSeriesLive(arr, this.model, { invert: this.contra, intervalSec: iv }, this.window());
-        prob = probs[probs.length - 1] || null;
+        // Както computeModelProbSeriesStrict в HERMES за последния бар: моделът се
+        // смята САМО върху последните `lookback` свещи (индикаторите — от началото им).
+        const W = Math.max(30, this.window());
+        const win = arr.length > W ? arr.slice(arr.length - W) : arr;
+        const vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W });
+        const v = vals ? vals[vals.length - 1] : null;
+        prob = v != null ? { time: bar.time, buyPct: v, sellPct: 100 - v } : null;
       } catch (e) { prob = null; }
     }
     if (prob && prob.buyPct) { st.prob = prob.buyPct; st.probTime = bar.time; }

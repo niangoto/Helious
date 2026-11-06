@@ -298,7 +298,15 @@
             <div class="chart-wrap">
                 <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">
                     <div class="tabs" id="symTabs"></div>
-                    <span class="note" id="symSource" style="color:var(--text-dim)"></span>
+                    <span style="display:flex;align-items:center;gap:8px">
+                        <span class="note" id="symSource" style="color:var(--text-dim)"></span>
+                        <select id="chartIv" title="Интервал на свещите в графиката (само за гледане — не променя търговията)" style="width:auto" onchange="onChartIvChange()">
+                            <option value="">Като сесията</option>
+                            <option value="1m">1м</option><option value="5m">5м</option><option value="15m">15м</option>
+                            <option value="30m">30м</option><option value="1h">1ч</option><option value="4h">4ч</option><option value="1d">1Д</option>
+                        </select>
+                        <button class="btn" type="button" onclick="fitChart()" title="Побери всичко в екрана">⤢ Побери</button>
+                    </span>
                 </div>
                 <div id="chart"></div>
                 <canvas id="pnlCanvas"></canvas>
@@ -377,6 +385,23 @@
             el.innerHTML = '<b>Токен (запиши го сега — повече няма да се покаже):</b><br><code>' + t + '</code><br>Адрес на сайта: <code>' + location.origin + '</code>';
         }
         setInterval(loadAgents, 10000);
+        // Резервно опресняване (ако EventSource е блокиран от прокси): на 5с взима състоянието.
+        setInterval(async () => {
+            if (document.hidden) return;
+            try {
+                const r = await fetch('/api/trade/sessions').then(x => x.json());
+                if (r && r.sessions) {
+                    const was = sessions.length;
+                    sessions = r.sessions; renderSessionList();
+                    const act = sessions.filter(s => s.status === 'running' || s.status === 'paused');
+                    if (!sessionId && act.length) return attach(act[0].id);
+                }
+                if (sessionId) {
+                    const st = await fetch('/api/trade/sessions/' + sessionId).then(x => x.json());
+                    if (st && st.ok && (!lastState || st.state.updatedAt >= (lastState.updatedAt || 0))) render(st.state);
+                }
+            } catch (e) {}
+        }, 5000);
 
         // ── Символи и контроли ──
         (function initControls() {
@@ -734,6 +759,46 @@
             try { chart.timeScale().subscribeVisibleLogicalRangeChange(() => drawPnl()); } catch (e) {}
         }
 
+        // Графика: свободно местене/мащабиране. Мащабът се нулира САМО при смяна на
+        // сесия/символ/интервал или с бутона „Побери“ — не при всяко опресняване.
+        let chartKey = null, ovCandles = null, ovKey = null, ovFetchedAt = 0, ovBusy = false;
+        const IV_SEC_UI = { '1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400 };
+        function chartIvSel() { return document.getElementById('chartIv').value; }
+        function onChartIvChange() { ovCandles = null; ovKey = null; ovFetchedAt = 0; if (lastState) render(lastState); }
+        function fitChart() { if (chart) chart.timeScale().fitContent(); }
+
+        function ensureOverrideCandles(state) {
+            const iv = chartIvSel();
+            if (!iv || iv === state.config.interval) { ovCandles = null; return null; }
+            const key = state.agentId + '|' + activeSymbol + '|' + iv;
+            if (ovKey !== key) { ovCandles = null; ovKey = key; ovFetchedAt = 0; }
+            if (!ovBusy && Date.now() - ovFetchedAt > 5000) {
+                ovBusy = true; ovFetchedAt = Date.now();
+                fetch('/api/mt5/agents/' + state.agentId + '/candles?symbol=' + encodeURIComponent(activeSymbol) + '&interval=' + iv + '&count=1500')
+                    .then(x => x.json()).then(r => {
+                        ovBusy = false;
+                        if (r && r.ok && ovKey === key) { ovCandles = r.candles; if (lastState) drawChartData(lastState); }
+                    }).catch(() => { ovBusy = false; });
+            }
+            return ovCandles;
+        }
+
+        function drawChartData(state) {
+            const sd = state.symbols[activeSymbol];
+            if (!sd) return;
+            const iv = chartIvSel() || state.config.interval;
+            const ov = ensureOverrideCandles(state);
+            const candles = ov || ((!chartIvSel() || chartIvSel() === state.config.interval) ? (sd.candles || []) : []);
+            const key = state.id + '|' + activeSymbol + '|' + iv;
+            const keep = (key === chartKey) ? chart.timeScale().getVisibleLogicalRange() : null;
+            candleSeries.setData(candles);
+            const step = IV_SEC_UI[iv] || 60;
+            const mk = (sd.markers || []).map(m => Object.assign({}, m, { time: m.time - (m.time % step) })).sort((a, b) => a.time - b.time);
+            candleSeries.setMarkers(mk);
+            if (keep) chart.timeScale().setVisibleLogicalRange(keep);
+            else if (candles.length) { chart.timeScale().fitContent(); chartKey = key; }
+        }
+
         function renderChart(state) {
             initChart();
             const sd = state.symbols[activeSymbol];
@@ -741,11 +806,9 @@
             const srcEl = document.getElementById('symSource');
             if (srcEl) {
                 const last = (sd.candles || []).slice(-1)[0];
-                srcEl.textContent = 'Цена: ' + (last ? fmt(last.close, 5) : '—') + ' · източник: ' + (sd.source || '—');
+                srcEl.textContent = 'Цена: ' + (last ? fmt(last.close, 5) : '—') + ' · MT5';
             }
-            candleSeries.setData(sd.candles || []);
-            candleSeries.setMarkers((sd.markers || []).slice().sort((a, b) => a.time - b.time));
-            chart.timeScale().fitContent();
+            drawChartData(state);
         }
 
         function renderOpenPositions(list) {

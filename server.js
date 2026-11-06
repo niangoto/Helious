@@ -170,6 +170,7 @@ const server = http.createServer(async (req, res) => {
             'Content-Type': 'text/event-stream; charset=utf-8',
             'Cache-Control': 'no-cache',
             'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no',
             'Access-Control-Allow-Origin': '*'
           });
           res.write('retry: 3000\n\n');

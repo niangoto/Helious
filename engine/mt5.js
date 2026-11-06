@@ -181,6 +181,17 @@ async function route(req, res, url, ctx) {
       sendJson(res, 200, { ok: true, account: snap.account, positions: snap.positions });
       return true;
     }
+    if (action === 'candles' && req.method === 'GET') {
+      const iv = url.searchParams.get('interval') || '1h';
+      if (!['1m', '5m', '15m', '30m', '1h', '4h', '1d'].includes(iv)) { sendJson(res, 200, { ok: false, error: 'Неподдържан интервал' }); return true; }
+      const sym = url.searchParams.get('symbol') || '';
+      const count = Math.max(50, Math.min(5000, parseInt(url.searchParams.get('count'), 10) || 1500));
+      const snap = await call(id, 'snapshot', { symbols: [{ name: sym, interval: iv, count, from: 0 }] });
+      const d = snap.symbols && snap.symbols[sym];
+      if (!d || d.error) { sendJson(res, 200, { ok: false, error: (d && d.error) || 'Няма данни' }); return true; }
+      sendJson(res, 200, { ok: true, interval: iv, candles: (d.candles || []).map(c => ({ time: c[0], open: c[1], high: c[2], low: c[3], close: c[4] })) });
+      return true;
+    }
     if (action === 'symbols' && req.method === 'GET') {
       const list = await call(id, 'symbols', { query: url.searchParams.get('query') || '' });
       sendJson(res, 200, { ok: true, symbols: list });
