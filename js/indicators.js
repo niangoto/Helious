@@ -24,9 +24,22 @@ function computeRSI(candles, period) {
 }
 
 function updateIndicatorCharts(candles) {
-    if (!candles || candles.length < 20) return;
+    if (!candles || candles.length < 4) return;
     // Няма фонови сметки: работим само когато табло/графика е отворено.
     if (typeof appVisible === 'function' && !appVisible()) return;
+    // Страница 11 (Кубична крива): не са нужни RSI/модели/FFT — само кривата.
+    if (typeof currentPage === 'number' && currentPage === 11) {
+        if (typeof updateCubicOverlay === 'function') updateCubicOverlay(candles);
+        if (typeof fftSeries !== 'undefined' && fftSeries) fftSeries.setData([]);
+        if (typeof fftForecastSeries !== 'undefined' && fftForecastSeries) fftForecastSeries.setData([]);
+        latestFft = null;
+        if (typeof drawFftSpectrum === 'function') drawFftSpectrum();
+        if (typeof updateCandleForecastOverlay === 'function') updateCandleForecastOverlay(candles);
+        drawIndicatorCanvases();
+        if (typeof window.updatePresentLinePosition === 'function') window.updatePresentLinePosition();
+        return;
+    }
+    if (candles.length < 20) return;
     const period = 14;
     const rsiVals = computeRSI(candles, period);
     if (!rsiVals.length) return;
@@ -56,6 +69,7 @@ function updateIndicatorCharts(candles) {
     indicatorData = { rsi, vol, bias };
     // Моделните вероятностни редици + FFT overlay са нужни САМО на графиката.
     if (typeof chartViewVisible === 'function' && !chartViewVisible()) return;
+    if (typeof clearCubicOverlay === 'function') clearCubicOverlay();
     computeIndicatorModelProbs(candles);
     updateFftOverlay(candles);
     if (typeof updateCandleForecastOverlay === 'function') updateCandleForecastOverlay(candles);

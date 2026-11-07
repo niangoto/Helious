@@ -1,4 +1,4 @@
-// Tab registry + shared helpers for the 8 swipeable indicator pages.
+// Tab registry + shared helpers for the 12 swipeable indicator pages.
 const TabRegistry = [];
 
 function registerTab(tab) {
@@ -17,8 +17,8 @@ let probLineHover = null;
 function updateIvPanel(candles) {
     if (!candles || candles.length < 25) return;
     if (typeof indicatorViewVisible === 'function' && !indicatorViewVisible()) return;
-    // Страница 10 (Производна) не показва вероятности — не смятаме модели.
-    if (typeof currentPage === 'number' && currentPage === 10) {
+    // Страници 10/11 (Производна / Кубична) не показват вероятности — не смятаме модели.
+    if (typeof currentPage === 'number' && (currentPage === 10 || currentPage === 11)) {
         ivModelsCache = {};
         ivPanelCandles = candles;
         renderCurrentTabPanel();
@@ -69,7 +69,7 @@ function drawIndicatorCanvases() {
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, w, h);
 
-    if (!indicatorData.rsi.length) return;
+    if (!indicatorData.rsi.length && !(typeof currentPage === 'number' && currentPage === 11)) return;
 
     const tab = TabRegistry[currentPage];
     probLineHover = null;   // само drawProbLine го задава (страниците с вероятности)

@@ -694,6 +694,11 @@
             color: var(--text-main);
         }
 
+        .derivative-controls input[type="range"] {
+            width: 130px;
+            accent-color: var(--accent-cyan);
+        }
+
         .derivative-canvas-wrap {
             position: relative;
             width: 100%;
@@ -702,7 +707,8 @@
             flex-shrink: 0;
         }
 
-        #derivativeCanvas {
+        #derivativeCanvas,
+        #cubicCanvas {
             display: block;
             width: 100%;
             height: 100%;
@@ -712,6 +718,8 @@
             font-size: 10px;
             color: var(--text-dim);
             font-family: 'JetBrains Mono', monospace;
+            line-height: 1.5;
+            word-break: break-word;
         }
 
         @media (max-width: 768px) {
@@ -1518,6 +1526,53 @@
                             <canvas id="derivativeCanvas"></canvas>
                         </div>
                     </div>
+
+                    <!-- Page 11: Кубична регресия (3-та степен, без вероятност) -->
+                    <div class="iv-page">
+                        <div class="iv-model-label" style="margin-bottom:8px">КУБИЧНА КРИВА · 3-ТА СТЕПЕН</div>
+                        <div class="derivative-controls">
+                            <label>Метод
+                                <select id="cubicMode">
+                                    <option value="interp4" selected>Една кубична (4 точки)</option>
+                                    <option value="regression">Регресия (1 кубична)</option>
+                                    <option value="spline">Сплайн (сегменти)</option>
+                                </select>
+                            </label>
+                            <label>Период за напасване
+                                <select id="cubicFitWindow">
+                                    <option value="0" selected>Всички</option>
+                                    <option value="100">100</option>
+                                    <option value="200">200</option>
+                                    <option value="500">500</option>
+                                    <option value="1000">1000</option>
+                                </select>
+                            </label>
+                            <label>Продължение (барове)
+                                <select id="cubicExtBars">
+                                    <option value="10">10</option>
+                                    <option value="20" selected>20</option>
+                                    <option value="50">50</option>
+                                    <option value="100">100</option>
+                                </select>
+                            </label>
+                            <label>Вид продължение
+                                <select id="cubicExtMode">
+                                    <option value="linear" selected>Линейно (стабилно)</option>
+                                    <option value="cubic">Кубично</option>
+                                </select>
+                            </label>
+                            <label title="Край на данните за проверка — същото като линията „СЕГА“">Край на данните
+                                <input type="range" id="cubicCutoff" min="0" max="0" value="0">
+                                <span class="derivative-info" id="cubicCutoffLabel">СЕГА</span>
+                            </label>
+                            <span class="derivative-info" id="cubicInfo">---</span>
+                        </div>
+                        <div class="derivative-legend" id="cubicLegend">y = a·x³ + b·x² + c·x + d</div>
+                        <div class="derivative-legend" style="opacity:0.75">Край на данните: плъзгача по-горе или линията „СЕГА“ в 📈 Графика.</div>
+                        <div class="derivative-canvas-wrap">
+                            <canvas id="cubicCanvas"></canvas>
+                        </div>
+                    </div>
                 </div>
                 <button class="iv-nav-arrow next" id="ivArrowNext" onclick="scrollIvPage(1)">›</button>
             </div>
@@ -1623,6 +1678,7 @@
     <script src="js/tabs/rsi-phase.js"></script>
     <script src="js/tabs/candle-forecast.js"></script>
     <script src="js/tabs/derivative.js"></script>
+    <script src="js/tabs/cubic.js"></script>
     <script src="js/indicators.js"></script>
     <script src="js/app.js"></script>
 </body>

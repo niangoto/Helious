@@ -77,11 +77,29 @@ function init() {
         lastValueVisible: false
     });
 
+    // Кубична крива за панела „Кубична крива“ (page 11) — върху главната графика.
+    cubicFitSeries = chart.addLineSeries({
+        color: 'rgba(180, 80, 255, 0.95)',
+        lineWidth: 2,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+        lineStyle: 0
+    });
+    cubicExtSeries = chart.addLineSeries({
+        color: 'rgba(180, 80, 255, 0.8)',
+        lineWidth: 2,
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+        lineStyle: 2
+    });
+
     setupPresentLine();
     // Build page dots
     const dotContainer = document.getElementById('ivPageDots');
     if (dotContainer) {
-        for (let i = 0; i < 11; i++) {
+        for (let i = 0; i < 12; i++) {
             const dot = document.createElement('div');
             dot.className = 'iv-page-dot' + (i === 0 ? ' active' : '');
             dot.id = 'ivDot' + i;
@@ -338,6 +356,7 @@ function toggleView() {
         if (latestCandles && latestCandles.length) {
             updateIndicatorCharts(candlesUpToCutoff(latestCandles));
         }
+        if (typeof window.updatePresentLinePosition === 'function') window.updatePresentLinePosition();
         // Retry drawing canvases until it works
         let tries = 0;
         function tryDraw() {
@@ -355,28 +374,41 @@ function updatePageChrome(idx) {
     const predRow = document.getElementById('candlePredictionRow');
     const betaCtl = document.getElementById('betaControl');
     const isCandlePage = (idx === 9);
-    const isDerivativePage = (idx === 10);
-    if (fftRow) fftRow.style.display = (isCandlePage || isDerivativePage) ? 'none' : '';
+    const isNoModelPage = (idx === 10 || idx === 11);
+    if (fftRow) fftRow.style.display = (isCandlePage || isNoModelPage) ? 'none' : '';
     if (predRow) predRow.style.display = isCandlePage ? '' : 'none';
     if (betaCtl) betaCtl.style.display = isCandlePage ? 'flex' : 'none';
+    const pendulum = document.getElementById('pendulumCanvas');
+    if (pendulum) pendulum.style.display = (idx === 11) ? 'none' : '';
+    if (idx !== 11 && typeof clearCubicOverlay === 'function') clearCubicOverlay();
 }
 
 function onIvPageScroll() {
     const pages = document.getElementById('ivPages');
     if (!pages) return;
-    const count = 11;
+    const count = 12;
     const idx = Math.round(pages.scrollLeft / pages.clientWidth);
     updatePageChrome(idx);
     if (currentPage !== idx) {
         currentPage = idx;
-        // Рендираме панела на новоотворената страница (лениво). Ако сме били на
-        // „Производна“ (10), моделите може да не са смятани — смятаме ги сега.
-        if (idx !== 10 && typeof ensureIvModels === 'function') ensureIvModels();
+        // Рендираме панела на новоотворената страница (лениво). На страници 10/11
+        // (Производна / Кубична) моделите не се смятат — смятаме ги при връщане.
+        if (idx !== 10 && idx !== 11 && typeof ensureIvModels === 'function') ensureIvModels();
         if (typeof renderCurrentTabPanel === 'function') renderCurrentTabPanel();
         // Опресняваме overlay-ите на графиката само ако тя е реално отворена.
         if (chartViewVisible() && latestCandles && latestCandles.length) {
-            updateFftOverlay(latestCandles);
-            if (typeof updateCandleForecastOverlay === 'function') updateCandleForecastOverlay(latestCandles);
+            if (idx === 11) {
+                // Страница 11: само кубичната крива, без FFT/прогнозни свещи.
+                if (typeof updateCubicOverlay === 'function') updateCubicOverlay(candlesUpToCutoff(latestCandles));
+                if (typeof fftSeries !== 'undefined' && fftSeries) fftSeries.setData([]);
+                if (typeof fftForecastSeries !== 'undefined' && fftForecastSeries) fftForecastSeries.setData([]);
+                if (typeof candleForecastSeries !== 'undefined' && candleForecastSeries) candleForecastSeries.setData([]);
+                drawIndicatorCanvases();
+            } else {
+                if (typeof clearCubicOverlay === 'function') clearCubicOverlay();
+                updateFftOverlay(latestCandles);
+                if (typeof updateCandleForecastOverlay === 'function') updateCandleForecastOverlay(latestCandles);
+            }
         }
     }
     for (let i = 0; i < count; i++) {
@@ -387,7 +419,7 @@ function onIvPageScroll() {
     const next = document.getElementById('ivArrowNext');
     if (prev) prev.style.display = 'flex';
     if (next) {
-        const labels = ['›', '›', '›', '›', '›', '›', '›', '›', '›', '›', 'A'];
+        const labels = ['›', '›', '›', '›', '›', '›', '›', '›', '›', '›', '›', 'A'];
         next.textContent = labels[idx] || '›';
     }
 }
@@ -399,7 +431,7 @@ function scrollIvPage(dir) {
     const idx = Math.round(pages.scrollLeft / w);
     const target = idx + dir;
     if (dir < 0 && target < 0) return;
-    const maxPage = 10;
+    const maxPage = 11;
     if (dir > 0 && target > maxPage) {
         showNotification('Модел A — активен модел', 'success');
         return;
@@ -561,6 +593,30 @@ function candlesUpToCutoff(candles) {
     return src;
 }
 
+// Кубичната крива върху главната графика — само когато е активна страница 11.
+// Данните идват от cubic.js (cubicOverlayData) и са до линията „СЕГА“.
+function updateCubicOverlay(candles) {
+    if (!cubicFitSeries || !cubicExtSeries) return;
+    if (typeof currentPage === 'number' && currentPage !== 11) {
+        clearCubicOverlay();
+        return;
+    }
+    if (!candles || candles.length < 4 || typeof cubicOverlayData !== 'function') {
+        clearCubicOverlay();
+        return;
+    }
+    let data = null;
+    try { data = cubicOverlayData(candles); } catch (e) { data = null; }
+    if (!data) { clearCubicOverlay(); return; }
+    cubicFitSeries.setData(data.fit || []);
+    cubicExtSeries.setData(data.ext || []);
+}
+
+function clearCubicOverlay() {
+    if (cubicFitSeries) cubicFitSeries.setData([]);
+    if (cubicExtSeries) cubicExtSeries.setData([]);
+}
+
 // Обединява два масива свещи по време (новите презаписват) и ги сортира.
 function mergeCandles(base, add) {
     const map = new Map();
@@ -706,7 +762,8 @@ function setupPresentLine() {
         line.style.left = `${left}px`;
         const d = new Date(presentCutoffTime * 1000);
         // Сумата на предвиденото движение (в %) до избрания момент (+ или -).
-        const pct = (typeof candleForecastTotalPct === 'function') ? candleForecastTotalPct() : null;
+        const noForecastPct = (typeof currentPage === 'number' && currentPage === 11);
+        const pct = (!noForecastPct && typeof candleForecastTotalPct === 'function') ? candleForecastTotalPct() : null;
         const pctStr = (pct == null) ? '' : ` · ${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%`;
         label.innerText = (presentLineLocked ? `Cutoff: ${d.toLocaleString()}` : `СЕГА`) + pctStr;
     }

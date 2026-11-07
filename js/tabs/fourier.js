@@ -17,8 +17,14 @@ registerTab({
 
 // Recompute the FFT on the visible candles and refresh chart overlay + spectrum.
 function updateFftOverlay(candles) {
-    // На страниците с RSI фаза (8) и прогноза на свещи (9) графиката НЕ трябва да
-    // показва FFT прогнозната линия — вместо нея отдолу се рисуват пикове/свещи.
+    // На страници 8, 9, 10 и 11 графиката НЕ показва FFT — там има собствени ленти.
+    if (typeof currentPage === 'number' && (currentPage === 10 || currentPage === 11)) {
+        latestFft = null;
+        if (fftSeries) fftSeries.setData([]);
+        if (fftForecastSeries) fftForecastSeries.setData([]);
+        drawFftSpectrum();
+        return;
+    }
     const hiddenOnPhasePage = typeof currentPage === 'number' && (currentPage === 8 || currentPage === 9);
     if (typeof computeFourierAnalysis !== 'function' || !candles || candles.length < 16) {
         latestFft = null;

@@ -3476,7 +3476,7 @@
                     // Закръгляме НАГОРЕ към валидната стъпка на лота (напр. 0.01),
                     // за да е минималният обем цял брой стъпки и позициите — цели
                     // кратни на минималния обем.
-                    P.minLot = Math.max(spec.min || step, Math.ceil(rawLots / step - 1e-9) * step);
+                    P.minLot = Math.max(1e-9, rawLots); // точно, без закръгляне към стъпка на лота
                 }
                 // Пазим ТОЧНИТЕ параметри на симулацията (с refPrice и превърнатия
                 // minLot) — sweep-ът варира от тях, а не от текущото състояние на UI.
@@ -4109,7 +4109,7 @@
             if (!(px > 0)) return raw;
             const step = (spec.step > 0) ? spec.step : 0.01;
             const rawLots = raw * lev / (px * spec.contract * fx);
-            return Math.max(spec.min || step, Math.ceil(rawLots / step - 1e-9) * step);
+            return Math.max(1e-9, rawLots);
         }
 
         function updateMinLotSpreadHint() {
@@ -4139,7 +4139,7 @@
             if (price > 0) {
                 const notional = units * price * fx;        // в EUR
                 const margin = notional / lev;
-                txt = minLot.toFixed(2) + ' лот (' + currentSymbol + ') = ' + margin.toFixed(2) +
+                txt = (minLot < 0.01 ? minLot.toFixed(4) : minLot.toFixed(2)) + ' лот (' + currentSymbol + ') = ' + margin.toFixed(2) +
                     ' € маржин при 1:' + lev + ' (нотионал ' + notional.toFixed(2) +
                     ' € при последна цена ' + price.toFixed(dec) + ').';
                 if (margin > budget) {
@@ -4148,7 +4148,7 @@
                         ' €) → НЯМА да се отварят позиции. Намали „Мин. обем“ (или ползвай авто-попълването от Binance) или увеличи бюджета.';
                 }
             } else {
-                txt = minLot.toFixed(2) + ' лот (' + currentSymbol + ').';
+                txt = (minLot < 0.01 ? minLot.toFixed(4) : minLot.toFixed(2)) + ' лот (' + currentSymbol + ').';
             }
             if (spread <= 0) {
                 txt += ' Спредът е 0 — не влияе на входа/сметката.';

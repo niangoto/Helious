@@ -1,4 +1,5 @@
 let chart, candleSeries, fftSeries, fftForecastSeries, candleForecastSeries;
+let cubicFitSeries, cubicExtSeries;
 let latestForecastData = null;
 let latestCandles = [];
 // Допълнителна история (още един период назад) за равна дълбочина на пресмятанията.
