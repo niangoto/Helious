@@ -95,3 +95,59 @@ MT5 терминалът и Python пакетът `MetaTrader5` работят *
    Очаквано: `True` и данни за сметката. Ако е `False` — терминалът не е отворен/логнат или е 32‑bit Python.
 10. **Копирай проекта** (или само `mt5-agent.py` след като го направя) на Windows компютъра и го пусни с `python mt5-agent.py` (по-късно: като Task Scheduler задача при вход в Windows).
 11. **Препоръки:** започни само с DEMO; не пускай реална сметка, докато не си наблюдавал поне няколко дни; VPS с Windows (напр. от брокера) е най-стабилен за 24/7.
+
+---
+
+# Пускане на агента на Windows (след инсталацията)
+
+Работната папка е **`C:\heros`**. Всичко по-долу се прави там.
+
+## 1. Файлове в `C:\heros`
+Отвори `cmd` (Start → напиши `cmd` → Enter) и пиши командите **по една**, като натискаш Enter след всяка:
+```
+mkdir C:\heros
+cd C:\heros
+curl -L -o mt5-agent.py https://raw.githubusercontent.com/niangoto/Helious/main/mt5-agent.py
+curl -L -o mt5-agent.config.json https://raw.githubusercontent.com/niangoto/Helious/main/mt5-agent.config.example.json
+dir
+```
+`mt5-agent.py` трябва да е около 17 000 байта (ако е 14 — командите са се слепили или е грешка; изтегли го пак).
+
+## 2. Токен от сайта
+1. Отвори `https://helious.dobg.eu/heros/trade.html` и влез в профила.
+2. В „MT5 връзка“ → „+ Нов агент“ → копирай токена (започва с `hmt_`, показва се само веднъж).
+
+## 3. Запиши токена в конфига
+```
+notepad C:\heros\mt5-agent.config.json
+```
+Съдържание (замени токена със своя; без български букви и интервали в него):
+```
+{
+  "server_url": "https://helious.dobg.eu",
+  "token": "hmt_ТВОЯТ_ТОКЕН",
+  "max_volume": 0.1,
+  "max_positions": 3,
+  "allowed_symbols": [],
+  "deviation": 20,
+  "server_utc_offset_hours": null
+}
+```
+File → Save. Файлът трябва да е точно в `C:\heros` и да се казва `mt5-agent.config.json` (не `.txt`).
+
+## 4. Пускане
+MT5 е отворен и логнат, „Algo Trading“ е зелен. После:
+```
+cd C:\heros
+python mt5-agent.py
+```
+Очаквано: `MT5 OK: сметка … (DEMO)` и `Свързан със сайта: https://helious.dobg.eu`. Прозорецът остава отворен, докато агентът работи. Спиране: затвори прозореца (X) или `taskkill /f /im python.exe`.
+
+## 5. Често срещани грешки
+- `'pip'/'py' is not recognized` — Python не е в PATH; преинсталирай с отметка „Add python.exe to PATH“ и ползвай `python -m pip ...`.
+- `'latin-1' codec can't encode` — в токена има български/неправилни символи (остава текстът от примера).
+- `Невалиден токен` — грешен/стар токен; в сайта „Нов токен“ и го сложи пак.
+- Сайтът показва „Офлайн“ — агентът не върви, компютърът е заспал или няма интернет.
+
+## 6. Всеки следващ път
+Само стъпка 4 (при рестарт на Windows агентът не тръгва сам — пуска се ръчно или през Task Scheduler).
