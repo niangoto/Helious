@@ -33,11 +33,17 @@ function normalizeParams(p) {
 // equity = общ капитал (за рисковото правило); freeMargin = свободен маржин
 // (equity − вече заетия маржин) — позицията никога не надхвърля него.
 // fx = колко EUR е 1 единица от котираната валута (напр. USD→EUR ≈ 0.92).
-function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn, spec) {
+function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn, spec, why) {
+  // `why` (по избор) — обект, в който се записва причината за отказ: why.reason (текст).
+  const no = (text) => { if (why) why.reason = text; return null; };
+  const n2 = (v) => (Math.abs(v) >= 100 ? v.toFixed(0) : v.toFixed(2));
   const fx = (fxIn > 0) ? fxIn : 1;
   if (freeMargin == null) freeMargin = equity;
-  if (!prob || !(atr > 0) || !(entry > 0) || !(equity > 0)) return null;
-  if (!(freeMargin > 0)) return null;
+  if (!prob) return no('Няма изчислена вероятност');
+  if (!(atr > 0)) return no('ATR не може да се изчисли (малко свещи)');
+  if (!(entry > 0)) return no('Няма цена');
+  if (!(equity > 0)) return no('Капиталът е 0 — няма от какво да се смята риск');
+  if (!(freeMargin > 0)) return no('Няма свободен маржин в сметката');
   const buyPct = prob.buyPct, sellPct = prob.sellPct;
   const alpha = P.alpha;
 
@@ -45,7 +51,7 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn, sp
   const slDist = P.slMult * alpha * atr;
   const gain = tpDist;
   const loss = slDist;
-  if (gain <= 0 || loss <= 0) return null;
+  if (gain <= 0 || loss <= 0) return no('TP/SL множителите дават 0');
 
   const pRise = buyPct / 100, pFall = sellPct / 100;
   const evLong = (pRise * alpha) * gain - (pFall / alpha) * loss;
@@ -56,40 +62,44 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn, sp
   let dir = null;
   if (buyPct >= buyPmin && evLong > P.minEv) dir = 'BUY';
   else if (sellPct >= sellPmin && evShort > P.minEv) dir = 'SELL';
-  if (!dir) return null;
+  if (!dir) {
+    return no('Сигналът е слаб — рискът не е причина: Buy ' + buyPct.toFixed(1) + '% / Sell ' + sellPct.toFixed(1) +
+      '%, нужни ≥ ' + buyPmin.toFixed(1) + '% / ' + sellPmin.toFixed(1) + '%' +
+      (P.minEv > 0 ? ' и EV > ' + P.minEv : ''));
+  }
 
   const p = dir === 'BUY' ? pRise : pFall;
   const q = 1 - p;
   const b = gain / loss;
   const fStar = p - q / b;
-  if (!(fStar > 0)) return null;
+  if (!(fStar > 0)) return no('Сигналът ' + dir + ' има праг, но Кели ≤ 0 при R:R ' + b.toFixed(2) + ' — няма преимущество');
 
   const f = Math.min(fStar * P.kellyF * alpha, P.maxKelly);
-  if (!(f > 0)) return null;
+  if (!(f > 0)) return no('Кели дава риск 0');
 
-  // Размер по риска (Kelly), ограничен от свободния маржин. Всички параметри
-  // идват от MT5: spec = { contract, min, step, max, spread (в цена), marginPerUnit }.
-  // fx = валута на сметката за 1 единица от котираната валута (tick_value/tick_size/contract).
-  if (!spec || !(spec.contract > 0)) return null;
+  if (!spec || !(spec.contract > 0)) return no('Няма спецификация на символа от MT5');
   const minLot = spec.min;
-  const perUnitMargin = spec.marginPerUnit > 0 ? spec.marginPerUnit : (entry * fx) / P.leverage;
+  const perUnitMargin = spec.marginPerUnit > 0 ? spec.marginPerUnit : (entry * fx);
   const riskAmount = f * equity;
   let units = riskAmount / (loss * fx);
   const maxUnits = perUnitMargin > 0 ? freeMargin / perUnitMargin : 0;
   units = Math.min(units, maxUnits);
-  if (!(units > 0)) return null;
+  if (!(units > 0)) return no('Свободният маржин не стига за позиция');
 
   let lots = Math.floor((units / spec.contract) / spec.step + 1e-9) * spec.step;
   lots = Math.min(lots, spec.max);
-  if (lots < minLot) lots = minLot;
+  let forcedMin = false;
+  if (lots < minLot) { lots = minLot; forcedMin = true; }
   lots = Math.round(lots * 1e8) / 1e8;
   const finalUnits = lots * spec.contract;
 
   if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
 
-  // Реален спред (ask−bid) — разход при отваряне; ако е голям спрямо TP/SL, пропускаме.
   const spread = Math.max(0, spec.spread || 0);
-  if (P.maxSpreadFrac > 0 && spread > P.maxSpreadFrac * Math.min(tpDist, slDist)) return null;
+  const nearest = Math.min(tpDist, slDist);
+  if (P.maxSpreadFrac > 0 && spread > P.maxSpreadFrac * nearest) {
+    return no('Спредът е твърде голям: ' + spread.toPrecision(3) + ' > ' + Math.round(P.maxSpreadFrac * 100) + '% от по-близкото ниво (' + nearest.toPrecision(3) + ')');
+  }
   const spreadCost = spread * finalUnits * fx;
 
   const notionalQuote = finalUnits * entry;
@@ -98,14 +108,20 @@ function entryDecision(prob, atr, entry, equity, freeMargin, P, symbol, fxIn, sp
   const tp = dir === 'BUY' ? entry + tpDist : entry - tpDist;
   const sl = dir === 'BUY' ? entry - slDist : entry + slDist;
   const riskCost = slDist * finalUnits * fx;
-  if (!(lots >= minLot && margin > 0 && margin <= freeMargin + 1e-9 && riskCost <= freeMargin + 1e-9)) return null;
+  if (!(margin > 0)) return no('Маржинът не може да се изчисли');
+  if (margin > freeMargin + 1e-9) {
+    return no('Маржинът за ' + lots + ' лота (' + n2(margin) + ') е над свободния (' + n2(freeMargin) + ')' + (forcedMin ? ' — даже минималният обем не се побира' : ''));
+  }
+  if (riskCost > freeMargin + 1e-9) {
+    return no('Рискът до SL при ' + lots + ' лота (' + n2(riskCost) + ') е над свободния маржин (' + n2(freeMargin) + ')' + (forcedMin ? ' — минималният обем е по-голям от допустимия риск' : ''));
+  }
 
   const probPct = (dir === 'BUY' ? pRise : pFall) * 100;
 
   return {
     dir, entry, lots, contract: spec.contract, units: finalUnits,
     notional, notionalQuote, margin, tp, sl, atr, tpDist, slDist, prob: probPct,
-    spreadCost, fillShift: 0, fx
+    spreadCost, fillShift: 0, fx, forcedMin, riskCost, riskAllowed: riskAmount
   };
 }
 

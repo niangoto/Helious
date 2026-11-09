@@ -3,9 +3,12 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>HEROS — Търговия (демо)</title>
     <meta name="theme-color" content="#06080f">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <script src="https://unpkg.com/lightweight-charts@4.1.1/dist/lightweight-charts.standalone.production.js"></script>
     <link
         href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@300;400;500;600;700&display=swap"
@@ -166,10 +169,67 @@
         @media (max-width: 900px) { .two-col { grid-template-columns: 1fr; } }
         .panel { background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 12px; padding: 10px 12px; }
         .panel h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-dim); }
+
+        /* Защо не се отваря позиция */
+        #accountPanel { font-size: 12px; }
+        .why { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+        .why .w { font-size: 12px; line-height: 1.4; padding: 7px 10px; border-radius: 9px; border: 1px solid var(--panel-border); background: rgba(255,255,255,0.03); }
+        .why .w b { font-family: 'JetBrains Mono', monospace; }
+        .why .w.ok { border-color: rgba(0,255,102,0.45); }
+        .why .w.wait { border-color: rgba(255,210,122,0.45); }
+        .why .w.block { border-color: rgba(255,0,85,0.5); }
+        .why .w.info { border-color: rgba(0,240,255,0.35); }
+        .why .lvl { font-size: 10px; text-transform: uppercase; letter-spacing: 1px; margin-right: 6px; }
+        .why .ok .lvl { color: var(--accent-green); } .why .wait .lvl { color: #ffd27a; }
+        .why .block .lvl { color: var(--accent-red); } .why .info .lvl { color: var(--accent-cyan); }
+
+        /* Мобилна навигация (приложение) */
+        .mnav { display: none; }
+        .tblwrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+        @media (max-width: 800px) {
+            body { height: auto; min-height: 100dvh; overflow: auto; padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+            header { flex-wrap: wrap; padding: 8px 12px; position: sticky; top: 0; z-index: 30; }
+            .brand { flex-wrap: wrap; gap: 6px; }
+            .brand .sub { display: none; }
+            .hdr-actions { flex-wrap: wrap; gap: 6px; width: 100%; }
+            .hdr-actions #userEmail, .hdr-actions #sessionInfo { display: none; }
+            .hdr-actions .btn { padding: 9px 12px; flex: 1 1 auto; text-align: center; }
+            .layout { flex-direction: column; }
+            aside { width: 100%; border-right: none; overflow: visible; padding: 12px; }
+            main { overflow: visible; padding: 10px 10px 14px; }
+            body[data-tab="main"] aside { display: none; }
+            body[data-tab="set"] main { display: none; }
+            .mnav {
+                display: flex; position: fixed; left: 0; right: 0; bottom: 0; z-index: 40;
+                background: rgba(8, 11, 18, 0.96); border-top: 1px solid var(--panel-border);
+                backdrop-filter: blur(12px); padding-bottom: env(safe-area-inset-bottom);
+            }
+            .mnav button {
+                flex: 1; padding: 13px 6px; background: none; border: none; color: var(--text-dim);
+                font-family: 'Outfit', sans-serif; font-size: 13px; font-weight: 600; cursor: pointer;
+            }
+            .mnav button.on { color: var(--accent-cyan); box-shadow: inset 0 2px 0 var(--accent-cyan); }
+            input, select, textarea { font-size: 16px; padding: 10px; }   /* без авто-zoom на iOS */
+            .btn { min-height: 40px; }
+            .stats { grid-template-columns: 1fr 1fr; gap: 8px; }
+            .card-stat { padding: 8px 10px; }
+            .card-stat .v { font-size: 15px; }
+            #chart { height: 300px; }
+            #pnlCanvas { height: 70px; }
+            .chart-wrap > div:first-child { flex-wrap: wrap; }
+            .panel { padding: 10px; overflow-x: auto; }
+            table { min-width: 560px; }
+            .grid2 { grid-template-columns: 1fr 1fr; }
+        }
+        @media (max-width: 420px) {
+            .grid2 { grid-template-columns: 1fr; }
+            .stats { grid-template-columns: 1fr 1fr; }
+        }
     </style>
 </head>
 
-<body>
+<body data-tab="set">
     <header>
         <div class="brand">
             <span class="logo">HEROS</span>
@@ -185,6 +245,11 @@
             <button class="btn" onclick="logout()">Изход</button>
         </div>
     </header>
+
+    <nav class="mnav">
+        <button id="mnavMain" onclick="setMobTab('main')">📊 Табло</button>
+        <button id="mnavSet" class="on" onclick="setMobTab('set')">⚙ Настройки</button>
+    </nav>
 
     <div class="layout">
         <aside>
@@ -292,6 +357,7 @@
         </aside>
 
         <main>
+            <div class="why" id="symWhy" style="margin:0"></div>
             <div class="stats" id="stats"></div>
             <div class="panel" id="accountPanel" style="margin-bottom:12px"></div>
 
@@ -338,6 +404,14 @@
         async function logout() {
             try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
             toLogin();
+        }
+
+        function setMobTab(t) {
+            document.body.dataset.tab = t;
+            document.getElementById('mnavMain').classList.toggle('on', t === 'main');
+            document.getElementById('mnavSet').classList.toggle('on', t === 'set');
+            window.scrollTo(0, 0);
+            if (t === 'main' && chart) { const el = document.getElementById('chart'); setTimeout(() => chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }), 50); }
         }
 
         // ── MT5 агенти ──
@@ -556,7 +630,9 @@
             if (!id) return;
             const r = await fetch('/api/trade/sessions/' + id).then(x => x.json()).catch(() => null);
             if (!r || !r.ok) { alert('Сесията не е намерена.'); return loadSessions(); }
+            const firstAttach = (sessionId !== id);
             sessionId = id;
+            if (firstAttach) setMobTab('main');
             applyConfig(r.state.config);
             setControls(true);
             render(r.state);
@@ -814,9 +890,9 @@
         function renderOpenPositions(list) {
             const el = document.getElementById('openPos');
             if (!list.length) { el.innerHTML = '<div class="empty">Няма отворени позиции</div>'; return; }
-            el.innerHTML = `<table><thead><tr><th>Символ</th><th>Вид</th><th>Вход</th><th>Обем (лот)</th><th>Нотионал</th><th>Маржин</th><th>Спред</th><th>TP</th><th>SL</th><th>Суап</th><th>Плаваща</th></tr></thead><tbody>` +
+            el.innerHTML = `<div class="tblwrap"><table><thead><tr><th>Символ</th><th>Вид</th><th>Вход</th><th>Обем (лот)</th><th>Нотионал</th><th>Маржин</th><th>Спред</th><th>TP</th><th>SL</th><th>Суап</th><th>Плаваща</th></tr></thead><tbody>` +
                 list.map(p => `<tr><td>${p.symbol}</td><td class="${p.dir === 'BUY' ? 'pos' : 'neg'}">${p.dir}</td><td>${fmt(p.entry, 5)}</td><td>${fmt(p.lots, 3)}</td><td>${fmt(p.notional, 2)} ${cur()}</td><td>${fmt(p.margin, 2)} ${cur()}</td><td class="neg">${p.spread ? fmt(p.spread, 2) + ' ' + cur() : '—'}</td><td>${fmt(p.tp, 5)}</td><td>${fmt(p.sl, 5)}</td><td>${fmt(p.swap, 2)}</td><td class="${cls(p.floating)}">${euro(p.floating)}</td></tr>`).join('') +
-                `</tbody></table>`;
+                `</tbody></table></div>`;
         }
 
         // Панел с данните на MT5 сметката (реални, от агента).
@@ -835,6 +911,17 @@
                 </div>
                 ${!acc.agentOnline ? '<div class="note neg">MT5 агентът е офлайн — алгоритъмът не взема решения, докато не се върне. Отворените позиции са защитени от SL/TP в MT5.</div>' : ''}
                 <div id="symQuotes" style="display:flex;gap:14px;flex-wrap:wrap;color:var(--text-dim)"></div>`;
+            const wy = document.getElementById('symWhy');
+            if (wy && lastState) {
+                const LV = { ok: 'отваря', wait: 'чака сигнал', block: 'блокирано', info: 'инфо' };
+                const esc = t => String(t).replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+                wy.innerHTML = Object.keys(lastState.symbols).map(k => {
+                    const w = lastState.symbols[k].why;
+                    if (!w) return `<div class="w info"><b>${k}</b> <span class="lvl">инфо</span>Още няма оценка…</div>`;
+                    const ago = Math.max(0, Math.round(Date.now() / 1000 - w.time));
+                    return `<div class="w ${w.level}"><b>${k}</b> <span class="lvl">${LV[w.level] || ''}</span>${esc(w.text)} <span style="color:var(--text-dim)">· преди ${ago}с</span></div>`;
+                }).join('');
+            }
             const q = document.getElementById('symQuotes');
             if (q && lastState) q.innerHTML = Object.keys(lastState.symbols).map(k => {
                 const d = lastState.symbols[k];

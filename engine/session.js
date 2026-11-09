@@ -204,7 +204,7 @@ class Session {
     }
     for (const s of this.symbols) {
       const st = this.state[s];
-      if (!st.candles.length || !st.info) continue;
+      if (!st.candles.length || !st.info) { st.why = { level: 'block', text: st.error || 'Още няма данни от MT5 за символа', time: nowSec() }; continue; }
       await this.processSymbol(s, st);
     }
   }
@@ -246,16 +246,19 @@ class Session {
       }
     }
 
-    // 2) Вход
-    if (this.status !== 'running') return;
-    if (Date.now() < st.cooldown) return;
-    if ([...this.positions.values()].some(p => p.symbol === symbol)) return;
-    if (this.positions.size >= this.P.maxPositions) return;
+    // 2) Вход — при всеки отказ записваме ПРИЧИНАТА в st.why (показва се в UI).
+    const why = (level, text) => { st.why = { level, text, time: nowSec() }; };
+    const probTxt = (prob && prob.buyPct) ? ' (Buy ' + prob.buyPct.toFixed(1) + '% / Sell ' + prob.sellPct.toFixed(1) + '%)' : '';
+    if (this.status !== 'running') { why('block', 'Сесията е на пауза'); return; }
+    if (Date.now() < st.cooldown) { why('block', 'Пауза след грешка при поръчка още ' + Math.ceil((st.cooldown - Date.now()) / 1000) + 'с — ' + (st.error || '')); return; }
+    if ([...this.positions.values()].some(p => p.symbol === symbol)) { why('info', 'Има отворена позиция по този символ — нов вход не се прави'); return; }
+    if (this.positions.size >= this.P.maxPositions) { why('block', 'Достигнат лимит „Макс. позиции“ (' + this.P.maxPositions + ')'); return; }
     const info = st.info;
-    if (!info.tradeAllowed || !(info.tickAge < STALE_TICK_SEC)) return;   // пазарът е затворен
-    if (!this.account || !this.account.trade_allowed) return;
-    if (!prob || !prob.buyPct) return;
-    if (!(info.contract > 0) || !(info.tickValue > 0) || !(info.tickSize > 0)) return;
+    if (!info.tradeAllowed) { why('block', 'Търговията по символа е забранена в MT5 (режимът не е „пълен“)'); return; }
+    if (!(info.tickAge < STALE_TICK_SEC)) { why('block', 'Пазарът е затворен — последният тик е отпреди ' + Math.round(info.tickAge / 60) + ' мин'); return; }
+    if (!this.account || !this.account.trade_allowed) { why('block', 'В MT5 е изключена алгоритмичната търговия („Algo Trading“) или сметката е само за четене'); return; }
+    if (!prob || !prob.buyPct) { why('block', 'Няма вероятност — малко свещи (' + arr.length + ', трябват ≥ 30)'); return; }
+    if (!(info.contract > 0) || !(info.tickValue > 0) || !(info.tickSize > 0)) { why('block', 'MT5 не дава contract size / tick value за символа'); return; }
 
     const atrArr = models.computeATR(arr, 14);
     const atr = atrArr[atrArr.length - 1];
@@ -268,12 +271,18 @@ class Session {
       contract: info.contract, min: info.vmin, step: info.vstep, max: info.vmax,
       spread: info.spread, marginPerUnit: info.margin1 > 0 ? info.margin1 / info.contract : 0
     };
-    const dec = entryDecision(prob, atr, mid, equity, freeMargin, this.P, symbol, fx, spec);
-    if (!dec) return;
+    const w = {};
+    const dec = entryDecision(prob, atr, mid, equity, freeMargin, this.P, symbol, fx, spec, w);
+    if (!dec) {
+      const weak = /^Сигналът е слаб/.test(w.reason || '');
+      why(weak ? 'wait' : 'block', w.reason || 'Няма решение за вход');
+      return;
+    }
 
     // Суап: по избор не отваряме при отрицателен суап за посоката.
     const swap = dec.dir === 'BUY' ? info.swapLong : info.swapShort;
-    if (this.P.skipNegSwap && swap < 0) return;
+    if (this.P.skipNegSwap && swap < 0) { why('block', 'Сигнал ' + dec.dir + ', но суапът е отрицателен (' + swap + ') и е включено „Не отваряй при отрицателен суап“'); return; }
+    why('ok', 'Сигнал ' + dec.dir + probTxt + ' — изпращам поръчка за ' + dec.lots + ' лота' + (dec.forcedMin ? ' (минималният обем е над риска по Кели)' : ''));
 
     // Реалният вход е ask (BUY) / bid (SELL); нивата са от него.
     const fill = dec.dir === 'BUY' ? info.ask : info.bid;
@@ -384,7 +393,7 @@ class Session {
       const st = this.state[sym];
       const i = st.info || {};
       symbols[sym] = {
-        source: 'MT5', error: st.error, contract: i.contract || null,
+        source: 'MT5', error: st.error, why: st.why || null, contract: i.contract || null,
         bid: i.bid, ask: i.ask, spread: i.spread, swapLong: i.swapLong, swapShort: i.swapShort,
         marketOpen: !!(st.info && i.tradeAllowed && i.tickAge < STALE_TICK_SEC),
         lastBarTime: st.lastBarTime, prob: st.prob, probTime: st.probTime,
