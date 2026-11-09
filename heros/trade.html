@@ -234,6 +234,7 @@
         <div class="brand">
             <span class="logo">HEROS</span>
             <span class="sub">Търговия · MetaTrader 5 (демо или реална)</span>
+            <span class="sub" id="verInfo" style="font-size:10px;opacity:.7"></span>
             <span class="status-badge" id="statusBadge">не е стартирано</span>
         </div>
         <div class="hdr-actions">
@@ -405,6 +406,8 @@
             try { await fetch('/api/auth/logout', { method: 'POST' }); } catch (e) {}
             toLogin();
         }
+
+        fetch('/version').then(r => r.json()).then(v => { document.getElementById('verInfo').textContent = 'v' + v.version + (v.commit ? ' · ' + v.commit : ''); }).catch(() => {});
 
         function setMobTab(t) {
             document.body.dataset.tab = t;
