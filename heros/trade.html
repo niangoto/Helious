@@ -160,6 +160,7 @@
         .chart-wrap { background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 12px; padding: 8px; }
         #chart { width: 100%; height: 380px; }
         #pnlCanvas { width: 100%; height: 90px; display: block; margin-top: 4px; }
+        #probCanvas { width: 100%; height: 64px; display: block; margin-top: 4px; }
 
         table { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
         th { text-align: left; color: var(--text-dim); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--panel-border); font-family: 'Outfit'; text-transform: uppercase; font-size: 9.5px; letter-spacing: 0.5px; }
@@ -217,6 +218,7 @@
             .card-stat .v { font-size: 15px; }
             #chart { height: 300px; }
             #pnlCanvas { height: 70px; }
+            #probCanvas { height: 56px; }
             .chart-wrap > div:first-child { flex-wrap: wrap; }
             .panel { padding: 10px; overflow-x: auto; }
             table { min-width: 560px; }
@@ -377,6 +379,7 @@
                 </div>
                 <div id="chart"></div>
                 <canvas id="pnlCanvas"></canvas>
+                <canvas id="probCanvas" title="Вероятност за покупка (Buy %) по бар — каквато я е виждал алгоритъмът. Пунктир = праговете за вход."></canvas>
             </div>
 
             <div class="two-col">
@@ -796,10 +799,10 @@
             renderChart(state);
             renderOpenPositions(state.openPositions || []);
             renderTrades(state.trades || []);
-            drawPnl();
+            drawPnl(); drawProb();
             // След презареждане размерите/оста на графиката може да се установят
             // в следващия кадър — рисуваме % графиката отново, за да е цялата видима.
-            requestAnimationFrame(() => drawPnl());
+            requestAnimationFrame(() => { drawPnl(); drawProb(); });
             const me = sessions.find(x => x.id === state.id);
             if (me) {
                 const eq = (s.equity != null && s.initial != null) ? s.equity - s.initial : null;
@@ -832,10 +835,10 @@
                 crosshair: { mode: LightweightCharts.CrosshairMode.Normal }
             });
             candleSeries = chart.addCandlestickSeries({ upColor: '#00ff66', downColor: '#ff0055', borderVisible: false, wickUpColor: '#00ff66', wickDownColor: '#ff0055' });
-            const ro = new ResizeObserver(() => { if (el.clientWidth) { chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }); drawPnl(); } });
+            const ro = new ResizeObserver(() => { if (el.clientWidth) { chart.applyOptions({ width: el.clientWidth, height: el.clientHeight }); drawPnl(); drawProb(); } });
             ro.observe(el);
-            window.addEventListener('resize', () => drawPnl());
-            try { chart.timeScale().subscribeVisibleLogicalRangeChange(() => drawPnl()); } catch (e) {}
+            window.addEventListener('resize', () => { drawPnl(); drawProb(); });
+            try { chart.timeScale().subscribeVisibleLogicalRangeChange(() => { drawPnl(); drawProb(); }); } catch (e) {}
         }
 
         // Графика: свободно местене/мащабиране. Мащабът се нулира САМО при смяна на
@@ -941,6 +944,74 @@
         }
 
         // Паралелна графика: промяната на капитала в % спрямо началото.
+        // Лента с вероятността (Buy %) по бар — подравнена по времевата ос на графиката.
+        // Зелено над 50 (към покупка), червено под 50 (към продажба); пунктир = прагове за вход.
+        function drawProb() {
+            const cvs = document.getElementById('probCanvas');
+            if (!cvs || !chart || !lastState) return;
+            const w = cvs.clientWidth, h = cvs.clientHeight;
+            if (w <= 0 || h <= 0) return;
+            const dpr = window.devicePixelRatio || 1;
+            cvs.width = w * dpr; cvs.height = h * dpr;
+            const ctx = cvs.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, w, h);
+            const sd = lastState.symbols[activeSymbol];
+            const P = (lastState.config && lastState.config.params) || {};
+            const alpha = P.alpha > 0 ? P.alpha : 1;
+            const buyMin = 50 + ((P.buyTh != null ? P.buyTh : 75) - 50) / alpha;
+            const sellMax = 100 - (50 + ((P.sellTh != null ? P.sellTh : 75) - 50) / alpha);
+            const toY = v => h - 4 - (v / 100) * (h - 8);
+            const midY = toY(50);
+            ctx.font = '9px JetBrains Mono'; ctx.textAlign = 'right';
+            // прагове и средна линия
+            ctx.lineWidth = 1;
+            ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+            ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(w, midY); ctx.stroke();
+            ctx.setLineDash([4, 4]);
+            ctx.strokeStyle = 'rgba(0,255,102,0.45)';
+            ctx.beginPath(); ctx.moveTo(0, toY(buyMin)); ctx.lineTo(w, toY(buyMin)); ctx.stroke();
+            ctx.strokeStyle = 'rgba(255,0,85,0.45)';
+            ctx.beginPath(); ctx.moveTo(0, toY(sellMax)); ctx.lineTo(w, toY(sellMax)); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = 'rgba(255,255,255,0.55)';
+            ctx.fillText('Buy ' + buyMin.toFixed(0) + '%', w - 4, toY(buyMin) - 2);
+            ctx.fillText('50%', w - 4, midY - 2);
+            ctx.fillText('Sell ' + (100 - sellMax).toFixed(0) + '%', w - 4, toY(sellMax) + 10);
+            const hist = (sd && sd.probHist) || [];
+            if (!hist.length) {
+                ctx.fillStyle = 'rgba(148,163,184,0.8)'; ctx.textAlign = 'left';
+                ctx.fillText('вероятност: още няма данни', 6, 12);
+                return;
+            }
+            const iv = chartIvSel() || lastState.config.interval;
+            const step = IV_SEC_UI[iv] || 60;
+            // по бар на избрания интервал: последната стойност
+            const byBar = new Map();
+            for (const pt of hist) byBar.set(pt[0] - (pt[0] % step), pt[1]);
+            const ts = chart.timeScale();
+            const bars = [...byBar.entries()].sort((a, b) => a[0] - b[0]);
+            let spacing = 6;
+            if (bars.length >= 2) {
+                const xa = ts.timeToCoordinate(bars[bars.length - 1][0]), xb = ts.timeToCoordinate(bars[bars.length - 2][0]);
+                if (xa != null && xb != null) spacing = Math.abs(xa - xb);
+            } else {
+                const lr = ts.getVisibleLogicalRange();
+                if (lr && lr.to > lr.from) spacing = w / (lr.to - lr.from);
+            }
+            const bw = Math.max(1, Math.min(14, spacing * 0.8));
+            for (const [t, v] of bars) {
+                const x = ts.timeToCoordinate(t);
+                if (x == null || x < -bw || x > w + bw) continue;
+                const y = toY(v);
+                ctx.fillStyle = v >= 50 ? 'rgba(0,255,102,0.75)' : 'rgba(255,0,85,0.75)';
+                ctx.fillRect(x - bw / 2, Math.min(y, midY), bw, Math.max(1, Math.abs(midY - y)));
+            }
+            const last = bars[bars.length - 1];
+            ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(255,255,255,0.8)';
+            ctx.fillText('Buy ' + last[1].toFixed(1) + '% / Sell ' + (100 - last[1]).toFixed(1) + '%', 6, 11);
+        }
+
         function drawPnl() {
             const cvs = document.getElementById('pnlCanvas');
             if (!cvs || !chart || !lastState) return;

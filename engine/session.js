@@ -50,7 +50,7 @@ class Session {
     this.startedAt = null;
     this.updatedAt = Date.now();
     this.state = {};
-    for (const s of this.symbols) this.state[s] = { candles: [], lastBarTime: 0, error: null, prob: null, probTime: 0, info: null, cooldown: 0 };
+    for (const s of this.symbols) this.state[s] = { candles: [], lastBarTime: 0, error: null, prob: null, probTime: 0, info: null, cooldown: 0, hist: [] };
     this.account = null;            // последен snapshot на сметката
     this.connected = false;
     this.positions = new Map();     // ticket → позиция на сесията
@@ -226,7 +226,16 @@ class Session {
         prob = v != null ? { time: bar.time, buyPct: v, sellPct: 100 - v } : null;
       } catch (e) { prob = null; }
     }
-    if (prob && prob.buyPct) { st.prob = prob.buyPct; st.probTime = bar.time; }
+    if (prob && prob.buyPct) {
+      st.prob = prob.buyPct; st.probTime = bar.time;
+      // История на вероятностите, каквито алгоритъмът реално ги е виждал (за лентата под графиката).
+      st.hist.push([nowSec(), Math.round(prob.buyPct * 10) / 10]);
+      if (st.hist.length > 6000) {
+        const out = [];
+        for (let i = 0; i < 3000; i += 2) out.push(st.hist[i]);
+        st.hist = out.concat(st.hist.slice(3000));
+      }
+    }
 
     // 1) Изход по време (TP/SL са в MT5 и се изпълняват от брокера)
     for (const pos of [...this.positions.values()]) {
@@ -387,6 +396,15 @@ class Session {
     return out.slice(-300);
   }
 
+  // Последна вероятност за всеки бар (до ~1500 бара) — компактно [времеНаБара, buyPct].
+  histFor(st) {
+    const iv = IV_SEC[this.interval];
+    const m = new Map();
+    for (const [t, v] of st.hist) m.set(t - (t % iv), v);
+    const out = [...m.entries()].sort((a, b) => a[0] - b[0]);
+    return out.slice(-1500);
+  }
+
   getState() {
     const symbols = {};
     for (const sym of this.symbols) {
@@ -396,7 +414,7 @@ class Session {
         source: 'MT5', error: st.error, why: st.why || null, contract: i.contract || null,
         bid: i.bid, ask: i.ask, spread: i.spread, swapLong: i.swapLong, swapShort: i.swapShort,
         marketOpen: !!(st.info && i.tradeAllowed && i.tickAge < STALE_TICK_SEC),
-        lastBarTime: st.lastBarTime, prob: st.prob, probTime: st.probTime,
+        lastBarTime: st.lastBarTime, prob: st.prob, probTime: st.probTime, probHist: this.histFor(st),
         candles: st.candles.slice(-800).map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })),
         markers: this.markers(sym)
       };
@@ -439,6 +457,7 @@ class Session {
       symbols: this.symbols, interval: this.interval, model: this.model, contra: this.contra, P: this.P,
       status: this.status, createdAt: this.createdAt, startedAt: this.startedAt, updatedAt: this.updatedAt,
       startBalance: this.startBalance, peak: this.peak, maxDD: this.maxDD,
+      hist: Object.fromEntries(this.symbols.map(x => [x, this.state[x].hist.slice(-6000)])),
       equitySeries: this.equitySeries
     };
   }
@@ -475,6 +494,7 @@ function restoreSession(obj) {
   s.peak = obj.peak || 0;
   s.maxDD = obj.maxDD || 0;
   s.equitySeries = Array.isArray(obj.equitySeries) ? obj.equitySeries : [];
+  for (const x of s.symbols) if (obj.hist && Array.isArray(obj.hist[x])) s.state[x].hist = obj.hist[x];
   return s;
 }
 
