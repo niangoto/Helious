@@ -160,6 +160,10 @@
         .chart-wrap { background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 12px; padding: 8px; }
         #chart { width: 100%; height: 380px; }
         #pnlCanvas { width: 100%; height: 90px; display: block; margin-top: 4px; }
+        .chart-wrap { position: relative; }
+        #vline { position: absolute; width: 0; border-left: 1px dashed rgba(255,255,255,0.55); pointer-events: none; display: none; z-index: 5; }
+        #vtip { position: absolute; pointer-events: none; display: none; z-index: 6; background: rgba(8,11,18,0.95); border: 1px solid var(--panel-border);
+                border-radius: 8px; padding: 5px 8px; font: 11px/1.45 'JetBrains Mono', monospace; color: var(--text-main); white-space: nowrap; }
         #probCanvas { width: 100%; height: 64px; display: block; margin-top: 4px; }
 
         table { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
@@ -379,6 +383,7 @@
                 </div>
                 <div id="chart"></div>
                 <canvas id="pnlCanvas"></canvas>
+                <div id="vline"></div><div id="vtip"></div>
                 <canvas id="probCanvas" title="Вероятност за покупка (Buy %) по бар — каквато я е виждал алгоритъмът. Пунктир = праговете за вход."></canvas>
             </div>
 
@@ -776,6 +781,7 @@
                 ['Обща P/L', euro(s.totalPnl) + ' (' + (s.totalPct >= 0 ? '+' : '') + fmt(s.totalPct) + '%)', cls(s.totalPnl)],
                 ['Баланс на сесията', fmt(s.balance) + ' ' + cur(), ''],
                 ['Капитал на сесията', fmt(s.equity) + ' ' + cur(), ''],
+                ['Капитал на сметката (реален)', fmt(s.accountEquity) + ' ' + cur(), ''],
                 ['Отворени сега', String(s.openCount), ''],
                 ['Зает маржин', fmt(usedMargin) + ' ' + cur(), ''],
                 ['Свободен маржин (сметка)', fmt(freeMargin) + ' ' + cur(), ''],
@@ -944,6 +950,65 @@
         }
 
         // Паралелна графика: промяната на капитала в % спрямо началото.
+
+        // ── Обща вертикална линия за графиката, печалбата и вероятността ──
+        // Мишката върху която и да е от трите показва линията и във всички (+ стойностите към този момент).
+        let vlTime = null;
+        function fmtTs(t) { return new Date(t * 1000).toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+        function hideVline() { vlTime = null; document.getElementById('vline').style.display = 'none'; document.getElementById('vtip').style.display = 'none'; }
+        function showVline(t, mouseY) {
+            if (!chart || t == null || !lastState) return hideVline();
+            const x = chart.timeScale().timeToCoordinate(t);
+            const chartEl = document.getElementById('chart'), pr = document.getElementById('probCanvas'), wrap = chartEl.parentElement;
+            if (x == null || x < 0 || x > chartEl.clientWidth) return hideVline();
+            vlTime = t;
+            const top = chartEl.offsetTop, bottom = pr.offsetTop + pr.offsetHeight;
+            const vl = document.getElementById('vline');
+            vl.style.display = 'block'; vl.style.left = (chartEl.offsetLeft + x) + 'px'; vl.style.top = top + 'px'; vl.style.height = (bottom - top) + 'px';
+            // стойности към момента
+            const iv = chartIvSel() || lastState.config.interval, step = IV_SEC_UI[iv] || 60;
+            const sd = lastState.symbols[activeSymbol] || {};
+            let pv = null;
+            for (const pt of (sd.probHist || [])) { if (pt[0] - (pt[0] % step) === t - (t % step)) pv = pt[1]; }
+            let eq = null; const init = (lastState.stats && lastState.stats.initial) || 0;
+            for (const pt of (lastState.equitySeries || [])) { if (pt.t <= t + step) eq = pt; else break; }
+            const c = ((ovCandles || sd.candles) || []).find(k => k.time === t);
+            let html = '<b>' + fmtTs(t) + '</b>';
+            if (c) html += '<br>Цена: ' + fmt(c.close, 5);
+            html += '<br>Вероятност: ' + (pv != null ? 'Buy ' + fmt(pv, 1) + '% / Sell ' + fmt(100 - pv, 1) + '%' : '—');
+            html += '<br>Печалба: ' + (eq && init > 0 ? ((eq.equity - init) >= 0 ? '+' : '') + fmt(eq.equity - init, 2) + ' (' + fmt((eq.equity - init) / init * 100, 2) + '%)' : '—');
+            const tip = document.getElementById('vtip');
+            tip.innerHTML = html; tip.style.display = 'block';
+            const tw = tip.offsetWidth, left = chartEl.offsetLeft + x;
+            tip.style.left = Math.max(4, Math.min(wrap.clientWidth - tw - 4, left + 10)) + 'px';
+            tip.style.top = (chartEl.offsetTop + 8) + 'px';
+        }
+        (function initVline() {
+            const hook = () => {
+                if (!chart) return setTimeout(hook, 300);
+                chart.subscribeCrosshairMove(p => {
+                    if (!p || !p.point || p.point.x < 0) return hideVline();
+                    let t = p.time;
+                    if (t == null) t = chart.timeScale().coordinateToTime(p.point.x);
+                    showVline(t);
+                });
+                for (const id of ['pnlCanvas', 'probCanvas']) {
+                    const c = document.getElementById(id);
+                    const mv = e => {
+                        const r = c.getBoundingClientRect();
+                        const x = (e.touches ? e.touches[0].clientX : e.clientX) - r.left;
+                        const t = chart.timeScale().coordinateToTime(x);
+                        if (t == null) return hideVline();
+                        showVline(t);
+                    };
+                    c.addEventListener('mousemove', mv); c.addEventListener('mouseleave', hideVline);
+                    c.addEventListener('touchstart', mv, { passive: true }); c.addEventListener('touchmove', mv, { passive: true });
+                }
+                document.getElementById('chart').addEventListener('mouseleave', hideVline);
+            };
+            hook();
+        })();
+
         // Лента с вероятността (Buy %) по бар — подравнена по времевата ос на графиката.
         // Зелено над 50 (към покупка), червено под 50 (към продажба); пунктир = прагове за вход.
         function drawProb() {
@@ -989,6 +1054,7 @@
             // по бар на избрания интервал: последната стойност
             const byBar = new Map();
             for (const pt of hist) byBar.set(pt[0] - (pt[0] % step), pt[1]);
+            if (sd.prob != null && sd.probAt) byBar.set(sd.probAt - (sd.probAt % step), sd.prob);   // най-новата проверка
             const ts = chart.timeScale();
             const bars = [...byBar.entries()].sort((a, b) => a[0] - b[0]);
             let spacing = 6;
@@ -1008,8 +1074,10 @@
                 ctx.fillRect(x - bw / 2, Math.min(y, midY), bw, Math.max(1, Math.abs(midY - y)));
             }
             const last = bars[bars.length - 1];
+            const live = (sd.prob != null) ? sd.prob : last[1];
+            const ago = sd.probAt ? Math.max(0, Math.round(Date.now() / 1000 - sd.probAt)) : null;
             ctx.textAlign = 'left'; ctx.fillStyle = 'rgba(255,255,255,0.8)';
-            ctx.fillText('Buy ' + last[1].toFixed(1) + '% / Sell ' + (100 - last[1]).toFixed(1) + '%', 6, 11);
+            ctx.fillText('Buy ' + live.toFixed(1) + '% / Sell ' + (100 - live).toFixed(1) + '%' + (ago != null ? ' · проверка преди ' + ago + 'с' : ''), 6, 11);
         }
 
         function drawPnl() {

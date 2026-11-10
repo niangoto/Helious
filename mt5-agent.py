@@ -29,7 +29,7 @@ except ImportError:
     print("Липсва пакетът MetaTrader5: pip install MetaTrader5")
     sys.exit(1)
 
-VERSION = "1.0"
+VERSION = "1.1"
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "mt5-agent.config.json")
 KILL_FILE = os.path.join(HERE, "KILL")
@@ -310,6 +310,12 @@ def cmd_order_open(p):
         "comment": str(p.get("comment", "HEROS"))[:30],
         "type_time": mt5.ORDER_TIME_GTC, "type_filling": filling_for(info),
     }
+    chk = mt5.order_check(req)      # проверка преди изпращане — дава точната причина за отказ
+    if chk is None:
+        raise RuntimeError("order_check: няма отговор (%s)" % (mt5.last_error(),))
+    if chk.retcode != 0:
+        raise RuntimeError("MT5 отказва поръчката: retcode %s — %s (SL %s, TP %s, цена %s, обем %s)" % (
+            chk.retcode, chk.comment, req["sl"], req["tp"], price, vol))
     res = mt5.order_send(req)
     check_result(res, "order_send")
     ticket = res.order
@@ -388,6 +394,8 @@ def main():
         try:
             r = api("POST", "/api/mt5/agent/hello", timeout=15,
                     json={"account": {k: a[k] for k in ("login", "server", "company", "currency", "demo", "leverage", "margin_mode")},
+                          "limits": {"max_volume": CFG["max_volume"], "max_positions": CFG["max_positions"],
+                                     "allowed_symbols": CFG["allowed_symbols"]},
                           "version": VERSION, "host": socket.gethostname()})
             if r.status_code == 401:
                 log("Невалиден токен — провери mt5-agent.config.json")

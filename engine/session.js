@@ -227,7 +227,7 @@ class Session {
       } catch (e) { prob = null; }
     }
     if (prob && prob.buyPct) {
-      st.prob = prob.buyPct; st.probTime = bar.time;
+      st.prob = prob.buyPct; st.probTime = bar.time; st.probAt = nowSec();
       // История на вероятностите, каквито алгоритъмът реално ги е виждал (за лентата под графиката).
       st.hist.push([nowSec(), Math.round(prob.buyPct * 10) / 10]);
       if (st.hist.length > 6000) {
@@ -259,7 +259,7 @@ class Session {
     const why = (level, text) => { st.why = { level, text, time: nowSec() }; };
     const probTxt = (prob && prob.buyPct) ? ' (Buy ' + prob.buyPct.toFixed(1) + '% / Sell ' + prob.sellPct.toFixed(1) + '%)' : '';
     if (this.status !== 'running') { why('block', 'Сесията е на пауза'); return; }
-    if (Date.now() < st.cooldown) { why('block', 'Пауза след грешка при поръчка още ' + Math.ceil((st.cooldown - Date.now()) / 1000) + 'с — ' + (st.error || '')); return; }
+    if (Date.now() < st.cooldown) { why('block', 'Пауза ' + Math.ceil((st.cooldown - Date.now()) / 1000) + 'с след отказана поръчка — ' + (st.error || '')); return; }
     if ([...this.positions.values()].some(p => p.symbol === symbol)) { why('info', 'Има отворена позиция по този символ — нов вход не се прави'); return; }
     if (this.positions.size >= this.P.maxPositions) { why('block', 'Достигнат лимит „Макс. позиции“ (' + this.P.maxPositions + ')'); return; }
     const info = st.info;
@@ -291,12 +291,34 @@ class Session {
     // Суап: по избор не отваряме при отрицателен суап за посоката.
     const swap = dec.dir === 'BUY' ? info.swapLong : info.swapShort;
     if (this.P.skipNegSwap && swap < 0) { why('block', 'Сигнал ' + dec.dir + ', но суапът е отрицателен (' + swap + ') и е включено „Не отваряй при отрицателен суап“'); return; }
-    why('ok', 'Сигнал ' + dec.dir + probTxt + ' — изпращам поръчка за ' + dec.lots + ' лота' + (dec.forcedMin ? ' (минималният обем е над риска по Кели)' : ''));
+
+    // Лимити на агента (max_volume / max_positions / allowed_symbols): подравняваме обема
+    // към тях, вместо агентът да откаже поръчката.
+    const lim = mt5.limits(this.agentId);
+    if (lim) {
+      if (Array.isArray(lim.allowed_symbols) && lim.allowed_symbols.length && !lim.allowed_symbols.includes(symbol)) {
+        why('block', symbol + ' не е в allowed_symbols на агента (mt5-agent.config.json)'); return;
+      }
+      if (lim.max_volume > 0 && dec.lots > lim.max_volume + 1e-9) {
+        const step = info.vstep > 0 ? info.vstep : 0.01;
+        let cl = Math.floor(lim.max_volume / step + 1e-9) * step;
+        cl = Math.round(cl * 1e8) / 1e8;
+        if (cl < info.vmin) { why('block', 'Лимитът max_volume на агента (' + lim.max_volume + ') е под минималния обем на символа (' + info.vmin + ')'); return; }
+        dec.clampedFrom = dec.lots; dec.lots = cl;
+      }
+    }
+    // Минимално разстояние на SL/TP от цената (stops level на брокера).
+    const minDist = (info.stopsLevel || 0) * (info.point || 0) + info.spread;
+    if (minDist > 0 && Math.min(dec.tpDist, dec.slDist) < minDist) {
+      why('block', 'TP/SL (' + Math.min(dec.tpDist, dec.slDist).toPrecision(3) + ') са по-близо от минимума на брокера (' + minDist.toPrecision(3) + ') — увеличи TP/SL множителите или интервала'); return;
+    }
 
     // Реалният вход е ask (BUY) / bid (SELL); нивата са от него.
     const fill = dec.dir === 'BUY' ? info.ask : info.bid;
     const tp = dec.dir === 'BUY' ? fill + dec.tpDist : fill - dec.tpDist;
     const sl = dec.dir === 'BUY' ? fill - dec.slDist : fill + dec.slDist;
+    const baseTxt = ' · капитал ' + equity.toFixed(2) + ', свободен маржин ' + freeMargin.toFixed(2) + ' ' + ((this.account && this.account.currency) || '');
+    why('ok', 'Сигнал ' + dec.dir + probTxt + ' — изпращам поръчка за ' + dec.lots + ' лота' + (dec.clampedFrom ? ' (намален от ' + dec.clampedFrom + ' заради max_volume на агента)' : '') + (dec.forcedMin ? ' (минималният обем е над риска по Кели)' : '') + baseTxt);
     try {
       const r = await mt5.call(this.agentId, 'order_open', {
         symbol, side: dec.dir, volume: dec.lots, sl, tp, magic: this.magic, comment: 'HEROS'
@@ -309,6 +331,7 @@ class Session {
     } catch (e) {
       st.error = 'Поръчка: ' + e.message;
       st.cooldown = Date.now() + 30000;
+      why('block', 'Поръчката ' + dec.dir + ' ' + dec.lots + ' лота е отказана: ' + e.message);
     }
   }
 
@@ -371,6 +394,7 @@ class Session {
     const wins = this.trades.filter(t => t.pnl > 0).length;
     return {
       initial: start, balance: start + this.realized, equity, floating,
+      accountEquity: this.account ? this.account.equity : null, accountBalance: this.account ? this.account.balance : null,
       totalPnl: equity - start, totalPct: start > 0 ? (equity - start) / start * 100 : 0,
       trades: this.trades.length, wins,
       winRate: this.trades.length ? wins / this.trades.length * 100 : 0,
@@ -414,7 +438,7 @@ class Session {
         source: 'MT5', error: st.error, why: st.why || null, contract: i.contract || null,
         bid: i.bid, ask: i.ask, spread: i.spread, swapLong: i.swapLong, swapShort: i.swapShort,
         marketOpen: !!(st.info && i.tradeAllowed && i.tickAge < STALE_TICK_SEC),
-        lastBarTime: st.lastBarTime, prob: st.prob, probTime: st.probTime, probHist: this.histFor(st),
+        lastBarTime: st.lastBarTime, prob: st.prob, probTime: st.probTime, probAt: st.probAt || 0, probHist: this.histFor(st),
         candles: st.candles.slice(-800).map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })),
         markers: this.markers(sym)
       };

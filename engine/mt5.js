@@ -125,7 +125,7 @@ async function route(req, res, url, ctx) {
     const action = p.slice('/api/mt5/agent/'.length);
     if (action === 'hello' && req.method === 'POST') {
       const b = await readJson(req);
-      r.info = { account: b.account || null, version: b.version || null, host: b.host || null, helloAt: Date.now() };
+      r.info = { account: b.account || null, limits: b.limits || null, version: b.version || null, host: b.host || null, helloAt: Date.now() };
       sendJson(res, 200, { ok: true, agentId: agent.id, name: agent.name });
       return true;
     }
@@ -204,4 +204,6 @@ async function route(req, res, url, ctx) {
   return true;
 }
 
-module.exports = { route, call, isOnline, owns, listFor, createAgent, removeAgent };
+function limits(id) { const r = runtime.get(id); return (r && r.info && r.info.limits) || null; }
+
+module.exports = { route, call, isOnline, limits, owns, listFor, createAgent, removeAgent };
