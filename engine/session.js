@@ -230,10 +230,10 @@ class Session {
       st.prob = prob.buyPct; st.probTime = bar.time; st.probAt = nowSec();
       // История на вероятностите, каквито алгоритъмът реално ги е виждал (за лентата под графиката).
       st.hist.push([nowSec(), Math.round(prob.buyPct * 10) / 10]);
-      if (st.hist.length > 6000) {
-        const out = [];
-        for (let i = 0; i < 3000; i += 2) out.push(st.hist[i]);
-        st.hist = out.concat(st.hist.slice(3000));
+      if (st.hist.length > 16000) {          // разреждаме по-старата половина (≈ 1 на 2 проверки)
+        const half = Math.floor(st.hist.length / 2), out = [];
+        for (let i = 0; i < half; i += 2) out.push(st.hist[i]);
+        st.hist = out.concat(st.hist.slice(half));
       }
     }
 
@@ -420,13 +420,16 @@ class Session {
     return out.slice(-300);
   }
 
-  // Последна вероятност за всеки бар (до ~1500 бара) — компактно [времеНаБара, buyPct].
+  // Всяка проверка на вероятността като точка [време, buyPct] (за кривата под графиката).
+  // Последните 2 часа — всички; по-старите — най-много една на 60с (за да е малък отговорът).
   histFor(st) {
-    const iv = IV_SEC[this.interval];
-    const m = new Map();
-    for (const [t, v] of st.hist) m.set(t - (t % iv), v);
-    const out = [...m.entries()].sort((a, b) => a[0] - b[0]);
-    return out.slice(-1500);
+    const now = nowSec(), out = [];
+    let lastOld = -1e12;
+    for (const pt of st.hist) {
+      if (pt[0] >= now - 7200) out.push(pt);
+      else if (pt[0] - lastOld >= 60) { out.push(pt); lastOld = pt[0]; }
+    }
+    return out.slice(-3500);
   }
 
   getState() {
@@ -436,6 +439,10 @@ class Session {
       const i = st.info || {};
       symbols[sym] = {
         source: 'MT5', error: st.error, why: st.why || null, contract: i.contract || null,
+        vmin: i.vmin, vstep: i.vstep, vmax: i.vmax, contract: i.contract,
+        minMargin: (i.margin1 > 0 && i.vmin > 0) ? i.margin1 * i.vmin : null,
+        minNotional: (i.contract > 0 && i.vmin > 0 && i.bid > 0 && i.tickSize > 0) ? i.vmin * i.contract * i.bid * ((i.tickValue / i.tickSize) / i.contract) : null,
+        minSpreadCost: (i.contract > 0 && i.vmin > 0 && i.tickSize > 0) ? i.spread * i.vmin * i.contract * ((i.tickValue / i.tickSize) / i.contract) : null,
         bid: i.bid, ask: i.ask, spread: i.spread, swapLong: i.swapLong, swapShort: i.swapShort,
         marketOpen: !!(st.info && i.tradeAllowed && i.tickAge < STALE_TICK_SEC),
         lastBarTime: st.lastBarTime, prob: st.prob, probTime: st.probTime, probAt: st.probAt || 0, probHist: this.histFor(st),
@@ -481,7 +488,7 @@ class Session {
       symbols: this.symbols, interval: this.interval, model: this.model, contra: this.contra, P: this.P,
       status: this.status, createdAt: this.createdAt, startedAt: this.startedAt, updatedAt: this.updatedAt,
       startBalance: this.startBalance, peak: this.peak, maxDD: this.maxDD,
-      hist: Object.fromEntries(this.symbols.map(x => [x, this.state[x].hist.slice(-6000)])),
+      hist: Object.fromEntries(this.symbols.map(x => [x, this.state[x].hist.slice(-8000)])),
       equitySeries: this.equitySeries
     };
   }

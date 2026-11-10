@@ -1,6 +1,6 @@
 {
   "name": "helious",
-  "version": "1.4.2",
+  "version": "1.4.3",
   "description": "Helious Quantum - Analytical Terminal",
   "main": "server.js",
   "scripts": {
