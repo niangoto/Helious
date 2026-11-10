@@ -633,9 +633,18 @@
             }).join('');
         }
 
-        function fmtDate(sec) {
-            return new Date(sec * 1000).toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
-        }
+        // ── Българско време (Europe/Sofia) навсякъде: скала, бележки, таблици ──
+        const TZ = 'Europe/Sofia';
+        const dtf = (o) => new Intl.DateTimeFormat('bg-BG', Object.assign({ timeZone: TZ }, o));
+        const F_DT = dtf({ day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
+        const F_DTS = dtf({ day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+        const F_T = dtf({ hour: '2-digit', minute: '2-digit', hour12: false });
+        const F_D = dtf({ day: '2-digit', month: '2-digit' });
+        const F_M = dtf({ month: 'short' });
+        const F_Y = dtf({ year: 'numeric' });
+        const sofiaDT = (sec) => F_DT.format(new Date(sec * 1000));
+        const sofiaDTS = (sec) => F_DTS.format(new Date(sec * 1000));
+        function fmtDate(sec) { return sofiaDT(sec); }
 
         async function attach(id) {
             if (!id) return;
@@ -836,7 +845,18 @@
                 width: el.clientWidth, height: el.clientHeight,
                 layout: { background: { color: '#0b0f18' }, textColor: '#94a3b8', fontSize: 11, fontFamily: 'Outfit, sans-serif' },
                 grid: { vertLines: { color: 'rgba(255,255,255,0.03)' }, horzLines: { color: 'rgba(255,255,255,0.03)' } },
-                timeScale: { borderColor: 'rgba(255,255,255,0.08)', timeVisible: true, secondsVisible: false, minBarSpacing: 0.001 },
+                timeScale: {
+                    borderColor: 'rgba(255,255,255,0.08)', timeVisible: true, secondsVisible: false, minBarSpacing: 0.001,
+                    // скалата е в българско време (графиката дава UTC)
+                    tickMarkFormatter: (time, type) => {
+                        const d = new Date(time * 1000);
+                        if (type === 0) return F_Y.format(d);
+                        if (type === 1) return F_M.format(d);
+                        if (type === 2) return F_D.format(d);
+                        return F_T.format(d);
+                    }
+                },
+                localization: { timeFormatter: (time) => sofiaDT(time) },
                 rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)' },
                 crosshair: { mode: LightweightCharts.CrosshairMode.Normal }
             });
@@ -902,8 +922,8 @@
         function renderOpenPositions(list) {
             const el = document.getElementById('openPos');
             if (!list.length) { el.innerHTML = '<div class="empty">Няма отворени позиции</div>'; return; }
-            el.innerHTML = `<div class="tblwrap"><table><thead><tr><th>Символ</th><th>Вид</th><th>Вход</th><th>Обем (лот)</th><th>Нотионал</th><th>Маржин</th><th>Спред</th><th>TP</th><th>SL</th><th>Суап</th><th>Плаваща</th></tr></thead><tbody>` +
-                list.map(p => `<tr><td>${p.symbol}</td><td class="${p.dir === 'BUY' ? 'pos' : 'neg'}">${p.dir}</td><td>${fmt(p.entry, 5)}</td><td>${fmt(p.lots, 3)}</td><td>${fmt(p.notional, 2)} ${cur()}</td><td>${fmt(p.margin, 2)} ${cur()}</td><td class="neg">${p.spread ? fmt(p.spread, 2) + ' ' + cur() : '—'}</td><td>${fmt(p.tp, 5)}</td><td>${fmt(p.sl, 5)}</td><td>${fmt(p.swap, 2)}</td><td class="${cls(p.floating)}">${euro(p.floating)}</td></tr>`).join('') +
+            el.innerHTML = `<div class="tblwrap"><table><thead><tr><th>Отворена (BG)</th><th>Символ</th><th>Вид</th><th>Вход</th><th>Обем (лот)</th><th>Нотионал</th><th>Маржин</th><th>Спред</th><th>TP</th><th>SL</th><th>Суап</th><th>Плаваща</th></tr></thead><tbody>` +
+                list.map(p => `<tr><td>${p.openTime ? sofiaDT(p.openTime) : '—'}</td><td>${p.symbol}</td><td class="${p.dir === 'BUY' ? 'pos' : 'neg'}">${p.dir}</td><td>${fmt(p.entry, 5)}</td><td>${fmt(p.lots, 3)}</td><td>${fmt(p.notional, 2)} ${cur()}</td><td>${fmt(p.margin, 2)} ${cur()}</td><td class="neg">${p.spread ? fmt(p.spread, 2) + ' ' + cur() : '—'}</td><td>${fmt(p.tp, 5)}</td><td>${fmt(p.sl, 5)}</td><td>${fmt(p.swap, 2)}</td><td class="${cls(p.floating)}">${euro(p.floating)}</td></tr>`).join('') +
                 `</tbody></table></div>`;
         }
 
@@ -945,8 +965,8 @@
             const el = document.getElementById('tradesList');
             if (!list.length) { el.innerHTML = '<div class="empty">Още няма сделки</div>'; return; }
             const rows = list.slice().reverse().slice(0, 50).map(t =>
-                `<tr><td>${new Date(t.openedAt * 1000).toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</td><td>${t.symbol}</td><td class="${t.dir === 'BUY' ? 'pos' : 'neg'}">${t.dir}</td><td>${fmt(t.lots, 3)}</td><td>${fmt(t.entry, 5)}</td><td>${fmt(t.exit, 5)}</td><td>${t.reason}</td><td class="${cls(t.pnl)}">${euro(t.pnl)}</td><td>${fmt(t.swap, 2)}</td></tr>`).join('');
-            el.innerHTML = `<table><thead><tr><th>Отваряне</th><th>Символ</th><th>Вид</th><th>Обем (лот)</th><th>Вход</th><th>Изход</th><th>Причина</th><th>P/L</th><th>Суап</th></tr></thead><tbody>${rows}</tbody></table>`;
+                `<tr><td>${sofiaDT(t.openedAt)}</td><td>${t.closedAt ? sofiaDT(t.closedAt) : '—'}</td><td>${t.symbol}</td><td class="${t.dir === 'BUY' ? 'pos' : 'neg'}">${t.dir}</td><td>${fmt(t.lots, 3)}</td><td>${fmt(t.entry, 5)}</td><td>${fmt(t.exit, 5)}</td><td>${t.reason}</td><td class="${cls(t.pnl)}">${euro(t.pnl)}</td><td>${fmt(t.swap, 2)}</td></tr>`).join('');
+            el.innerHTML = `<table><thead><tr><th>Отваряне</th><th>Затваряне</th><th>Символ</th><th>Вид</th><th>Обем (лот)</th><th>Вход</th><th>Изход</th><th>Причина</th><th>P/L</th><th>Суап</th></tr></thead><tbody>${rows}</tbody></table>`;
         }
 
         // Паралелна графика: промяната на капитала в % спрямо началото.
@@ -954,7 +974,7 @@
         // ── Обща вертикална линия за графиката, печалбата и вероятността ──
         // Мишката върху която и да е от трите показва линията и във всички (+ стойностите към този момент).
         let vlTime = null;
-        function fmtTs(t) { return new Date(t * 1000).toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
+        function fmtTs(t) { return sofiaDT(t); }
         function hideVline() { vlTime = null; document.getElementById('vline').style.display = 'none'; document.getElementById('vtip').style.display = 'none'; }
         function showVline(t, mouseY) {
             if (!chart || t == null || !lastState) return hideVline();
