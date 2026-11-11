@@ -1071,23 +1071,11 @@
             }
             // Всяка проверка е точка във времето (не по бар) → непрекъсната крива, която се вижда
             // и при малък интервал на свещите. Вътре в бара x се интерполира по времето.
-            const iv = chartIvSel() || lastState.config.interval;
-            const step = IV_SEC_UI[iv] || 60;
-            const ts = chart.timeScale();
-            const cs = (ovCandles || sd.candles || []);
-            let spacing = 0;
-            if (cs.length >= 2) {
-                const xa = ts.timeToCoordinate(cs[cs.length - 1].time), xb = ts.timeToCoordinate(cs[cs.length - 2].time);
-                if (xa != null && xb != null) spacing = Math.abs(xa - xb);
-            }
-            if (!(spacing > 0)) { const lr = ts.getVisibleLogicalRange(); spacing = (lr && lr.to > lr.from) ? w / (lr.to - lr.from) : 6; }
+            const { xAt, spacing } = makeXAt(w);
             const pts = [];
             for (const pt of hist) {
-                const bt = pt[0] - (pt[0] % step);
-                const x0 = ts.timeToCoordinate(bt);
-                if (x0 == null) continue;
-                const x = x0 + ((pt[0] - bt) / step) * spacing;
-                if (x < -20 || x > w + 20) continue;
+                const x = xAt(pt[0]);
+                if (x == null || x < -20 || x > w + 20) continue;
                 pts.push({ x, y: toY(pt[1]), v: pt[1], t: pt[0] });
             }
             if (pts.length) {
@@ -1119,6 +1107,35 @@
             ctx.fillText('Buy ' + live.toFixed(1) + '% / Sell ' + (100 - live).toFixed(1) + '%' + (ago != null ? ' · проверка преди ' + ago + 'с' : '') + ' · ' + hist.length + ' проверки', 6, 11);
         }
 
+        // Позиция по X на произволен момент (unix сек) върху времевата ос на графиката —
+        // и между свещите (интерполира в рамките на бара). Общо за печалбата и вероятността.
+        function makeXAt(w) {
+            const sd = lastState && lastState.symbols[activeSymbol];
+            const iv = chartIvSel() || lastState.config.interval;
+            const step = IV_SEC_UI[iv] || 60;
+            const ts = chart.timeScale();
+            const cs = ovCandles || (sd && sd.candles) || [];
+            let spacing = 0;
+            if (cs.length >= 2) {
+                const xa = ts.timeToCoordinate(cs[cs.length - 1].time), xb = ts.timeToCoordinate(cs[cs.length - 2].time);
+                if (xa != null && xb != null) spacing = Math.abs(xa - xb);
+            }
+            if (!(spacing > 0)) { const lr = ts.getVisibleLogicalRange(); spacing = (lr && lr.to > lr.from) ? w / (lr.to - lr.from) : 6; }
+            const firstT = cs.length ? cs[0].time : null, lastT = cs.length ? cs[cs.length - 1].time : null;
+            const xAt = (t) => {
+                const bt = t - (t % step);
+                let x0 = ts.timeToCoordinate(bt);
+                if (x0 == null) {
+                    // извън заредените свещи: екстраполираме от най-близката позната свещ
+                    if (lastT != null && bt > lastT) { const xl = ts.timeToCoordinate(lastT); if (xl == null) return null; x0 = xl + ((bt - lastT) / step) * spacing; }
+                    else if (firstT != null && bt < firstT) { const xf = ts.timeToCoordinate(firstT); if (xf == null) return null; x0 = xf - ((firstT - bt) / step) * spacing; }
+                    else return null;
+                }
+                return x0 + ((t - bt) / step) * spacing;
+            };
+            return { xAt, spacing, step };
+        }
+
         function drawPnl() {
             const cvs = document.getElementById('pnlCanvas');
             if (!cvs || !chart || !lastState) return;
@@ -1132,26 +1149,15 @@
             const series = lastState.equitySeries || [];
             const initial = (lastState.stats && lastState.stats.initial) || 1;
             if (series.length < 2) return;
-            // Ако цялата серия е в видимия диапазон на ценовата графика — подравняваме
-            // по нейната времева ос; иначе (напр. след презареждане серията е по-дълга
-            // от заредените свещи) я разпъваме по цялата ширина, за да се вижда цялата.
-            const t0 = series[0].t, t1 = series[series.length - 1].t;
-            const vr = chart.timeScale().getVisibleRange();
-            const aligned = !!(vr && t0 >= vr.from);
-            const span = Math.max(1, t1 - t0);
-            const xOf = aligned
-                ? (t => chart.timeScale().timeToCoordinate(t))
-                : (t => ((t - t0) / span) * w);
+            // Винаги по времевата ос на графиката (мести се и мащабира заедно със свещите).
+            const { xAt } = makeXAt(w);
             let maxAbs = 0;
+            for (const pt of series) { const a = Math.abs((pt.equity - initial) / initial * 100); if (a > maxAbs) maxAbs = a; }   // мащабът е по цялата серия — не скача при местене
             const pts = [];
             for (const pt of series) {
-                const pct = (pt.equity - initial) / initial * 100;
-                const x = xOf(pt.t);
-                if (x == null) continue;
-                if (aligned && x < -20) continue;
-                if (aligned && x > w + 20) break;
-                pts.push({ x, v: pct });
-                if (Math.abs(pct) > maxAbs) maxAbs = Math.abs(pct);
+                const x = xAt(pt.t);
+                if (x == null || x < -20 || x > w + 20) continue;
+                pts.push({ x, v: (pt.equity - initial) / initial * 100 });
             }
             if (pts.length < 2) return;
             const pow = Math.pow(10, Math.floor(Math.log10(Math.max(maxAbs, 0.5))));
