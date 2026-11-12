@@ -91,12 +91,14 @@ class Session {
       return { name, interval: this.interval, count: this.window(), from: (last > 0 && !gap && st.candles.length >= 30) ? last : 0 };
     });
     return mt5.call(this.agentId, 'snapshot', {
-      symbols: req, magic: this.magic, historyFrom: Math.max(0, (this.startedAt || now) - 3600)
+      symbols: req, magic: this.magic, historyFrom: Math.max(0, (this.startedAt || now) - 3600),
+      pnlFrom: Math.floor(Math.min(startOfMonth(), startOfWeek(), startOfDay()) / 1000) - 3600
     });
   }
 
   ingest(snap) {
     this.account = snap.account || null;
+    if (Array.isArray(snap.pnl_deals)) this.pnlDeals = snap.pnl_deals;   // всички сделки по сметката от началото на месеца
     this.connected = !!this.account;
     if (this.account) {
       if (this.startBalance == null && this.account.balance > 0) this.startBalance = this.account.balance;
@@ -378,7 +380,19 @@ class Session {
 
   destroy() { if (this.timer) clearInterval(this.timer); this.timer = null; this.listeners.clear(); }
 
+  // Печалба за период по ЦЯЛАТА сметка (не само сесията): нетни сделки от историята на MT5 от
+  // началото на периода + текущата плаваща (equity − balance). Ако агентът е стар → резервен метод.
+  accountPeriodPnl(ms) {
+    if (!Array.isArray(this.pnlDeals) || !this.account) return null;
+    const from = Math.floor(ms / 1000);
+    let sum = 0;
+    for (const [t, v] of this.pnlDeals) if (t >= from) sum += v;
+    return sum + ((this.account.equity || 0) - (this.account.balance || 0));
+  }
+
   periodPnl(ms, equityNow) {
+    const a = this.accountPeriodPnl(ms);
+    if (a != null) return a;
     const s = this.equitySeries;
     let base = this.startBalance || equityNow;
     for (let i = s.length - 1; i >= 0; i--) {

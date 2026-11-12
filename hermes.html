@@ -1170,6 +1170,12 @@
                 <option value="1">1/сек</option>
             </select>
         </label>
+        <label class="cal-label">Реверс
+            <span class="cal-controls">
+                <input type="checkbox" id="inpReversal" title="При достигнати нива за нова позиция в ОБРАТНА посока, отворената се затваря (по цената на свещта) и се отваря новата — за сметка на старата. Сигнал в същата посока не прави нищо.">
+                <span class="cal-sep" style="font-size:11px;text-transform:none;letter-spacing:0.3px">обратен сигнал затваря старата</span>
+            </span>
+        </label>
         <label class="cal-label">Обърната посока
             <span class="cal-controls">
                 <input type="checkbox" id="inpReverse" title="Отваря се само обратната поръчка (контра) вместо определената, със същия обем">
@@ -2394,7 +2400,8 @@
                 lookback: Math.max(30, Math.min(50000, parseInt((document.getElementById('inpLookback') || {}).value, 10) || 3000)),
                 dynPeriod: Math.max(60, Math.min(50000, parseInt((document.getElementById('inpDynPeriod') || {}).value, 10) || 200)),
                 lookbackGrow: !!((document.getElementById('inpLookbackGrow') || {}).checked),
-                reverse: document.getElementById('inpReverse').checked
+                reverse: document.getElementById('inpReverse').checked,
+                reversal: !!((document.getElementById('inpReversal') || {}).checked)
             };
         }
 
@@ -2752,6 +2759,30 @@
             const minLotUnit = Math.max(1e-9, P.minLot || 1);
             let minLotsSum = 0;
             const n = candles.length;
+            // Затваряне на позиция по дадена цена (ползва се от „Реверс“).
+            const closeLeg = (pos, exitPrice, reason, c) => {
+                const pnl = (pos.dir === 'BUY' ? (exitPrice - pos.entry) * pos.units : (pos.entry - exitPrice) * pos.units) * (pos.fx || 1);
+                equity += pnl;
+                pnlExSum += pnlExOf(pos, exitPrice);
+                minLotsSum += (pos.lots || 0) / minLotUnit;
+                tradeCount++;
+                if (pnl > 0) winsCount++;
+                if (equity > peak) peak = equity;
+                const dd = (peak - equity) / peak * 100;
+                if (dd > maxDD) maxDD = dd;
+                if (!silent) {
+                    prependOrder(pos, exitPrice, reason, pnl, equity, tradeCount);
+                    tradeMarkers.push({
+                        time: c.time,
+                        position: pos.dir === 'BUY' ? 'aboveBar' : 'belowBar',
+                        color: pnl >= 0 ? '#00ff66' : '#ff0055',
+                        shape: 'circle',
+                        text: reason + (pnl >= 0 ? ' +' : ' ') + pnl.toFixed(2) + '€'
+                    });
+                    markersDirty = true;
+                }
+                return pnl;
+            };
             // При динамичен „Поглед назад“ вероятностите се преизчисляват при
             // всяка нова избрана стойност (без стария режим „расте с +1 на бар“).
             let curProbs = probs;
@@ -2982,7 +3013,7 @@
                     }
                 }
 
-                if (!legs.length && i < n - 1 && marketOpen(currentSymbol, candles[i].time)) {
+                if ((!legs.length || P.reversal) && i < n - 1 && marketOpen(currentSymbol, candles[i].time)) {
                     const pr = prScaled;
                     if (pr) {
                         const buyPct = pr.buyPct, sellPct = pr.sellPct;
@@ -3018,13 +3049,18 @@
                                 // (1) Множител на размера на позицията: Size_final = α × Size_calc
                                 let f = Math.min(fStar * P.kellyF * alpha, P.maxKelly);
                                 if (f > 0) {
-                                    const riskAmount = f * equity;
+                                    // „Реверс“: размерът се смята, сякаш старата позиция вече е затворена
+                                    // по цената на свещта (капиталът включва нейния резултат, маржинът е свободен).
+                                    const rev = !!P.reversal && legs.length > 0;
+                                    let eqSz = equity;
+                                    if (rev) for (const pp of legs) eqSz += (pp.dir === 'BUY' ? (entry - pp.entry) * pp.units : (pp.entry - entry) * pp.units) * (pp.fx || 1);
+                                    const riskAmount = f * eqSz;
                                     // € риск за 1 единица при движение loss в цена = loss × fx.
                                     let units = riskAmount / (loss * fx);
                                     // Свободен маржин = капитал − заетия маржин на позициите
                                     let usedMargin = 0;
-                                    for (const pp of legs) usedMargin += pp.margin || 0;
-                                    const freeMargin = Math.max(0, equity - usedMargin);
+                                    if (!rev) for (const pp of legs) usedMargin += pp.margin || 0;
+                                    const freeMargin = Math.max(0, eqSz - usedMargin);
                                     const spec = specFor(currentSymbol);
                                     const minLot = P.minLot || spec.min;
                                     // Спредът: € за мин. обем (при текущата цена P.refPrice,
@@ -3086,8 +3122,14 @@
                                         : (fill <= tpPrice || fill >= slPrice));
                                     // Отваряме само ако свободният маржин покрива маржин +
                                     // (при директно теглене) спред + риск до SL.
-                                    if (lots >= minLot && margin > 0 && !badEntry && margin + upfrontCost <= freeMargin + 1e-9 && riskCost <= freeMargin + 1e-9 && notional >= 1) {
+                                    // Реверс: само при ОБРАТНА посока; в същата — старата си остава.
+                                    if (lots >= minLot && margin > 0 && !badEntry && margin + upfrontCost <= freeMargin + 1e-9 && riskCost <= freeMargin + 1e-9 && notional >= 1
+                                        && (!legs.length || legs[0].dir !== dir)) {
                                         const t = candles[i].time;
+                                        if (legs.length) {
+                                            for (const old of legs) closeLeg(old, entry, 'Реверс', candles[i]);
+                                            legs = [];
+                                        }
                                         legs = [{
                                             dir,
                                             entry: fill,
@@ -4242,6 +4284,7 @@
             { id: 'inpPctClose', type: 'checkbox' },
             { id: 'inpPctCloseLimit', type: 'value' },
             { id: 'inpReverse', type: 'checkbox' },
+            { id: 'inpReversal', type: 'checkbox' },
             { id: 'inpModel', type: 'value' },
             { id: 'inpLookback', type: 'value' },
             { id: 'inpDynPeriod', type: 'value' },

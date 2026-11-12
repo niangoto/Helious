@@ -29,7 +29,7 @@ except ImportError:
     print("Липсва пакетът MetaTrader5: pip install MetaTrader5")
     sys.exit(1)
 
-VERSION = "1.1"
+VERSION = "1.2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "mt5-agent.config.json")
 KILL_FILE = os.path.join(HERE, "KILL")
@@ -187,6 +187,20 @@ def closed_trades(magic, from_ts, open_ids):
     return out
 
 
+def pnl_deals(from_ts):
+    """Всички сделки по сметката (вход и изход, всякакви magic) от from_ts: [време UTC, нетна сума].
+    Нетна сума = печалба + суап + комисиона + такса. Без депозити/тегления. Служи за „печалба за деня/седмицата/месеца“."""
+    start = from_utc_dt(from_ts)
+    end = from_utc_dt(time.time() + 86400)
+    deals = mt5.history_deals_get(start, end)
+    out = []
+    for d in (deals or []):
+        if d.type not in (mt5.DEAL_TYPE_BUY, mt5.DEAL_TYPE_SELL):
+            continue
+        out.append([to_utc(d.time), d.profit + d.swap + d.commission + getattr(d, "fee", 0.0)])
+    return out
+
+
 def symbol_data(req):
     name = req["name"]
     info = mt5.symbol_info(name)
@@ -241,7 +255,13 @@ def cmd_snapshot(p):
     if p.get("magic"):
         open_ids = {x["ticket"] for x in positions}
         deals = closed_trades(p["magic"], int(p.get("historyFrom", 0)), open_ids)
-    return {"account": account_dict(), "symbols": syms, "positions": positions, "deals": deals}
+    result = {"account": account_dict(), "symbols": syms, "positions": positions, "deals": deals}
+    if p.get("pnlFrom"):
+        try:
+            result["pnl_deals"] = pnl_deals(int(p["pnlFrom"]))
+        except Exception as e:
+            log("pnl_deals:", e)
+    return result
 
 
 def cmd_symbols(p):

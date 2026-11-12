@@ -786,11 +786,10 @@
             const acc = state.account || {};
             const freeMargin = acc.available;
             const cards = [
-                ['Плаваща P/L', euro(s.floating), cls(s.floating)],
-                ['Обща P/L', euro(s.totalPnl) + ' (' + (s.totalPct >= 0 ? '+' : '') + fmt(s.totalPct) + '%)', cls(s.totalPnl)],
-                ['Баланс на сесията', fmt(s.balance) + ' ' + cur(), ''],
-                ['Капитал на сесията', fmt(s.equity) + ' ' + cur(), ''],
-                ['Капитал на сметката (реален)', fmt(s.accountEquity) + ' ' + cur(), ''],
+                ['Плаваща P/L (сесия)', euro(s.floating), cls(s.floating)],
+                ['Обща P/L (сесия)', euro(s.totalPnl) + ' (' + (s.totalPct >= 0 ? '+' : '') + fmt(s.totalPct) + '%)', cls(s.totalPnl)],
+                ['Баланс (реален, без позиции)', fmt(acc.balance) + ' ' + cur(), ''],
+                ['Капитал (реален)', fmt(acc.equity) + ' ' + cur(), ''],
                 ['Отворени сега', String(s.openCount), ''],
                 ['Зает маржин', fmt(usedMargin) + ' ' + cur(), ''],
                 ['Свободен маржин (сметка)', fmt(freeMargin) + ' ' + cur(), ''],
@@ -798,9 +797,9 @@
                 ['Нотионал', fmt(notional) + ' ' + cur(), ''],
                 ['Сделки от начало', String(s.trades), ''],
                 ['Win rate', fmt(s.winRate, 1) + '%', ''],
-                ['За деня', euro(s.dayPnl), cls(s.dayPnl)],
-                ['За седмицата', euro(s.weekPnl), cls(s.weekPnl)],
-                ['За месеца', euro(s.monthPnl), cls(s.monthPnl)],
+                ['За деня (сметка)', euro(s.dayPnl), cls(s.dayPnl)],
+                ['За седмицата (сметка)', euro(s.weekPnl), cls(s.weekPnl)],
+                ['За месеца (сметка)', euro(s.monthPnl), cls(s.monthPnl)],
                 ['Макс. теглене', fmt(s.maxDD, 2) + '%', s.maxDD > 0 ? 'neg' : '']
             ];
             document.getElementById('stats').innerHTML = cards.map(c =>
