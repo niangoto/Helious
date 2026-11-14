@@ -767,7 +767,61 @@
         function euro(v) { const n = fmt(v, 2); return (v > 0 ? '+' : '') + n + ' ' + cur(); }
         function cls(v) { return v > 0 ? 'pos' : (v < 0 ? 'neg' : ''); }
 
+        // ── История на печалбата и вероятностите ──
+        // Сървърът праща в живото състояние само последните ~15 мин. Цялата (разредена по възраст)
+        // история се тегли през /history и се държи тук; новите точки се долепват към нея.
+        let hc = { id: null, eq: [], prob: {}, loaded: false, loading: false };
+        function hcAppend(recentEq, recentProb) {
+            let le = hc.eq.length ? hc.eq[hc.eq.length - 1].t : 0;
+            for (const p of (recentEq || [])) if (p.t > le) { hc.eq.push({ t: p.t, equity: p.equity }); le = p.t; }
+            for (const k in (recentProb || {})) {
+                const arr = hc.prob[k] || (hc.prob[k] = []);
+                let lp = arr.length ? arr[arr.length - 1][0] : 0;
+                for (const p of recentProb[k]) if (p[0] > lp) { arr.push(p); lp = p[0]; }
+            }
+        }
+        async function loadHistory(since, sid) {
+            if (hc.loading) return;
+            hc.loading = true;
+            try {
+                const r = await fetch('/api/trade/sessions/' + sid + '/history?since=' + (since || 0)).then(x => x.json());
+                if (!r || !r.ok || hc.id !== sid) return;
+                if (!since) {
+                    hc.eq = r.equity.map(p => ({ t: p[0], equity: p[1] }));
+                    hc.prob = r.prob || {};
+                } else {
+                    hcAppend(r.equity.map(p => ({ t: p[0], equity: p[1] })), r.prob);
+                }
+                hc.loaded = true;
+                if (lastState && lastState.id === sid) {   // дължината на пролуката може да е променила нарисуваното
+                    const rp = {}; for (const k in lastState.symbols) rp[k] = lastState.symbols[k].probHist || [];
+                    hcAppend(lastState.equityRecent, rp);
+                    applyHistToState(lastState); drawPnl(); drawProb();
+                }
+            } catch (e) { /* ще опита при следващото състояние */ }
+            hc.loading = false;
+        }
+        function applyHistToState(state) {
+            state.equitySeries = hc.eq;
+            for (const k in state.symbols) { state.symbols[k].probHist = hc.prob[k] || []; }
+        }
+        function syncHistory(state) {
+            if (hc.id !== state.id) { hc = { id: state.id, eq: [], prob: {}, loaded: false, loading: false }; }
+            const recentProb = {};
+            for (const k in state.symbols) recentProb[k] = state.symbols[k].probHist || [];
+            if (!hc.loaded) { if (!hc.loading) loadHistory(0, state.id); hcAppend(state.equityRecent, recentProb); }
+            else {
+                // пропуснати съобщения (скрит таб/прекъсване) → доиска липсващото
+                const last = hc.eq.length ? hc.eq[hc.eq.length - 1].t : 0;
+                const first = (state.equityRecent || [])[0];
+                if (first && last && first.t > last + 30 && !hc.loading) loadHistory(last, state.id);
+                hcAppend(state.equityRecent, recentProb);
+            }
+            applyHistToState(state);
+        }
+
         function render(state) {
+            syncHistory(state);
             lastState = state;
             setStatus(state.status);
             const symKeys = Object.keys(state.symbols || {});
@@ -1078,18 +1132,21 @@
                 pts.push({ x, y: toY(pt[1]), v: pt[1], t: pt[0] });
             }
             if (pts.length) {
-                const GAP = 150;   // пауза > 150с (рестарт/офлайн) прекъсва кривата
+                // Пауза (рестарт/офлайн) прекъсва кривата. Прагът е според разреждането на сървъра:
+                // последните 2ч — на ~3с, до 2 дни — на 60с, по-старите — на 300с.
+                const nowS = Date.now() / 1000;
+                const gapOf = (t) => { const age = nowS - t; return age <= 7200 ? 150 : (age <= 172800 ? 300 : 900); };
                 // лек запълнен фон към 50% линията
                 for (let i = 1; i < pts.length; i++) {
                     const a = pts[i - 1], b = pts[i];
-                    if (b.t - a.t > GAP) continue;
+                    if (b.t - a.t > gapOf(a.t)) continue;
                     ctx.fillStyle = (a.v + b.v) / 2 >= 50 ? 'rgba(0,255,102,0.14)' : 'rgba(255,0,85,0.14)';
                     ctx.beginPath(); ctx.moveTo(a.x, midY); ctx.lineTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(b.x, midY); ctx.closePath(); ctx.fill();
                 }
                 ctx.lineWidth = 1.6; ctx.lineJoin = 'round';
                 for (let i = 1; i < pts.length; i++) {
                     const a = pts[i - 1], b = pts[i];
-                    if (b.t - a.t > GAP) continue;
+                    if (b.t - a.t > gapOf(a.t)) continue;
                     ctx.strokeStyle = (a.v + b.v) / 2 >= 50 ? 'rgba(0,255,102,0.95)' : 'rgba(255,0,85,0.95)';
                     ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.stroke();
                 }
@@ -1124,13 +1181,17 @@
             const xAt = (t) => {
                 const bt = t - (t % step);
                 let x0 = ts.timeToCoordinate(bt);
-                if (x0 == null) {
-                    // извън заредените свещи: екстраполираме от най-близката позната свещ
-                    if (lastT != null && bt > lastT) { const xl = ts.timeToCoordinate(lastT); if (xl == null) return null; x0 = xl + ((bt - lastT) / step) * spacing; }
-                    else if (firstT != null && bt < firstT) { const xf = ts.timeToCoordinate(firstT); if (xf == null) return null; x0 = xf - ((firstT - bt) / step) * spacing; }
-                    else return null;
-                }
-                return x0 + ((t - bt) / step) * spacing;
+                if (x0 != null) return x0 + ((t - bt) / step) * spacing;
+                if (!cs.length) return null;
+                // извън заредените свещи: екстраполираме от най-близката позната свещ
+                if (bt > lastT) { const xl = ts.timeToCoordinate(lastT); return xl == null ? null : xl + ((t - lastT) / step) * spacing; }
+                if (bt < firstT) { const xf = ts.timeToCoordinate(firstT); return xf == null ? null : xf - ((firstT - t) / step) * spacing; }
+                // пролука МЕЖДУ свещите (затворен пазар, уикенд, липсващ бар): слагаме момента
+                // веднага след предходната свещ, за да не изчезват точките
+                let lo = 0, hi = cs.length - 1;
+                while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (cs[mid].time <= bt) lo = mid; else hi = mid - 1; }
+                const xp = ts.timeToCoordinate(cs[lo].time);
+                return xp == null ? null : xp + Math.min(1, Math.max(0, (t - cs[lo].time) / step)) * spacing;
             };
             return { xAt, spacing, step };
         }

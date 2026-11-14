@@ -180,6 +180,17 @@ const server = http.createServer(async (req, res) => {
           req.on('close', () => { clearInterval(hb); off(); });
           return;
         }
+        if (action === 'history' && method === 'GET') {
+          // Цялата история на печалбата и вероятностите (разредена по възраст) — gzip, ако се поддържа.
+          const body = Buffer.from(JSON.stringify(Object.assign({ ok: true }, s.history(url.searchParams.get('since')))));
+          if (/\bgzip\b/.test(req.headers['accept-encoding'] || '')) {
+            const gz = require('zlib').gzipSync(body);
+            res.writeHead(200, { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip', 'Cache-Control': 'no-store' });
+            return res.end(gz);
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          return res.end(body);
+        }
         if (action === 'pause' && method === 'POST') { s.pause(); return sendJson(res, 200, { ok: true, status: s.status }); }
         if (action === 'resume' && method === 'POST') { s.resume(); return sendJson(res, 200, { ok: true, status: s.status }); }
         if (action === 'stop' && method === 'POST') {

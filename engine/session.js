@@ -19,7 +19,10 @@ const { normalizeParams, entryDecision } = require('./strategy');
 const IV_SEC = { '1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400 };
 const WINDOW = 2000;          // свещи за модела/ATR
 const TICK_MS = 3000;         // период на непрекъснатата проверка
-const MAX_EQ = 4000;          // горна граница на точките в equitySeries
+const RAW_SEC = 7200;         // последните 2 часа — всички точки (на ~3с)
+const MID_SEC = 172800;       // до 2 дни — по една на 60с; по-старите — по една на 300с
+const HIST_CAP = 90000;       // предпазен таван на точките в една серия
+const RECENT_SEC = 900;       // колко назад праща живото състояние (SSE); останалото — през /history
 const MARGIN_LEVEL_MIN = 50;  // под това ниво на маржина затваряме най-губещата позиция
 const STALE_TICK_SEC = 300;   // по-стар тик → пазарът е затворен
 const DATA_DIR = path.join(__dirname, '..', 'data');
@@ -29,6 +32,28 @@ const nowSec = () => Math.floor(Date.now() / 1000);
 const startOfDay = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); };
 const startOfWeek = () => { const d = new Date(); const day = (d.getDay() + 6) % 7; d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - day); return d.getTime(); };
 const startOfMonth = () => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(1); return d.getTime(); };
+
+// Многостепенно разреждане на времева серия: нищо не се изхвърля — по-старите точки само
+// се обединяват (последна стойност за интервала), така историята расте с ограничен размер.
+function compactTiered(arr, tOf, now) {
+  const out = [];
+  let lastKey = null;
+  for (const pt of arr) {
+    const t = tOf(pt), age = now - t;
+    const step = age <= RAW_SEC ? 0 : (age <= MID_SEC ? 60 : 300);
+    if (step === 0) { out.push(pt); lastKey = null; continue; }
+    const key = step + ':' + Math.floor(t / step);
+    if (key === lastKey) out[out.length - 1] = pt; else { out.push(pt); lastKey = key; }
+  }
+  return out.length > HIST_CAP ? out.slice(out.length - HIST_CAP) : out;
+}
+function recentOf(arr, tOf, sec) {
+  const lim = nowSec() - sec;
+  let i = arr.length;
+  while (i > 0 && tOf(arr[i - 1]) >= lim) i--;
+  return arr.slice(i);
+}
+const r2 = (v) => Math.round(v * 100) / 100;
 
 class Session {
   constructor(id, config) {
@@ -181,8 +206,9 @@ class Session {
       await this.manage();
       this.trackDrawdown();
       this.sampleEquity();
+      this.compactHistory();
       this.updatedAt = Date.now();
-      if (Date.now() - this._lastPersist > 30000) { saveAll(); this._lastPersist = Date.now(); }
+      if (Date.now() - this._lastPersist > 20000) { saveAll(); this._lastPersist = Date.now(); }
       this.emit();
     } finally {
       this._ticking = false;
@@ -232,11 +258,6 @@ class Session {
       st.prob = prob.buyPct; st.probTime = bar.time; st.probAt = nowSec();
       // История на вероятностите, каквито алгоритъмът реално ги е виждал (за лентата под графиката).
       st.hist.push([nowSec(), Math.round(prob.buyPct * 10) / 10]);
-      if (st.hist.length > 16000) {          // разреждаме по-старата половина (≈ 1 на 2 проверки)
-        const half = Math.floor(st.hist.length / 2), out = [];
-        for (let i = 0; i < half; i += 2) out.push(st.hist[i]);
-        st.hist = out.concat(st.hist.slice(half));
-      }
     }
 
     // 1) Изход по време (TP/SL са в MT5 и се изпълняват от брокера)
@@ -353,13 +374,26 @@ class Session {
     if (!this.connected || this.startBalance == null) return;
     const eq = this.sessionEquity();
     this.equitySeries.push({ t: nowSec(), equity: eq, balance: this.startBalance + this.realized, floating: this.floatingTotal() });
-    if (this.equitySeries.length > MAX_EQ) {
-      const half = Math.floor(this.equitySeries.length / 2);
-      const out = [];
-      for (let i = 0; i < half; i += 2) out.push(this.equitySeries[i]);
-      for (let i = half; i < this.equitySeries.length; i++) out.push(this.equitySeries[i]);
-      this.equitySeries = out;
-    }
+  }
+
+  // Периодично (на ~60с) обединява старите точки — нищо не се губи, само се разрежда.
+  compactHistory() {
+    if (Date.now() - (this._lastCompact || 0) < 60000) return;
+    this._lastCompact = Date.now();
+    const now = nowSec();
+    this.equitySeries = compactTiered(this.equitySeries, p => p.t, now);
+    for (const x of this.symbols) this.state[x].hist = compactTiered(this.state[x].hist, p => p[0], now);
+  }
+
+  // Серии след момент `since` (unix сек) — за зареждане на цялата история от клиента.
+  history(since) {
+    since = Number(since) || 0;
+    const prob = {};
+    for (const x of this.symbols) prob[x] = this.state[x].hist.filter(p => p[0] > since);
+    return {
+      equity: this.equitySeries.filter(p => p.t > since).map(p => [p.t, r2(p.equity)]),
+      prob, now: nowSec()
+    };
   }
 
   pause() { if (this.status === 'running') { this.status = 'paused'; this.persistStatus(); saveAll(); this.emit(); } }
@@ -434,18 +468,6 @@ class Session {
     return out.slice(-300);
   }
 
-  // Всяка проверка на вероятността като точка [време, buyPct] (за кривата под графиката).
-  // Последните 2 часа — всички; по-старите — най-много една на 60с (за да е малък отговорът).
-  histFor(st) {
-    const now = nowSec(), out = [];
-    let lastOld = -1e12;
-    for (const pt of st.hist) {
-      if (pt[0] >= now - 7200) out.push(pt);
-      else if (pt[0] - lastOld >= 60) { out.push(pt); lastOld = pt[0]; }
-    }
-    return out.slice(-3500);
-  }
-
   getState() {
     const symbols = {};
     for (const sym of this.symbols) {
@@ -459,7 +481,7 @@ class Session {
         minSpreadCost: (i.contract > 0 && i.vmin > 0 && i.tickSize > 0) ? i.spread * i.vmin * i.contract * ((i.tickValue / i.tickSize) / i.contract) : null,
         bid: i.bid, ask: i.ask, spread: i.spread, swapLong: i.swapLong, swapShort: i.swapShort,
         marketOpen: !!(st.info && i.tradeAllowed && i.tickAge < STALE_TICK_SEC),
-        lastBarTime: st.lastBarTime, prob: st.prob, probTime: st.probTime, probAt: st.probAt || 0, probHist: this.histFor(st),
+        lastBarTime: st.lastBarTime, prob: st.prob, probTime: st.probTime, probAt: st.probAt || 0, probHist: recentOf(st.hist, p => p[0], RECENT_SEC),
         candles: st.candles.slice(-800).map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })),
         markers: this.markers(sym)
       };
@@ -492,7 +514,7 @@ class Session {
       config: { symbols: this.symbols, interval: this.interval, model: this.model, contra: this.contra, params: this.P, agentId: this.agentId },
       stats: this.stats(), account, openPositions,
       trades: this.trades.slice(-100),
-      symbols, equitySeries: this.equitySeries
+      symbols, equityRecent: recentOf(this.equitySeries, p => p.t, RECENT_SEC).map(p => ({ t: p.t, equity: r2(p.equity) }))
     };
   }
 
@@ -502,8 +524,9 @@ class Session {
       symbols: this.symbols, interval: this.interval, model: this.model, contra: this.contra, P: this.P,
       status: this.status, createdAt: this.createdAt, startedAt: this.startedAt, updatedAt: this.updatedAt,
       startBalance: this.startBalance, peak: this.peak, maxDD: this.maxDD,
-      hist: Object.fromEntries(this.symbols.map(x => [x, this.state[x].hist.slice(-8000)])),
-      equitySeries: this.equitySeries
+      trades: this.trades.slice(-2000),
+      hist: Object.fromEntries(this.symbols.map(x => [x, this.state[x].hist])),
+      equitySeries: this.equitySeries.map(p => [p.t, r2(p.equity), r2(p.balance), r2(p.floating)])
     };
   }
 
@@ -519,11 +542,33 @@ class Session {
 // ─── Мениджър на сесиите ───────────────────────────────────────────
 const sessions = new Map();
 
+let loaded = false;   // докато не е прочетен файлът, не го презаписваме (иначе празна карта би го изтрила)
+
+// Атомичен запис: първо във временен файл, после преименуване — прекъсване по средата
+// не може да остави недовършен файл. Предишната пълна версия се пази като .bak.
+function writeAtomic(file, text) {
+  const tmp = file + '.tmp';
+  fs.writeFileSync(tmp, text);
+  try { if (fs.existsSync(file)) fs.copyFileSync(file, file + '.bak'); } catch (e) { /* ignore */ }
+  fs.renameSync(tmp, file);
+}
+
+function readStore() {
+  for (const f of [STORE_FILE, STORE_FILE + '.bak']) {
+    try {
+      const j = JSON.parse(fs.readFileSync(f, 'utf8'));
+      if (j && Array.isArray(j.sessions)) { if (f !== STORE_FILE) console.error('[trade] основният файл е повреден — прочетен ' + path.basename(f)); return j; }
+    } catch (e) { /* пробваме следващия */ }
+  }
+  return null;
+}
+
 function saveAll() {
+  if (!loaded) return;
   try {
     if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-    fs.writeFileSync(STORE_FILE, JSON.stringify({ savedAt: Date.now(), sessions: [...sessions.values()].map(s => s.serialize()) }));
-  } catch (e) { /* ignore */ }
+    writeAtomic(STORE_FILE, JSON.stringify({ savedAt: Date.now(), sessions: [...sessions.values()].map(s => s.serialize()) }));
+  } catch (e) { console.error('[trade] запис:', e.message); }
 }
 
 function restoreSession(obj) {
@@ -538,25 +583,34 @@ function restoreSession(obj) {
   s.startBalance = obj.startBalance != null ? obj.startBalance : null;
   s.peak = obj.peak || 0;
   s.maxDD = obj.maxDD || 0;
-  s.equitySeries = Array.isArray(obj.equitySeries) ? obj.equitySeries : [];
+  s.equitySeries = (Array.isArray(obj.equitySeries) ? obj.equitySeries : []).map(p => Array.isArray(p) ? { t: p[0], equity: p[1], balance: p[2], floating: p[3] } : p);
   for (const x of s.symbols) if (obj.hist && Array.isArray(obj.hist[x])) s.state[x].hist = obj.hist[x];
+  if (Array.isArray(obj.trades)) {
+    s.trades = obj.trades;
+    for (const t of s.trades) s.tradeIds.add(t.ticket);
+    s.realized = s.trades.reduce((a, t) => a + t.pnl, 0);
+  }
   return s;
 }
 
 async function init() {
-  let data;
-  try { data = JSON.parse(fs.readFileSync(STORE_FILE, 'utf8')); } catch (e) { return 0; }
-  if (!data || !Array.isArray(data.sessions)) return 0;
+  const data = readStore();
+  if (!data) {
+    // няма файл (първо пускане) → празно; ако файл съществува, но е нечетим, не го презаписваме
+    loaded = !fs.existsSync(STORE_FILE) && !fs.existsSync(STORE_FILE + '.bak');
+    if (!loaded) console.error('[trade] файлът със сесиите е нечетим — не го презаписвам (виж data/mt5-sessions.json*).');
+    return 0;
+  }
   let n = 0;
   for (const obj of data.sessions) {
     try {
-      if (obj.status === 'stopped') continue;
       const s = restoreSession(obj);
       sessions.set(s.id, s);
       if (s.status === 'running' || s.status === 'paused') s.start(true);
       n++;
     } catch (e) { console.error('[trade] restore fail:', e.message); }
   }
+  loaded = true;
   if (n) console.log(`[trade] възстановени ${n} MT5 сесии от диска.`);
   return n;
 }
@@ -564,6 +618,7 @@ async function init() {
 async function createSession(config) {
   if (!config.agentId || !mt5.owns(config.ownerId, config.agentId)) throw new Error('Избери MT5 агент (връзка) от профила си.');
   if (!mt5.isOnline(config.agentId)) throw new Error('MT5 агентът е офлайн — стартирай mt5-agent.py на Windows компютъра.');
+  loaded = true;
   const id = crypto.randomBytes(6).toString('hex');
   const s = new Session(id, config);
   if (!s.symbols.length) throw new Error('Въведи поне един MT5 символ.');
@@ -628,4 +683,4 @@ function hookSignals() {
 }
 hookSignals();
 
-module.exports = { Session, createSession, getSession, listSessions, activeSessions, owns, removeSession, init, saveAll, IV_SEC, WINDOW, TICK_MS };
+module.exports = { compactTiered, Session, createSession, getSession, listSessions, activeSessions, owns, removeSession, init, saveAll, IV_SEC, WINDOW, TICK_MS };
