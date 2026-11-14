@@ -2346,15 +2346,23 @@
             // При sweep и авто-оптимизация на lookback: без 1м мрежа, песимистично SL.
             if (sweepMode || autoLbOptActive) return { exitPrice: pos.sl, reason: 'SL' };
             const from = candle.time, to = candle.time + ivSec;
-            const key = symbol + '|' + from;
-            let arr = oneMinCache.get(key);
-            if (!arr) {
-                // Локалното време → реално (UTC): off = локално − UTC.
-                const off = timeToLocal(Math.floor(Date.now() / 1000)) - Math.floor(Date.now() / 1000);
-                arr = await fetchCandlesRange(symbol, '1m', from - off - 180, to - off + 180);
-                arr = (arr || []).slice().sort((a, b) => a.time - b.time);
-                oneMinCache.set(key, arr);
+            // 1м свещите се теглят на ДНЕВНИ парчета (UTC-подравнени) и се кешират:
+            // съседните двусмислени барове ползват същата заявка вместо нова за всеки.
+            const CH = 86400;
+            const off = timeToLocal(Math.floor(Date.now() / 1000)) - Math.floor(Date.now() / 1000);
+            const c0 = Math.floor((from - off - 180) / CH), c1 = Math.floor((to - off + 180) / CH);
+            let arr = [];
+            for (let ck = c0; ck <= c1; ck++) {
+                const key = symbol + '|d' + ck;
+                let part = oneMinCache.get(key);
+                if (!part) {
+                    part = await fetchCandlesRange(symbol, '1m', ck * CH, (ck + 1) * CH);
+                    part = (part || []).slice().sort((a, b) => a.time - b.time);
+                    oneMinCache.set(key, part);
+                }
+                if (part.length) arr = arr.length ? arr.concat(part) : part;
             }
+            if (c1 > c0) arr.sort((a, b) => a.time - b.time);
             if (!arr || !arr.length) return { exitPrice: pos.sl, reason: 'SL' };
             for (const m of arr) {
                 if (m.time < from) continue;
@@ -2804,6 +2812,7 @@
                 simI0 = i0;
                 equityPct = new Array(n).fill(null);
             }
+            let simLastYield = performance.now();
             for (let i = i0; i < n; i++) {
                 // При тих (sweep) режим гледаме sweepCancel; иначе — cancelFlag.
                 // Вътрешните кандидати на динамичния lookback също трябва да
@@ -3174,7 +3183,7 @@
                 }
 
                 if (!silent) {
-                    updatePositionsPanel(legs, candles[i], equity);
+                    // Панелът се обновява само при кадър/пауза (не на всеки бар).
                     // Точка от кривата на сметката (% спрямо началото) за текущата свещ.
                     let fl = 0;
                     const cc = candles[i];
@@ -3189,12 +3198,15 @@
                         const delay = 1000 / cps;
                         const paintEvery = delay >= 16 ? 1 : Math.max(1, Math.ceil(16 / delay));
                         if (((i - 30) % paintEvery) === 0 || i === n - 1) {
+                            updatePositionsPanel(legs, candles[i], equity);
                             liveTick(i, equity, legs, tradeCount);
                             const wait = delay * paintEvery;
                             if (wait > 0) await sleep(wait);
                         }
-                    } else if (i % 50 === 0 || i === n - 1) {
+                    } else if (i === n - 1 || performance.now() - simLastYield >= 40) {
                         // „Мгновено“: показваме само баланса/статистиките (с +/–), без графика.
+                        simLastYield = performance.now();
+                        updatePositionsPanel(legs, candles[i], equity);
                         updateLiveStats(i, equity, legs, tradeCount);
                         setProgress(Math.round(((i - i0) / Math.max(1, n - i0)) * 100), `Обработка на свещ ${i}/${n} — ${tradeCount} сделки`);
                         await sleep(0);
