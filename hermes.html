@@ -1099,6 +1099,7 @@
             <button class="btn start" id="btnStart" onclick="runSimulation()">▶ Стартирай</button>
             <button class="btn stop" id="btnStop" onclick="stopSimulation()">■ Стоп</button>
             <button class="btn" id="btnSweep" onclick="toggleSweepPick()" title="Анализ на чувствителността: цъкни бутона, после цъкни върху настройка">📈 Чувствителност</button>
+            <button class="btn" id="btnCompare" onclick="openCompare()" title="Сравни няколко файла с настройки върху няколко тестови периода">⚖ Сравни</button>
             <label style="display:inline-flex;align-items:center;gap:4px;font-size:10.5px;color:var(--text-dim);white-space:nowrap" title="При „Запази“ записва ВТОРИ отделен файл с точните свещи от последната симулация. При „Зареди“ избери двата файла заедно (настройки + данни) — няма да се теглят данни от сървъра.">
                 <input type="checkbox" id="inpSaveData" style="width:auto"> данни
             </label>
@@ -1112,6 +1113,50 @@
     </header>
 
     <div id="loadedFilesBar"></div>
+
+    <div id="cmpPanel" style="display:none;position:fixed;inset:0;z-index:10000;background:rgba(3,5,10,0.82);align-items:center;justify-content:center">
+        <div style="width:min(1100px,96vw);max-height:92vh;display:flex;flex-direction:column;background:#0b0f18;border:1px solid var(--panel-border);border-radius:10px;padding:12px 14px;box-shadow:0 10px 40px rgba(0,0,0,0.6);font-size:12px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+                <b style="font-size:14px">⚖ Сравнение на настройки</b>
+                <button class="btn close" onclick="closeCompare()" style="padding:2px 8px">✕</button>
+            </div>
+            <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;margin-bottom:8px">
+                <div style="flex:1;min-width:260px">
+                    <label class="btn" style="display:inline-flex;cursor:pointer">📂 Избери файлове с настройки
+                        <input type="file" id="cmpFileInput" accept=".json,application/json" multiple style="display:none" onchange="cmpAddFiles(event)">
+                    </label>
+                    <div id="cmpFileList" style="margin-top:6px;color:var(--text-dim)"></div>
+                </div>
+                <div style="flex:1;min-width:300px">
+                    <label>Брой тестови периода: <input type="number" id="cmpPeriodCount" min="1" max="20" value="3" style="width:60px" onchange="cmpSetPeriodCount(this.value)"></label>
+                    <div id="cmpPeriods" style="margin-top:6px"></div>
+                </div>
+            </div>
+            <div style="margin-bottom:8px">
+                <label style="cursor:pointer"><input type="checkbox" id="cmpSameMoney" onchange="cmpMoneyToggle()" style="width:auto"> Едни и същи пари за всички файлове</label>
+                <input type="number" id="cmpMoney" value="1000" min="1" step="any" disabled style="width:100px;margin-left:6px"> €
+            </div>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+                <button class="btn start" id="cmpBtnStart" onclick="cmpStart()">▶ Започни</button>
+                <div style="flex:1;height:10px;background:rgba(255,255,255,0.07);border-radius:5px;overflow:hidden"><div id="cmpBar" style="height:100%;width:0;background:#00c27a;transition:width .2s"></div></div>
+                <b id="cmpPct" style="min-width:42px;text-align:right">0%</b>
+            </div>
+            <div id="cmpStatus" style="color:var(--text-dim);margin-bottom:6px;min-height:16px"></div>
+            <div style="overflow:auto;flex:1;border:1px solid var(--panel-border);border-radius:6px">
+                <table id="cmpTable" style="width:100%;border-collapse:collapse;font-size:12px">
+                    <thead style="position:sticky;top:0;background:#121826"><tr>
+                        <th style="text-align:left;padding:6px 8px">Файл / период</th>
+                        <th style="text-align:right;padding:6px 8px">Печалба</th>
+                        <th style="text-align:right;padding:6px 8px">Поръчки</th>
+                        <th style="text-align:right;padding:6px 8px">Макс. теглене</th>
+                        <th style="text-align:right;padding:6px 8px">Ср. поръчки/ден</th>
+                    </tr></thead>
+                    <tbody id="cmpBody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
 
     <div id="sweepPanel" style="display:none; position:fixed; right:12px; bottom:12px; width:470px; max-width:96vw; background:#0b0f18; border:1px solid var(--panel-border); border-radius:10px; padding:8px 10px; z-index:9999; box-shadow:0 10px 34px rgba(0,0,0,0.55)">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
@@ -4735,6 +4780,242 @@
             if (meta && meta.settingsName) loadedSettingsFile = { name: meta.settingsName };
             updateLoadedFilesBar();
             runSimulation();
+        }
+
+        // ── Сравнение на файлове с настройки върху няколко периода ──
+        // Всеки файл се пуска безшумно (silent) върху всеки период със своите
+        // символ/интервал/модел/параметри; датите са от периодите на сравнението.
+        // Ограничение: динамичният „Поглед назад“ (разширявай) не се прилага.
+        const cmp = { files: [], periods: [], rows: [], running: false, stop: false, candlesCache: new Map(), probsCache: new Map() };
+
+        function openCompare() {
+            const el = document.getElementById('cmpPanel');
+            if (el) el.style.display = 'flex';
+            if (!cmp.periods.length) cmpSetPeriodCount(document.getElementById('cmpPeriodCount').value);
+            cmpRenderFiles(); cmpRenderTable();
+        }
+        function closeCompare() {
+            if (cmp.running) { cmp.stop = true; sweepCancel = true; }
+            const el = document.getElementById('cmpPanel');
+            if (el) el.style.display = 'none';
+        }
+        function cmpMoneyToggle() {
+            const on = document.getElementById('cmpSameMoney').checked;
+            document.getElementById('cmpMoney').disabled = !on || cmp.running;
+        }
+        function cmpAddFiles(ev) {
+            const input = ev.target;
+            const files = Array.from(input.files || []);
+            Promise.all(files.map(f => new Promise(res => {
+                const r = new FileReader();
+                r.onload = () => res({ name: f.name, text: r.result });
+                r.onerror = () => res({ name: f.name, text: null });
+                r.readAsText(f);
+            }))).then(list => {
+                input.value = '';
+                const bad = [];
+                for (const e of list) {
+                    try {
+                        const d = JSON.parse(e.text);
+                        if (d && d.fields && typeof d.fields === 'object') {
+                            cmp.files.push({ name: e.name, data: d });
+                        } else bad.push(e.name);
+                    } catch (err) { bad.push(e.name); }
+                }
+                if (bad.length) alert('Не са файлове с настройки на HERMES: ' + bad.join(', '));
+                cmpResetRows(); cmpRenderFiles(); cmpRenderTable();
+            });
+        }
+        function cmpRemoveFile(i) {
+            if (cmp.running) return;
+            cmp.files.splice(i, 1);
+            cmpResetRows(); cmpRenderFiles(); cmpRenderTable();
+        }
+        function cmpRenderFiles() {
+            const el = document.getElementById('cmpFileList');
+            if (!el) return;
+            el.innerHTML = cmp.files.length ? cmp.files.map((f, i) =>
+                `<div>${i + 1}. <b style="color:var(--text-main)">${f.name}</b> · ${f.data.symbol || '?'} · ${(f.data.fields || {}).inpInterval || '?'} ` +
+                `<span style="cursor:pointer;color:#ff6b8a" onclick="cmpRemoveFile(${i})" title="Махни">✕</span></div>`).join('')
+                : 'Няма избрани файлове.';
+        }
+        function cmpSetPeriodCount(v) {
+            const n = Math.max(1, Math.min(20, parseInt(v, 10) || 1));
+            document.getElementById('cmpPeriodCount').value = n;
+            // Нови периоди по подразбиране: последователни блокове по 30 дни назад от днес.
+            while (cmp.periods.length < n) {
+                const k = cmp.periods.length;
+                const to = new Date(Date.now() - k * 30 * 86400000);
+                const from = new Date(to.getTime() - 29 * 86400000);
+                cmp.periods.push({ from: dateStr(from), to: dateStr(to) });
+            }
+            cmp.periods.length = n;
+            cmpRenderPeriods(); cmpResetRows(); cmpRenderTable();
+        }
+        function cmpRenderPeriods() {
+            const el = document.getElementById('cmpPeriods');
+            if (!el) return;
+            el.innerHTML = cmp.periods.map((p, i) =>
+                `<div style="margin-bottom:3px">${i + 1}. от <input type="date" value="${p.from}" onchange="cmpPeriodEdit(${i},'from',this.value)"> ` +
+                `до <input type="date" value="${p.to}" onchange="cmpPeriodEdit(${i},'to',this.value)"></div>`).join('');
+        }
+        function cmpPeriodEdit(i, k, v) {
+            if (cmp.running) return;
+            cmp.periods[i][k] = v;
+            cmpResetRows(); cmpRenderTable();
+        }
+        function cmpResetRows() {
+            if (cmp.running) return;
+            cmp.rows = [];
+            for (let fi = 0; fi < cmp.files.length; fi++)
+                for (let pi = 0; pi < cmp.periods.length; pi++) cmp.rows.push({ fi, pi, status: 'wait', res: null });
+            cmpSetProgress(0, '');
+        }
+        function cmpSetProgress(pct, text) {
+            const b = document.getElementById('cmpBar'), t = document.getElementById('cmpPct'), s = document.getElementById('cmpStatus');
+            if (b) b.style.width = pct + '%';
+            if (t) t.textContent = Math.round(pct) + '%';
+            if (s) s.textContent = text || '';
+        }
+        function cmpRenderTable() {
+            const body = document.getElementById('cmpBody');
+            if (!body) return;
+            if (!cmp.rows.length) cmpResetRows();
+            const td = 'padding:5px 8px;text-align:right;border-top:1px solid rgba(255,255,255,0.05)';
+            body.innerHTML = cmp.rows.map((r, idx) => {
+                const f = cmp.files[r.fi], p = cmp.periods[r.pi];
+                const first = r.pi === 0;
+                const label = `<span style="color:var(--text-main)">${f.name}</span> <span style="color:var(--text-dim)">· ${p.from} → ${p.to}</span>`;
+                const bg = r.status === 'run' ? 'background:rgba(255,200,60,0.10)' : '';
+                const sep = first && idx > 0 ? 'border-top:2px solid rgba(255,255,255,0.18);' : '';
+                let cells;
+                if (r.status === 'done') {
+                    const x = r.res;
+                    const pc = x.profit >= 0 ? 'pos' : 'neg';
+                    cells = `<td style="${td}"><b class="${pc}">${(x.profit >= 0 ? '+' : '') + x.profit.toFixed(2)} € (${(x.pct >= 0 ? '+' : '') + x.pct.toFixed(2)}%)</b></td>` +
+                        `<td style="${td}">${x.trades}</td><td style="${td}">${x.maxDD.toFixed(2)}%</td><td style="${td}">${x.perDay.toFixed(2)}</td>`;
+                } else if (r.status === 'err') {
+                    cells = `<td style="${td};color:#ff6b8a;text-align:left" colspan="4">${r.err || 'Грешка'}</td>`;
+                } else {
+                    const t = r.status === 'run' ? '⏳ ' + (r.stage || 'изчислява се...') : '—';
+                    cells = `<td style="${td};color:var(--text-dim)" colspan="4">${t}</td>`;
+                }
+                return `<tr id="cmpRow${idx}" style="${bg}"><td style="padding:5px 8px;${sep}border-top:${first && idx > 0 ? '2px solid rgba(255,255,255,0.18)' : '1px solid rgba(255,255,255,0.05)'}">${label}</td>${cells}</tr>`;
+            }).join('');
+        }
+
+        async function cmpRunOne(file, per, row, cmpSameMoney) {
+            const fields = file.data.fields;
+            const saved = collectSettingsFields();
+            const savedSym = currentSymbol, savedModel = currentModel;
+            let P, interval, invert, model;
+            try {
+                applySettingsFields(fields);
+                if (cmpSameMoney !== null) document.getElementById('inpBudget').value = cmpSameMoney;
+                P = readParams();
+                interval = (document.getElementById('inpInterval').value) || '5m';
+                invert = contraFlags();
+                model = parseInt(document.getElementById('inpModel').value, 10);
+            } finally { applySettingsFields(saved); }
+            const symbol = file.data.symbol || savedSym;
+            if (file.data.fx && typeof file.data.fx === 'object') { fxRates = Object.assign({ EUR: 1 }, file.data.fx); fxFetchedAt = Date.now(); }
+            else await ensureFxRates();
+            currentSymbol = symbol; currentModel = model;
+            try {
+                if (!per.from || !per.to || per.to < per.from) throw new Error('Невалиден период');
+                const fromS = timeToLocal(new Date(per.from + 'T00:00:00').getTime() / 1000);
+                const toS = timeToLocal(new Date(per.to + 'T23:59:59').getTime() / 1000);
+                const iv = intervalSecs(interval);
+                const pre = Math.max(300, P.lookback) * iv;
+                const ckey = symbol + '|' + interval + '|' + (fromS - pre) + '|' + toS;
+                let candles = cmp.candlesCache.get(ckey);
+                if (!candles) {
+                    row.stage = 'теглене на данни (' + symbol + ' ' + interval + ')...'; cmpRenderTable();
+                    candles = ensureUniqueTimes(await fetchExactRange(symbol, interval, fromS - pre, toS));
+                    cmp.candlesCache.set(ckey, candles);
+                }
+                if (!candles || candles.length < 30) throw new Error('Недостатъчно данни');
+                if (cmp.stop) return null;
+                const startIdx0 = candles.findIndex(c => c.time >= fromS);
+                if (startIdx0 < 0 || candles.length - startIdx0 < 30) throw new Error('Периодът покрива под 30 свещи');
+                const pkey = ckey + '|' + model + '|' + P.lookback + '|' + invert.join('');
+                let probs = cmp.probsCache.get(pkey);
+                if (!probs) {
+                    row.stage = 'изчисляване на вероятностите...'; cmpRenderTable();
+                    await sleep(20);
+                    probs = computeModelProbSeries(candles, model, { invert, intervalSec: iv, lookback: P.lookback, lookbackGrow: false });
+                    cmp.probsCache.set(pkey, probs);
+                    if (cmp.probsCache.size > 6) cmp.probsCache.delete(cmp.probsCache.keys().next().value);
+                }
+                const atr = computeATR(candles, 14);
+                P.refPrice = candles[candles.length - 1].close;
+                if (P.minLotUnit === 'value' && P.refPrice > 0) {
+                    const spec = specFor(symbol), fx = fxFor(symbol);
+                    P.minLot = Math.max(1e-9, (P.minLot * P.leverage) / (P.refPrice * spec.contract * fx));
+                }
+                row.stage = 'симулация...'; cmpRenderTable();
+                await sleep(0);
+                const r = await simulate(candles, atr, probs, P, interval, startIdx0, true);
+                if (!r || r.cancelled) return null;
+                const days = Math.max(1, Math.round((new Date(per.to) - new Date(per.from)) / 86400000) + 1);
+                const profit = r.equity - P.budget;
+                return { profit, pct: P.budget > 0 ? profit / P.budget * 100 : 0, trades: r.tradeCount, maxDD: r.maxDD, perDay: r.tradeCount / days };
+            } finally {
+                currentSymbol = savedSym; currentModel = savedModel;
+            }
+        }
+
+        async function cmpStart() {
+            const btn = document.getElementById('cmpBtnStart');
+            if (cmp.running) { cmp.stop = true; sweepCancel = true; if (btn) btn.textContent = '⏳ Спиране...'; return; }
+            if (!cmp.files.length) { alert('Избери поне един файл с настройки.'); return; }
+            if (!(await acquireSweep())) { alert('Спри текущата симулация и опитай пак.'); return; }
+            sweepMode = false;   // реалистично: 1м разрешаване на бар с TP и SL
+            let sameMoney = null;
+            if (document.getElementById('cmpSameMoney').checked) {
+                sameMoney = parseFloat(document.getElementById('cmpMoney').value);
+                if (!(sameMoney > 0)) { finishSweep(); alert('Въведи положителна начална сума.'); return; }
+            }
+            document.getElementById('cmpMoney').disabled = true;
+            document.getElementById('cmpSameMoney').disabled = true;
+            cmp.running = true; cmp.stop = false;
+            cmp.rows = [];
+            for (let fi = 0; fi < cmp.files.length; fi++)
+                for (let pi = 0; pi < cmp.periods.length; pi++) cmp.rows.push({ fi, pi, status: 'wait', res: null });
+            if (btn) btn.textContent = '■ Стоп';
+            cmpRenderTable();
+            const total = cmp.rows.length;
+            let done = 0;
+            for (let idx = 0; idx < total && !cmp.stop; idx++) {
+                const row = cmp.rows[idx];
+                row.status = 'run'; row.stage = 'изчислява се...';
+                const f = cmp.files[row.fi], p = cmp.periods[row.pi];
+                cmpSetProgress(done / total * 100, `Ред ${idx + 1}/${total} · файл ${row.fi + 1}/${cmp.files.length} „${f.name}“ · период ${row.pi + 1}/${cmp.periods.length}`);
+                cmpRenderTable();
+                const el = document.getElementById('cmpRow' + idx);
+                if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest' });
+                try {
+                    sweepCancel = false;
+                    const res = await cmpRunOne(f, p, row, sameMoney);
+                    if (res) { row.res = res; row.status = 'done'; }
+                    else { row.status = 'wait'; break; }
+                } catch (e) {
+                    row.status = 'err'; row.err = e.message || String(e);
+                }
+                done++;
+                cmpSetProgress(done / total * 100, `Готово ${done}/${total} реда (${Math.round(done / total * 100)}%)` + (done < total ? ` · следва ред ${done + 1}` : ''));
+                cmpRenderTable();
+                await sleep(0);
+            }
+            cmp.running = false;
+            if (cmp.stop) cmpSetProgress(done / total * 100, `Спряно — готови ${done}/${total} реда.`);
+            else cmpSetProgress(100, `Завършено — ${total} реда.`);
+            cmp.stop = false;
+            document.getElementById('cmpSameMoney').disabled = false;
+            cmpMoneyToggle();
+            if (btn) btn.textContent = '▶ Започни';
+            finishSweep();
+            cmpRenderTable();
         }
 
         // ── ИИ чат за настройки (без да пипа симулацията) ────────────
