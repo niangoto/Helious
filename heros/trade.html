@@ -835,17 +835,17 @@
             ].filter(Boolean).join(' · '));
             const s = state.stats || {};
             const open = state.openPositions || [];
-            const usedMargin = open.reduce((a, p) => a + (p.margin || 0), 0);
             const notional = open.reduce((a, p) => a + (p.notional || 0), 0);
             const acc = state.account || {};
+            const usedMargin = acc.margin != null ? acc.margin : open.reduce((a, p) => a + (p.margin || 0), 0);
             const freeMargin = acc.available;
             const cards = [
-                ['Плаваща P/L (сесия)', euro(s.floating), cls(s.floating)],
-                ['Обща P/L (сесия)', euro(s.totalPnl) + ' (' + (s.totalPct >= 0 ? '+' : '') + fmt(s.totalPct) + '%)', cls(s.totalPnl)],
+                ['Плаваща P/L (сметка)', euro(s.floating), cls(s.floating)],
+                ['Обща P/L (сметка от старта)', euro(s.totalPnl) + ' (' + (s.totalPct >= 0 ? '+' : '') + fmt(s.totalPct) + '%)', cls(s.totalPnl)],
                 ['Баланс (реален, без позиции)', fmt(acc.balance) + ' ' + cur(), ''],
                 ['Капитал (реален)', fmt(acc.equity) + ' ' + cur(), ''],
                 ['Отворени сега', String(s.openCount), ''],
-                ['Зает маржин', fmt(usedMargin) + ' ' + cur(), ''],
+                ['Зает маржин (сметка)', fmt(usedMargin) + ' ' + cur(), ''],
                 ['Свободен маржин (сметка)', fmt(freeMargin) + ' ' + cur(), ''],
                 ['Маржин ниво', acc.marginLevel ? fmt(acc.marginLevel, 0) + '%' : '—', ''],
                 ['Нотионал', fmt(notional) + ' ' + cur(), ''],

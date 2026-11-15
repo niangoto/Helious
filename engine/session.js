@@ -181,12 +181,22 @@ class Session {
     this.realized = this.trades.reduce((s, t) => s + t.pnl, 0);
   }
 
+  // Плаваща печалба: от РЕАЛНАТА MT5 сметка (account.profit — всички позиции), а не от сбор по сесията.
   floatingTotal() {
+    if (this.account && this.account.profit != null) return this.account.profit;
     let f = 0;
     for (const p of this.positions.values()) f += (p.profit || 0) + (p.swap || 0) + (p.commission || 0);
     return f;
   }
-  sessionEquity() { return (this.startBalance || 0) + this.realized + this.floatingTotal(); }
+  // Капитал/баланс — директно от MT5 сметката; резервно (без данни) — изчислени по сесията.
+  sessionEquity() {
+    if (this.account && this.account.equity != null) return this.account.equity;
+    return (this.startBalance || 0) + this.realized + this.floatingTotal();
+  }
+  sessionBalance() {
+    if (this.account && this.account.balance != null) return this.account.balance;
+    return (this.startBalance || 0) + this.realized;
+  }
 
   async tick() {
     if (this._ticking || this.status === 'stopped') return;
@@ -373,7 +383,7 @@ class Session {
   sampleEquity() {
     if (!this.connected || this.startBalance == null) return;
     const eq = this.sessionEquity();
-    this.equitySeries.push({ t: nowSec(), equity: eq, balance: this.startBalance + this.realized, floating: this.floatingTotal() });
+    this.equitySeries.push({ t: nowSec(), equity: eq, balance: this.sessionBalance(), floating: this.floatingTotal() });
   }
 
   // Периодично (на ~60с) обединява старите точки — нищо не се губи, само се разрежда.
@@ -441,7 +451,7 @@ class Session {
     const floating = this.floatingTotal();
     const wins = this.trades.filter(t => t.pnl > 0).length;
     return {
-      initial: start, balance: start + this.realized, equity, floating,
+      initial: start, balance: this.sessionBalance(), equity, floating,
       accountEquity: this.account ? this.account.equity : null, accountBalance: this.account ? this.account.balance : null,
       totalPnl: equity - start, totalPct: start > 0 ? (equity - start) / start * 100 : 0,
       trades: this.trades.length, wins,
@@ -657,7 +667,7 @@ function listSessions(ownerId) {
       id: s.id, status: s.status, mode: 'mt5', agentId: s.agentId, symbols: s.symbols, interval: s.interval,
       model: s.model, contra: s.contra, params: s.P,
       createdAt: s.createdAt, startedAt: s.startedAt, updatedAt: s.updatedAt,
-      equity: s.sessionEquity(), balance: s.startBalance != null ? s.startBalance + s.realized : null,
+      equity: s.sessionEquity(), balance: s.startBalance != null ? s.sessionBalance() : null,
       initial: s.startBalance, currency: s.account ? s.account.currency : null,
       trades: s.trades.length,
       lastBars: Object.fromEntries(s.symbols.map(x => [x, s.state[x].lastBarTime || 0])),
