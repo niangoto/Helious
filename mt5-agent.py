@@ -29,7 +29,7 @@ except ImportError:
     print("Липсва пакетът MetaTrader5: pip install MetaTrader5")
     sys.exit(1)
 
-VERSION = "1.2"
+VERSION = "1.3"
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.join(HERE, "mt5-agent.config.json")
 KILL_FILE = os.path.join(HERE, "KILL")
@@ -140,13 +140,31 @@ def account_dict():
     }
 
 
+_fee_cache = {}
+
+
+def entry_fee(ticket):
+    """Начална такса/комисиона на позицията — от входната сделка (в позицията я няма)."""
+    if ticket in _fee_cache:
+        return _fee_cache[ticket]
+    try:
+        ds = mt5.history_deals_get(position=ticket)
+    except Exception:
+        ds = None
+    if ds:
+        fee = sum(d.commission + getattr(d, "fee", 0.0) for d in ds if d.entry == mt5.DEAL_ENTRY_IN)
+        _fee_cache[ticket] = fee
+        return fee
+    return 0.0
+
+
 def pos_dict(p):
     return {
         "ticket": p.ticket, "symbol": p.symbol,
         "type": "BUY" if p.type == mt5.POSITION_TYPE_BUY else "SELL",
         "volume": p.volume, "price_open": p.price_open, "price_current": p.price_current,
         "sl": p.sl, "tp": p.tp, "profit": p.profit, "swap": p.swap,
-        "commission": getattr(p, "commission", 0.0), "time": to_utc(p.time),
+        "commission": getattr(p, "commission", 0.0) or entry_fee(p.ticket), "time": to_utc(p.time),
         "magic": p.magic, "comment": p.comment,
     }
 

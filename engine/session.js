@@ -81,6 +81,7 @@ class Session {
     this.positions = new Map();     // ticket → позиция на сесията
     this.trades = [];               // затворени сделки (от историята на MT5)
     this.tradeIds = new Set();
+    this.levels = new Map();        // ticket → {sl,tp} (историята на MT5 не ги пази за затворените)
     this.closeReasons = new Map();  // ticket → причина, зададена от нас
     this.startBalance = null;
     this.realized = 0;
@@ -164,6 +165,7 @@ class Session {
         prob: (this.positions.get(p.ticket) || {}).prob || null
       });
     }
+    for (const p of mine.values()) this.levels.set(p.ticket, { sl: p.sl, tp: p.tp });
     this.positions = mine;
     // Затворени сделки от историята
     for (const t of (snap.deals || [])) {
@@ -174,8 +176,9 @@ class Session {
         id: this.trades.length + 1, ticket: t.ticket, symbol: t.symbol, dir: t.type, lots: t.volume,
         entry: t.price_open, exit: t.price_close, openedAt: t.time_open, closedAt: t.time_close,
         pnl: (t.profit || 0) + (t.swap || 0) + (t.commission || 0), swap: t.swap || 0, commission: t.commission || 0,
-        reason, spread: 0
+        reason, spread: 0, sl: (this.levels.get(t.ticket) || {}).sl || null, tp: (this.levels.get(t.ticket) || {}).tp || null
       });
+      this.levels.delete(t.ticket);
     }
     this.trades.sort((a, b) => a.closedAt - b.closedAt);
     this.realized = this.trades.reduce((s, t) => s + t.pnl, 0);
@@ -479,15 +482,24 @@ class Session {
     const iv = IV_SEC[this.interval];
     const bar = t => t - (t % iv);
     const out = [];
-    const open = (p, t) => out.push({ time: bar(t), position: p.dir === 'BUY' ? 'belowBar' : 'aboveBar', color: p.dir === 'BUY' ? '#00ff66' : '#ff0055', shape: p.dir === 'BUY' ? 'arrowUp' : 'arrowDown', text: p.dir + ' ' + p.lots + 'л' });
+    const mk = (p, t, o) => ({ time: bar(t), position: o.position, color: o.color, shape: o.shape, text: o.text,
+      d: { ticket: p.ticket, dir: p.dir, lots: p.lots, entry: p.entry, sl: p.sl || null, tp: p.tp || null, openedAt: p.openedAt || p.openTime, closedAt: p.closedAt || null, exit: p.exit != null ? p.exit : null, pnl: p.pnl != null ? p.pnl : null, swap: p.swap || 0, commission: p.commission || 0, reason: p.reason || null } });
+    const open = (p, t) => out.push(mk(p, t, { position: p.dir === 'BUY' ? 'belowBar' : 'aboveBar', color: p.dir === 'BUY' ? '#00ff66' : '#ff0055', shape: p.dir === 'BUY' ? 'arrowUp' : 'arrowDown', text: p.dir + ' ' + p.lots + 'л' }));
     for (const t of this.trades) {
       if (t.symbol !== sym) continue;
       open(t, t.openedAt);
-      out.push({ time: bar(t.closedAt), position: t.dir === 'BUY' ? 'aboveBar' : 'belowBar', color: t.pnl >= 0 ? '#00ff66' : '#ff0055', shape: 'circle', text: t.reason + (t.pnl >= 0 ? ' +' : ' ') + t.pnl.toFixed(2) });
+      out.push(mk(t, t.closedAt, { position: t.dir === 'BUY' ? 'aboveBar' : 'belowBar', color: t.pnl >= 0 ? '#00ff66' : '#ff0055', shape: 'circle', text: t.reason + (t.pnl >= 0 ? ' +' : ' ') + t.pnl.toFixed(2) }));
     }
     for (const p of this.positions.values()) if (p.symbol === sym) open(p, p.openTime);
     out.sort((a, b) => a.time - b.time);
-    return out.slice(-300);
+    return out;
+  }
+
+  // Цялата история на сесията (всички сделки и маркери) — за преглед назад.
+  fullHistory() {
+    const markers = {};
+    for (const sym of this.symbols) markers[sym] = this.markers(sym);
+    return { trades: this.trades, markers, nTrades: this.trades.length, nOpen: this.positions.size };
   }
 
   getState() {
@@ -501,11 +513,11 @@ class Session {
         minMargin: (i.margin1 > 0 && i.vmin > 0) ? i.margin1 * i.vmin : null,
         minNotional: (i.contract > 0 && i.vmin > 0 && i.bid > 0 && i.tickSize > 0) ? i.vmin * i.contract * i.bid * ((i.tickValue / i.tickSize) / i.contract) : null,
         minSpreadCost: (i.contract > 0 && i.vmin > 0 && i.tickSize > 0) ? i.spread * i.vmin * i.contract * ((i.tickValue / i.tickSize) / i.contract) : null,
-        bid: i.bid, ask: i.ask, spread: i.spread, swapLong: i.swapLong, swapShort: i.swapShort,
+        digits: i.digits, point: i.point, bid: i.bid, ask: i.ask, spread: i.spread, swapLong: i.swapLong, swapShort: i.swapShort,
         marketOpen: !!(st.info && i.tradeAllowed && i.tickAge < STALE_TICK_SEC),
         lastBarTime: st.lastBarTime, prob: st.prob, probTime: st.probTime, probAt: st.probAt || 0, probHist: recentOf(st.hist, p => p[0], RECENT_SEC),
         candles: st.candles.slice(-800).map(c => ({ time: c.time, open: c.open, high: c.high, low: c.low, close: c.close })),
-        markers: this.markers(sym)
+        markers: this.markers(sym).slice(-300)
       };
     }
     const openPositions = [...this.positions.values()].map(p => {
@@ -516,7 +528,7 @@ class Session {
         ticket: p.ticket, symbol: p.symbol, dir: p.dir, entry: p.entry, lots: p.lots, contract: i.contract,
         units, notional: units * p.entry * fx, margin: i.margin1 ? i.margin1 * p.lots : null, tp: p.tp, sl: p.sl,
         openTime: p.openTime, prob: p.prob, spread: i.spread ? i.spread * units * fx : 0, fx,
-        swap: p.swap, floating: (p.profit || 0) + (p.swap || 0) + (p.commission || 0)
+        swap: p.swap, commission: p.commission || 0, gross: p.profit || 0, price: p.price, floating: (p.profit || 0) + (p.swap || 0) + (p.commission || 0)
       };
     });
     const a = this.account;
@@ -546,7 +558,7 @@ class Session {
       symbols: this.symbols, interval: this.interval, model: this.model, contra: this.contra, P: this.P,
       status: this.status, createdAt: this.createdAt, startedAt: this.startedAt, updatedAt: this.updatedAt,
       startBalance: this.startBalance, peak: this.peak, maxDD: this.maxDD,
-      trades: this.trades.slice(-2000),
+      trades: this.trades,
       hist: Object.fromEntries(this.symbols.map(x => [x, this.state[x].hist])),
       equitySeries: this.equitySeries.map(p => [p.t, r2(p.equity), r2(p.balance), r2(p.floating)])
     };

@@ -164,6 +164,9 @@
         #vline { position: absolute; width: 0; border-left: 1px dashed rgba(255,255,255,0.55); pointer-events: none; display: none; z-index: 5; }
         #vtip { position: absolute; pointer-events: none; display: none; z-index: 6; background: rgba(8,11,18,0.95); border: 1px solid var(--panel-border);
                 border-radius: 8px; padding: 5px 8px; font: 11px/1.45 'JetBrains Mono', monospace; color: var(--text-main); white-space: nowrap; }
+        #posInfo { position: absolute; left: 14px; top: 12px; display: none; z-index: 7; background: rgba(8,11,18,0.96); border: 1px solid var(--panel-border);
+                border-radius: 8px; padding: 6px 26px 6px 9px; font: 11px/1.5 'JetBrains Mono', monospace; color: var(--text-main); max-width: 92%; }
+        #posInfo .x { position: absolute; right: 7px; top: 3px; cursor: pointer; color: var(--text-dim); }
         #probCanvas { width: 100%; height: 64px; display: block; margin-top: 4px; }
 
         table { width: 100%; border-collapse: collapse; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
@@ -384,7 +387,7 @@
                 </div>
                 <div id="chart"></div>
                 <canvas id="pnlCanvas"></canvas>
-                <div id="vline"></div><div id="vtip"></div>
+                <div id="vline"></div><div id="vtip"></div><div id="posInfo"></div>
                 <canvas id="probCanvas" title="Вероятност за покупка (Buy %) по бар — каквато я е виждал алгоритъмът. Пунктир = праговете за вход."></canvas>
             </div>
 
@@ -804,6 +807,21 @@
             } catch (e) { /* ще опита при следващото състояние */ }
             hc.loading = false;
         }
+        // Цялата история на сделките и маркерите (тегли се отделно; обновява се при нова/затворена сделка).
+        let fullH = { id: null, key: '', trades: null, markers: {}, loading: false };
+        function syncFull(state) {
+            const key = (state.stats ? state.stats.trades : 0) + '|' + (state.openPositions || []).length;
+            if (fullH.id !== state.id) fullH = { id: state.id, key: '', trades: null, markers: {}, loading: false };
+            if (fullH.key === key || fullH.loading) return;
+            fullH.loading = true;
+            const sid = state.id;
+            fetch('/api/trade/sessions/' + sid + '/full').then(x => x.json()).then(r => {
+                fullH.loading = false;
+                if (!r || !r.ok || fullH.id !== sid) return;
+                fullH.key = r.nTrades + '|' + r.nOpen; fullH.trades = r.trades; fullH.markers = r.markers || {};
+                if (lastState && lastState.id === sid) { drawChartData(lastState); renderTrades(lastState.trades || []); }
+            }).catch(() => { fullH.loading = false; });
+        }
         function applyHistToState(state) {
             state.equitySeries = hc.eq;
             for (const k in state.symbols) { state.symbols[k].probHist = hc.prob[k] || []; }
@@ -825,6 +843,7 @@
 
         function render(state) {
             syncHistory(state);
+            syncFull(state);
             lastState = state;
             setStatus(state.status);
             const symKeys = Object.keys(state.symbols || {});
@@ -913,7 +932,7 @@
                     }
                 },
                 localization: { timeFormatter: (time) => sofiaDT(time) },
-                rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)' },
+                rightPriceScale: { borderColor: 'rgba(255,255,255,0.08)', ticksVisible: true, scaleMargins: { top: 0.06, bottom: 0.06 } },
                 crosshair: { mode: LightweightCharts.CrosshairMode.Normal }
             });
             candleSeries = chart.addCandlestickSeries({ upColor: '#00ff66', downColor: '#ff0055', borderVisible: false, wickUpColor: '#00ff66', wickDownColor: '#ff0055' });
@@ -928,24 +947,96 @@
         let chartKey = null, ovCandles = null, ovKey = null, ovFetchedAt = 0, ovBusy = false;
         const IV_SEC_UI = { '1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400 };
         function chartIvSel() { return document.getElementById('chartIv').value; }
-        function onChartIvChange() { ovCandles = null; ovKey = null; ovFetchedAt = 0; if (lastState) render(lastState); }
+        function onChartIvChange() { ovCandles = null; ovKey = null; ovFetchedAt = 0; ovWant = 0; ovFull = false; ovAtStart = false; if (lastState) render(lastState); }
         function fitChart() { if (chart) chart.timeScale().fitContent(); }
 
+        let ovWant = 0, ovFull = false;   // ovWant>0 → по-дълга история от MT5 (скролиране назад)
         function ensureOverrideCandles(state) {
-            const iv = chartIvSel();
-            if (!iv || iv === state.config.interval) { ovCandles = null; return null; }
+            const iv = chartIvSel() || state.config.interval;
+            if (iv === state.config.interval && !ovWant) { ovCandles = null; return null; }
             const key = state.agentId + '|' + activeSymbol + '|' + iv;
-            if (ovKey !== key) { ovCandles = null; ovKey = key; ovFetchedAt = 0; }
-            if (!ovBusy && Date.now() - ovFetchedAt > 5000) {
+            if (ovKey !== key) { ovCandles = null; ovKey = key; ovFetchedAt = 0; ovWant = 0; ovFull = false; ovAtStart = false; if (iv === state.config.interval) return null; }
+            const want = Math.max(1500, ovWant);
+            if (!ovBusy && (!ovFull || (ovCandles && ovCandles.length < want && !ovAtStart) || Date.now() - ovFetchedAt > 5000)) {
+                const needFull = !ovCandles || !ovFull || (ovCandles.length < want && !ovAtStart);
                 ovBusy = true; ovFetchedAt = Date.now();
-                fetch('/api/mt5/agents/' + state.agentId + '/candles?symbol=' + encodeURIComponent(activeSymbol) + '&interval=' + iv + '&count=1500')
+                const cnt = needFull ? want : 120;
+                fetch('/api/mt5/agents/' + state.agentId + '/candles?symbol=' + encodeURIComponent(activeSymbol) + '&interval=' + iv + '&count=' + cnt)
                     .then(x => x.json()).then(r => {
                         ovBusy = false;
-                        if (r && r.ok && ovKey === key) { ovCandles = r.candles; if (lastState) drawChartData(lastState); }
+                        if (!(r && r.ok && ovKey === key)) return;
+                        if (needFull) {
+                            ovAtStart = r.candles.length < cnt;     // повече няма (началото на историята в MT5)
+                            ovCandles = r.candles; ovFull = true;
+                        } else if (ovCandles && r.candles.length) {  // само последните свещи → слепваме
+                            const f = r.candles[0].time;
+                            ovCandles = ovCandles.filter(c => c.time < f).concat(r.candles);
+                        }
+                        if (lastState) drawChartData(lastState);
                     }).catch(() => { ovBusy = false; });
             }
             return ovCandles;
         }
+        let ovAtStart = false;
+        (function initScrollBack() {
+            const hook = () => {
+                if (!chart) return setTimeout(hook, 300);
+                chart.timeScale().subscribeVisibleLogicalRangeChange(r => {
+                    if (!r || !lastState || ovBusy || ovAtStart) return;
+                    if (r.from < 15 && Date.now() - ovFetchedAt > 800) {   // близо до най-старата заредена свещ
+                        const cur = (ovCandles && ovCandles.length) || ((lastState.symbols[activeSymbol] || {}).candles || []).length;
+                        if (cur >= 20 && ovWant < 50000) { ovKey = lastState.agentId + '|' + activeSymbol + '|' + (chartIvSel() || lastState.config.interval); ovWant = Math.min(50000, Math.max(ovWant, cur) * 2); ovFetchedAt = 0; ovFull = false; drawChartData(lastState); }
+                    }
+                });
+            };
+            hook();
+        })();
+
+        let markerData = [], posLines = [], lastFirstT = null, priceDigits = null, bidLine = null, askLine = null;
+        function clearPosInfo() {
+            for (const l of posLines) { try { candleSeries.removePriceLine(l); } catch (e) {} }
+            posLines = [];
+            const el = document.getElementById('posInfo'); if (el) el.style.display = 'none';
+        }
+        // Цъкване върху маркер: показва входа, SL и TP на позицията, къде е затворена и с какъв резултат.
+        function showPosInfo(d) {
+            clearPosInfo();
+            const line = (price, color, title, style) => {
+                if (price == null || !(price > 0)) return;
+                posLines.push(candleSeries.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title }));
+            };
+            const hitTp = d.reason === 'TP', hitSl = d.reason === 'SL';
+            line(d.entry, '#cbd5e1', 'Вход ' + d.dir, 0);
+            line(d.tp, '#00ff66', 'TP' + (hitTp ? ' ✓ тук е затворена' : ''), 2);
+            line(d.sl, '#ff0055', 'SL' + (hitSl ? ' ✓ тук е затворена' : ''), 2);
+            if (d.exit != null && !hitTp && !hitSl) line(d.exit, '#ffb37a', 'Изход (' + (d.reason || '') + ')', 1);
+            let h = '<span class="x" onclick="clearPosInfo()">✕</span><b class="' + (d.dir === 'BUY' ? 'pos' : 'neg') + '">' + d.dir + '</b> ' + fmt(d.lots, 3) + ' лота · вход ' + fmt(d.entry, priceDigits != null ? priceDigits : 5) + ' (' + sofiaDT(d.openedAt) + ')';
+            h += '<br>TP ' + (d.tp ? fmt(d.tp, 5) : '—') + ' · SL ' + (d.sl ? fmt(d.sl, 5) : '—');
+            if (d.closedAt) {
+                h += '<br>Затворена ' + sofiaDT(d.closedAt) + ' на ' + fmt(d.exit, 5) + ' · причина: <b>' + (d.reason || '—') + '</b>';
+                h += '<br>Бруто ' + fmt(d.pnl - (d.swap || 0) - (d.commission || 0), 2) + ' · суап ' + fmt(d.swap, 2) + ' · нач. такса ' + fmt(d.commission, 2);
+                h += '<br>Резултат (нето): <b class="' + (d.pnl >= 0 ? 'pos' : 'neg') + '">' + (d.pnl >= 0 ? '+' : '') + fmt(d.pnl, 2) + ' ' + cur() + '</b>';
+            } else h += '<br>Още е отворена';
+            const el = document.getElementById('posInfo'); el.innerHTML = h; el.style.display = 'block';
+        }
+        (function initPosClick() {
+            const hook = () => {
+                if (!chart) return setTimeout(hook, 300);
+                chart.subscribeClick(p => {
+                    if (!p || !p.point || !markerData.length) return;
+                    let best = null, bd = 16;
+                    for (const m of markerData) {
+                        if (!m.d) continue;
+                        const x = chart.timeScale().timeToCoordinate(m.time);
+                        if (x == null) continue;
+                        const dx = Math.abs(x - p.point.x);
+                        if (dx < bd) { bd = dx; best = m; }
+                    }
+                    if (best) showPosInfo(best.d); else clearPosInfo();
+                });
+            };
+            hook();
+        })();
 
         function drawChartData(state) {
             const sd = state.symbols[activeSymbol];
@@ -955,10 +1046,29 @@
             const candles = ov || ((!chartIvSel() || chartIvSel() === state.config.interval) ? (sd.candles || []) : []);
             const key = state.id + '|' + activeSymbol + '|' + iv;
             const keep = (key === chartKey) ? chart.timeScale().getVisibleLogicalRange() : null;
+            // Точна скала: всички знаци след десетичната запетая, както в MT5, + живи линии Bid/Ask.
+            const dg = sd.digits != null ? sd.digits : 5;
+            if (priceDigits !== dg) {
+                priceDigits = dg;
+                candleSeries.applyOptions({ priceFormat: { type: 'price', precision: dg, minMove: sd.point > 0 ? sd.point : Math.pow(10, -dg) } });
+            }
+            if (bidLine) { try { candleSeries.removePriceLine(bidLine); } catch (e) {} bidLine = null; }
+            if (askLine) { try { candleSeries.removePriceLine(askLine); } catch (e) {} askLine = null; }
+            if (sd.bid > 0) bidLine = candleSeries.createPriceLine({ price: sd.bid, color: '#60a5fa', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: 'Bid (SELL затваря на Ask)' });
+            if (sd.ask > 0) askLine = candleSeries.createPriceLine({ price: sd.ask, color: '#f59e0b', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: 'Ask' });
+            // При добавяне на по-стари свещи индексите се изместват — местим видимия диапазон със същия брой.
+            if (keep && candles.length && lastFirstT && candles[0].time < lastFirstT) {
+                const added = candles.filter(c => c.time < lastFirstT).length;
+                keep.from += added; keep.to += added;
+            }
+            lastFirstT = candles.length ? candles[0].time : null;
             candleSeries.setData(candles);
             const step = IV_SEC_UI[iv] || 60;
-            const mk = (sd.markers || []).map(m => Object.assign({}, m, { time: m.time - (m.time % step) })).sort((a, b) => a.time - b.time);
-            candleSeries.setMarkers(mk);
+            // Само маркери във видимо заредения диапазон — иначе графиката ги струпва в края.
+            const t0 = candles.length ? candles[0].time : 0, t1 = candles.length ? candles[candles.length - 1].time : 0;
+            markerData = ((fullH.id === state.id && fullH.markers[activeSymbol]) || sd.markers || []).map(m => Object.assign({}, m, { time: m.time - (m.time % step) }))
+                .filter(m => m.time >= t0 && m.time <= t1).sort((a, b) => a.time - b.time);
+            candleSeries.setMarkers(markerData.map(m => ({ time: m.time, position: m.position, color: m.color, shape: m.shape, text: m.text })));
             if (keep) chart.timeScale().setVisibleLogicalRange(keep);
             else if (candles.length) { chart.timeScale().fitContent(); chartKey = key; }
         }
@@ -978,8 +1088,8 @@
         function renderOpenPositions(list) {
             const el = document.getElementById('openPos');
             if (!list.length) { el.innerHTML = '<div class="empty">Няма отворени позиции</div>'; return; }
-            el.innerHTML = `<div class="tblwrap"><table><thead><tr><th>Отворена (BG)</th><th>Символ</th><th>Вид</th><th>Вход</th><th>Обем (лот)</th><th>Нотионал</th><th>Маржин</th><th>Спред</th><th>TP</th><th>SL</th><th>Суап</th><th>Плаваща</th></tr></thead><tbody>` +
-                list.map(p => `<tr><td>${p.openTime ? sofiaDT(p.openTime) : '—'}</td><td>${p.symbol}</td><td class="${p.dir === 'BUY' ? 'pos' : 'neg'}">${p.dir}</td><td>${fmt(p.entry, 5)}</td><td>${fmt(p.lots, 3)}</td><td>${fmt(p.notional, 2)} ${cur()}</td><td>${fmt(p.margin, 2)} ${cur()}</td><td class="neg">${p.spread ? fmt(p.spread, 2) + ' ' + cur() : '—'}</td><td>${fmt(p.tp, 5)}</td><td>${fmt(p.sl, 5)}</td><td>${fmt(p.swap, 2)}</td><td class="${cls(p.floating)}">${euro(p.floating)}</td></tr>`).join('') +
+            el.innerHTML = `<div class="tblwrap"><table><thead><tr><th>Отворена (BG)</th><th>Символ</th><th>Вид</th><th>Вход</th><th>Обем (лот)</th><th>Нотионал</th><th>Маржин</th><th>Спред</th><th>TP</th><th>SL</th><th>Суап</th><th>Нач. такса</th><th>Бруто</th><th>Текуща цена</th><th>Плаваща (нето)</th></tr></thead><tbody>` +
+                list.map(p => `<tr><td>${p.openTime ? sofiaDT(p.openTime) : '—'}</td><td>${p.symbol}</td><td class="${p.dir === 'BUY' ? 'pos' : 'neg'}">${p.dir}</td><td>${fmt(p.entry, 5)}</td><td>${fmt(p.lots, 3)}</td><td>${fmt(p.notional, 2)} ${cur()}</td><td>${fmt(p.margin, 2)} ${cur()}</td><td class="neg">${p.spread ? fmt(p.spread, 2) + ' ' + cur() : '—'}</td><td>${fmt(p.tp, 5)}</td><td>${fmt(p.sl, 5)}</td><td>${fmt(p.swap, 2)}</td><td>${fmt(p.commission, 2)}</td><td class="${cls(p.gross)}">${fmt(p.gross, 2)}</td><td>${fmt(p.price, 5)}</td><td class="${cls(p.floating)}">${euro(p.floating)}</td></tr>`).join('') +
                 `</tbody></table></div>`;
         }
 
@@ -1017,12 +1127,17 @@
             }).join('');
         }
 
-        function renderTrades(list) {
+        let tradesShowAll = false;
+        function renderTrades(live) {
             const el = document.getElementById('tradesList');
+            const list = (fullH.trades && fullH.trades.length >= (live || []).length) ? fullH.trades : (live || []);
             if (!list.length) { el.innerHTML = '<div class="empty">Още няма сделки</div>'; return; }
-            const rows = list.slice().reverse().slice(0, 50).map(t =>
-                `<tr><td>${sofiaDT(t.openedAt)}</td><td>${t.closedAt ? sofiaDT(t.closedAt) : '—'}</td><td>${t.symbol}</td><td class="${t.dir === 'BUY' ? 'pos' : 'neg'}">${t.dir}</td><td>${fmt(t.lots, 3)}</td><td>${fmt(t.entry, 5)}</td><td>${fmt(t.exit, 5)}</td><td>${t.reason}</td><td class="${cls(t.pnl)}">${euro(t.pnl)}</td><td>${fmt(t.swap, 2)}</td></tr>`).join('');
-            el.innerHTML = `<table><thead><tr><th>Отваряне</th><th>Затваряне</th><th>Символ</th><th>Вид</th><th>Обем (лот)</th><th>Вход</th><th>Изход</th><th>Причина</th><th>P/L</th><th>Суап</th></tr></thead><tbody>${rows}</tbody></table>`;
+            const all = list.slice().reverse();
+            const shown = tradesShowAll ? all : all.slice(0, 50);
+            const rows = shown.map(t =>
+                `<tr><td>${sofiaDT(t.openedAt)}</td><td>${t.closedAt ? sofiaDT(t.closedAt) : '—'}</td><td>${t.symbol}</td><td class="${t.dir === 'BUY' ? 'pos' : 'neg'}">${t.dir}</td><td>${fmt(t.lots, 3)}</td><td>${fmt(t.entry, 5)}</td><td>${fmt(t.exit, 5)}</td><td>${t.reason}</td><td class="${cls(t.pnl - (t.swap || 0) - (t.commission || 0))}">${fmt(t.pnl - (t.swap || 0) - (t.commission || 0), 2)}</td><td>${fmt(t.swap, 2)}</td><td>${fmt(t.commission, 2)}</td><td class="${cls(t.pnl)}"><b>${euro(t.pnl)}</b></td></tr>`).join('');
+            const more = all.length > 50 ? `<div style="margin-top:6px"><button class="btn" onclick="tradesShowAll=!tradesShowAll;renderTrades(lastState.trades)">${tradesShowAll ? 'Покажи само последните 50' : 'Покажи всички (' + all.length + ')'}</button></div>` : '';
+            el.innerHTML = `<table><thead><tr><th>Отваряне</th><th>Затваряне</th><th>Символ</th><th>Вид</th><th>Обем (лот)</th><th>Вход</th><th>Изход</th><th>Причина</th><th>Бруто</th><th>Суап</th><th>Нач. такса</th><th>Нето P/L</th></tr></thead><tbody>${rows}</tbody></table>` + more;
         }
 
         // Паралелна графика: промяната на капитала в % спрямо началото.

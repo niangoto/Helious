@@ -185,8 +185,8 @@ async function route(req, res, url, ctx) {
       const iv = url.searchParams.get('interval') || '1h';
       if (!['1m', '5m', '15m', '30m', '1h', '4h', '1d'].includes(iv)) { sendJson(res, 200, { ok: false, error: 'Неподдържан интервал' }); return true; }
       const sym = url.searchParams.get('symbol') || '';
-      const count = Math.max(50, Math.min(5000, parseInt(url.searchParams.get('count'), 10) || 1500));
-      const snap = await call(id, 'snapshot', { symbols: [{ name: sym, interval: iv, count, from: 0 }] });
+      const count = Math.max(50, Math.min(50000, parseInt(url.searchParams.get('count'), 10) || 1500));
+      const snap = await call(id, 'snapshot', { symbols: [{ name: sym, interval: iv, count, from: 0 }] }, count > 5000 ? 60000 : undefined);
       const d = snap.symbols && snap.symbols[sym];
       if (!d || d.error) { sendJson(res, 200, { ok: false, error: (d && d.error) || 'Няма данни' }); return true; }
       sendJson(res, 200, { ok: true, interval: iv, candles: (d.candles || []).map(c => ({ time: c[0], open: c[1], high: c[2], low: c[3], close: c[4] })) });
