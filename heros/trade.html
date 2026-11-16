@@ -993,6 +993,23 @@
         })();
 
         let markerData = [], posLines = [], lastFirstT = null, priceDigits = null, bidLine = null, askLine = null;
+        let openLines = [];
+        // Постоянни линии за отворените позиции на избрания символ: вход, цена на затваряне (със спреда), TP, SL.
+        function drawOpenLines(state) {
+            for (const l of openLines) { try { candleSeries.removePriceLine(l); } catch (e) {} }
+            openLines = [];
+            const dg = priceDigits != null ? priceDigits : 5;
+            for (const p of (state.openPositions || [])) {
+                if (p.symbol !== activeSymbol) continue;
+                const add = (price, color, title, style) => { if (price > 0) openLines.push(candleSeries.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title })); };
+                const buy = p.dir === 'BUY', sp = p.spreadPx || 0;
+                add(p.entry, '#e2e8f0', 'Отворена ' + p.dir + ' @ ' + fmt(p.entry, dg), 0);
+                // позицията се затваря от обратната страна на спреда: BUY → Bid, SELL → Ask
+                if (sp > 0) add(buy ? p.entry - sp : p.entry + sp, '#a78bfa', 'Със спреда (' + (buy ? 'Bid' : 'Ask') + ' при вход) ' + fmt(buy ? p.entry - sp : p.entry + sp, dg), 3);
+                add(p.tp, '#00ff66', 'TP ' + fmt(p.tp, dg), 2);
+                add(p.sl, '#ff0055', 'SL ' + fmt(p.sl, dg), 2);
+            }
+        }
         function clearPosInfo() {
             for (const l of posLines) { try { candleSeries.removePriceLine(l); } catch (e) {} }
             posLines = [];
@@ -1007,10 +1024,12 @@
             };
             const hitTp = d.reason === 'TP', hitSl = d.reason === 'SL';
             line(d.entry, '#cbd5e1', 'Вход ' + d.dir, 0);
+            if (d.spreadPx > 0) line(d.dir === 'BUY' ? d.entry - d.spreadPx : d.entry + d.spreadPx, '#a78bfa', 'Със спреда', 3);
             line(d.tp, '#00ff66', 'TP' + (hitTp ? ' ✓ тук е затворена' : ''), 2);
             line(d.sl, '#ff0055', 'SL' + (hitSl ? ' ✓ тук е затворена' : ''), 2);
             if (d.exit != null && !hitTp && !hitSl) line(d.exit, '#ffb37a', 'Изход (' + (d.reason || '') + ')', 1);
             let h = '<span class="x" onclick="clearPosInfo()">✕</span><b class="' + (d.dir === 'BUY' ? 'pos' : 'neg') + '">' + d.dir + '</b> ' + fmt(d.lots, 3) + ' лота · вход ' + fmt(d.entry, priceDigits != null ? priceDigits : 5) + ' (' + sofiaDT(d.openedAt) + ')';
+            if (d.spreadPx > 0) h += '<br>Спред при вход: ' + fmt(d.spreadPx, priceDigits != null ? priceDigits : 5) + ' (' + (d.dir === 'BUY' ? 'вход по Ask, излиза по Bid' : 'вход по Bid, излиза по Ask') + ')';
             h += '<br>TP ' + (d.tp ? fmt(d.tp, 5) : '—') + ' · SL ' + (d.sl ? fmt(d.sl, 5) : '—');
             if (d.closedAt) {
                 h += '<br>Затворена ' + sofiaDT(d.closedAt) + ' на ' + fmt(d.exit, 5) + ' · причина: <b>' + (d.reason || '—') + '</b>';
@@ -1063,6 +1082,7 @@
             }
             lastFirstT = candles.length ? candles[0].time : null;
             candleSeries.setData(candles);
+            drawOpenLines(state);
             const step = IV_SEC_UI[iv] || 60;
             // Само маркери във видимо заредения диапазон — иначе графиката ги струпва в края.
             const t0 = candles.length ? candles[0].time : 0, t1 = candles.length ? candles[candles.length - 1].time : 0;
