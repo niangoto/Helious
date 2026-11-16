@@ -331,6 +331,7 @@
                 <div class="note" style="color:var(--text-dim)">Обемът, спредът, суапът, маржинът и леверидж идват директно от MT5 (реални стойности на брокера).</div>
                 <div class="row"><input type="checkbox" id="inpSkipNegSwap"> Не отваряй при отрицателен суап за посоката</div>
                 <div class="row"><input type="checkbox" id="inpReverse"> Обърната посока (контра със същия обем)</div>
+                <div class="row"><input type="checkbox" id="inpReversal"> Реверс (при обратен сигнал: първо затваря позицията, после отваря обратната; важи и за хеджинг)</div>
                 <div class="row"><input type="checkbox" id="inpPctClose"> Процентно затваряне (вероятност срещу позицията)</div>
                 </div>
                 </details>
@@ -537,7 +538,7 @@
             inpTp: 'inpTp', inpSl: 'inpSl', inpHold: 'inpHold', inpKelly: 'inpKelly', inpMaxKelly: 'inpMaxKelly',
             inpModel: 'inpModel', inpLookback: 'inpLookback', inpInterval: 'inpInterval', inpPctCloseLimit: 'inpPctCloseLimit'
         };
-        const HERMES_CHECKS = { inpReverse: 'inpReverse', inpPctClose: 'inpPctClose', contraModel0: 'c0', contraModel1: 'c1', contraModel2: 'c2', contraModel3: 'c3', contraModel4: 'c4' };
+        const HERMES_CHECKS = { inpReverse: 'inpReverse', inpReversal: 'inpReversal', inpPctClose: 'inpPctClose', contraModel0: 'c0', contraModel1: 'c1', contraModel2: 'c2', contraModel3: 'c3', contraModel4: 'c4' };
         function importHermes(ev) {
             const input = ev.target, f = input.files && input.files[0];
             if (!f) return;
@@ -597,7 +598,8 @@
                     lookback: parseInt(v('inpLookback'), 10),
                     pctClose: document.getElementById('inpPctClose').checked,
                     pctCloseLimit: parseFloat(v('inpPctCloseLimit')) || 0,
-                    reverse: document.getElementById('inpReverse').checked
+                    reverse: document.getElementById('inpReverse').checked,
+                    reversal: document.getElementById('inpReversal').checked
                 }
             };
         }
@@ -689,6 +691,7 @@
             set('inpTp', P.tpMult); set('inpSl', P.slMult); set('inpHold', P.holdBars);
             set('inpKelly', P.kellyF); set('inpMaxKelly', P.maxKelly);
             document.getElementById('inpReverse').checked = !!P.reverse;
+            document.getElementById('inpReversal').checked = !!P.reversal;
         }
 
         function setControls(hasSession) {

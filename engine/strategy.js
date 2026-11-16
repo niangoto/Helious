@@ -24,7 +24,8 @@ function normalizeParams(p) {
     lookback: Math.min(5000, Math.max(100, parseInt(p.lookback, 10) || 2000)), // свещи назад за модела/ATR
     pctClose: !!p.pctClose,                                  // процентно затваряне (вероятност срещу позицията)
     pctCloseLimit: Math.max(0, num(p.pctCloseLimit, 0)),     // лимит на очакваната загуба; 0 = загубата до SL
-    reverse: !!p.reverse
+    reverse: !!p.reverse,
+    reversal: !!p.reversal                                   // „Реверс“: при обратен сигнал първо затваря позицията, после отваря обратната
   };
 }
 

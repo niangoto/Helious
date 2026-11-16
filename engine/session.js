@@ -293,8 +293,12 @@ class Session {
     const probTxt = (prob && prob.buyPct) ? ' (Buy ' + prob.buyPct.toFixed(1) + '% / Sell ' + prob.sellPct.toFixed(1) + '%)' : '';
     if (this.status !== 'running') { why('block', 'Сесията е на пауза'); return; }
     if (Date.now() < st.cooldown) { why('block', 'Пауза ' + Math.ceil((st.cooldown - Date.now()) / 1000) + 'с след отказана поръчка — ' + (st.error || '')); return; }
-    if ([...this.positions.values()].some(p => p.symbol === symbol)) { why('info', 'Има отворена позиция по този символ — нов вход не се прави'); return; }
-    if (this.positions.size >= this.P.maxPositions) { why('block', 'Достигнат лимит „Макс. позиции“ (' + this.P.maxPositions + ')'); return; }
+    // „Реверс“: при отворена позиция по символа чакаме обратен сигнал; тогава първо затваряме
+    // старата (при хеджинг обратен ордер иначе би направил втора, срещуположна позиция), после отваряме новата.
+    const existing = [...this.positions.values()].filter(p => p.symbol === symbol);
+    const reversing = !!this.P.reversal && existing.length > 0;
+    if (existing.length && !reversing) { why('info', 'Има отворена позиция по този символ — нов вход не се прави'); return; }
+    if (this.positions.size - (reversing ? existing.length : 0) >= this.P.maxPositions) { why('block', 'Достигнат лимит „Макс. позиции“ (' + this.P.maxPositions + ')'); return; }
     const info = st.info;
     if (!info.tradeAllowed) { why('block', 'Търговията по символа е забранена в MT5 (режимът не е „пълен“)'); return; }
     if (!(info.tickAge < STALE_TICK_SEC)) { why('block', 'Пазарът е затворен — последният тик е отпреди ' + Math.round(info.tickAge / 60) + ' мин'); return; }
@@ -308,7 +312,9 @@ class Session {
     const fx = (info.tickValue / info.tickSize) / info.contract;     // валута на сметката за 1 единица от цената
     let equity = this.account.equity || 0;
     if (this.P.budget > 0) equity = Math.min(equity, this.P.budget);
-    const freeMargin = this.account.margin_free || 0;
+    let freeMargin = this.account.margin_free || 0;
+    // При реверс маржинът на старата позиция ще се освободи — оразмеряваме сякаш вече е затворена.
+    if (reversing) for (const p of existing) freeMargin += (info.margin1 || 0) * (p.lots || 0);
     const spec = {
       contract: info.contract, min: info.vmin, step: info.vstep, max: info.vmax,
       spread: info.spread, marginPerUnit: info.margin1 > 0 ? info.margin1 / info.contract : 0
@@ -320,6 +326,8 @@ class Session {
       why(weak ? 'wait' : 'block', w.reason || 'Няма решение за вход');
       return;
     }
+
+    if (reversing && existing.some(p => p.dir === dec.dir)) { why('info', 'Има отворена ' + dec.dir + ' позиция — реверс се прави само при обратен сигнал'); return; }
 
     // Суап: по избор не отваряме при отрицателен суап за посоката.
     const swap = dec.dir === 'BUY' ? info.swapLong : info.swapShort;
@@ -352,6 +360,10 @@ class Session {
     const sl = dec.dir === 'BUY' ? fill - dec.slDist : fill + dec.slDist;
     const baseTxt = ' · капитал ' + equity.toFixed(2) + ', свободен маржин ' + freeMargin.toFixed(2) + ' ' + ((this.account && this.account.currency) || '');
     why('ok', 'Сигнал ' + dec.dir + probTxt + ' — изпращам поръчка за ' + dec.lots + ' лота' + (dec.clampedFrom ? ' (намален от ' + dec.clampedFrom + ' заради max_volume на агента)' : '') + (dec.forcedMin ? ' (минималният обем е над риска по Кели)' : '') + baseTxt);
+    if (reversing) {
+      for (const p of existing) await this.closeTicket(p, 'Реверс');
+      if ([...this.positions.values()].some(p => p.symbol === symbol)) { why('block', 'Реверс: старата позиция не се затвори — новата не се отваря (' + (st.error || '') + ')'); return; }
+    }
     try {
       const r = await mt5.call(this.agentId, 'order_open', {
         symbol, side: dec.dir, volume: dec.lots, sl, tp, magic: this.magic, comment: 'HEROS'
