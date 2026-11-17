@@ -182,7 +182,7 @@ class Session {
         id: this.trades.length + 1, ticket: t.ticket, symbol: t.symbol, dir: t.type, lots: t.volume,
         entry: t.price_open, exit: t.price_close, openedAt: t.time_open, closedAt: t.time_close,
         pnl: (t.profit || 0) + (t.swap || 0) + (t.commission || 0), swap: t.swap || 0, commission: t.commission || 0,
-        reason, spread: 0, spreadPx: (this.levels.get(t.ticket) || {}).spreadPx || null, sl: (this.levels.get(t.ticket) || {}).sl || null, tp: (this.levels.get(t.ticket) || {}).tp || null
+        reason, spread: (() => { const inf = (this.state[t.symbol] || {}).info, lv = this.levels.get(t.ticket) || {}; return inf && lv.spreadPx > 0 && inf.contract > 0 && inf.tickSize > 0 ? lv.spreadPx * t.volume * inf.contract * ((inf.tickValue / inf.tickSize) / inf.contract) : 0; })(), spreadPx: (this.levels.get(t.ticket) || {}).spreadPx || null, sl: (this.levels.get(t.ticket) || {}).sl || null, tp: (this.levels.get(t.ticket) || {}).tp || null
       });
       this.levels.delete(t.ticket);
     }
@@ -489,7 +489,7 @@ class Session {
     const bar = t => t;   // точното време; клиентът го закръгля до свещта на избрания интервал
     const out = [];
     const mk = (p, t, o) => ({ time: bar(t), position: o.position, color: o.color, shape: o.shape, text: o.text,
-      d: { ticket: p.ticket, dir: p.dir, lots: p.lots, entry: p.entry, sl: p.sl || null, tp: p.tp || null, openedAt: p.openedAt || p.openTime, closedAt: p.closedAt || null, exit: p.exit != null ? p.exit : null, pnl: p.pnl != null ? p.pnl : null, swap: p.swap || 0, commission: p.commission || 0, spreadPx: p.spreadPx != null ? p.spreadPx : null, reason: p.reason || null } });
+      d: { ticket: p.ticket, dir: p.dir, lots: p.lots, entry: p.entry, sl: p.sl || null, tp: p.tp || null, openedAt: p.openedAt || p.openTime, closedAt: p.closedAt || null, exit: p.exit != null ? p.exit : null, pnl: p.pnl != null ? p.pnl : null, swap: p.swap || 0, commission: p.commission || 0, spreadPx: p.spreadPx != null ? p.spreadPx : null, spreadCost: p.spread || 0, reason: p.reason || null } });
     const open = (p, t) => out.push(mk(p, t, { position: p.dir === 'BUY' ? 'belowBar' : 'aboveBar', color: p.dir === 'BUY' ? '#00ff66' : '#ff0055', shape: p.dir === 'BUY' ? 'arrowUp' : 'arrowDown', text: p.dir + ' ' + p.lots + 'л' }));
     for (const t of this.trades) {
       if (t.symbol !== sym) continue;
@@ -533,7 +533,7 @@ class Session {
       return {
         ticket: p.ticket, symbol: p.symbol, dir: p.dir, entry: p.entry, lots: p.lots, contract: i.contract,
         units, notional: units * p.entry * fx, margin: i.margin1 ? i.margin1 * p.lots : null, tp: p.tp, sl: p.sl,
-        openTime: p.openTime, prob: p.prob, spread: i.spread ? i.spread * units * fx : 0, fx,
+        openTime: p.openTime, prob: p.prob, spread: (p.spreadPx != null ? p.spreadPx : i.spread) ? (p.spreadPx != null ? p.spreadPx : i.spread) * units * fx : 0, fx,
         swap: p.swap, commission: p.commission || 0, gross: p.profit || 0, price: p.price, spreadPx: p.spreadPx != null ? p.spreadPx : null, floating: (p.profit || 0) + (p.swap || 0) + (p.commission || 0)
       };
     });
