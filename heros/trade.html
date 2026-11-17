@@ -1001,7 +1001,7 @@
             const dg = priceDigits != null ? priceDigits : 5;
             for (const p of (state.openPositions || [])) {
                 if (p.symbol !== activeSymbol) continue;
-                const add = (price, color, title, style) => { if (price > 0) openLines.push(candleSeries.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title })); };
+                const add = (price, color, title, style) => { if (price > 0) openLines.push(candleSeries.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title: '' })); };
                 const buy = p.dir === 'BUY', sp = p.spreadPx || 0;
                 add(p.entry, '#e2e8f0', 'Отворена ' + p.dir + ' @ ' + fmt(p.entry, dg), 0);
                 // позицията се затваря от обратната страна на спреда: BUY → Bid, SELL → Ask
@@ -1020,7 +1020,7 @@
             clearPosInfo();
             const line = (price, color, title, style) => {
                 if (price == null || !(price > 0)) return;
-                posLines.push(candleSeries.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title }));
+                posLines.push(candleSeries.createPriceLine({ price, color, lineWidth: 1, lineStyle: style, axisLabelVisible: true, title: '' }));
             };
             const hitTp = d.reason === 'TP', hitSl = d.reason === 'SL';
             line(d.entry, '#cbd5e1', 'Вход ' + d.dir, 0);
@@ -1073,8 +1073,8 @@
             }
             if (bidLine) { try { candleSeries.removePriceLine(bidLine); } catch (e) {} bidLine = null; }
             if (askLine) { try { candleSeries.removePriceLine(askLine); } catch (e) {} askLine = null; }
-            if (sd.bid > 0) bidLine = candleSeries.createPriceLine({ price: sd.bid, color: '#60a5fa', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: 'Bid (SELL затваря на Ask)' });
-            if (sd.ask > 0) askLine = candleSeries.createPriceLine({ price: sd.ask, color: '#f59e0b', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: 'Ask' });
+            if (sd.bid > 0) bidLine = candleSeries.createPriceLine({ price: sd.bid, color: '#60a5fa', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: '' });
+            if (sd.ask > 0) askLine = candleSeries.createPriceLine({ price: sd.ask, color: '#f59e0b', lineWidth: 1, lineStyle: 3, axisLabelVisible: true, title: '' });
             // При добавяне на по-стари свещи индексите се изместват — местим видимия диапазон със същия брой.
             if (keep && candles.length && lastFirstT && candles[0].time < lastFirstT) {
                 const added = candles.filter(c => c.time < lastFirstT).length;

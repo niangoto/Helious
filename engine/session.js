@@ -486,7 +486,7 @@ class Session {
 
   markers(sym) {
     const iv = IV_SEC[this.interval];
-    const bar = t => t - (t % iv);
+    const bar = t => t;   // точното време; клиентът го закръгля до свещта на избрания интервал
     const out = [];
     const mk = (p, t, o) => ({ time: bar(t), position: o.position, color: o.color, shape: o.shape, text: o.text,
       d: { ticket: p.ticket, dir: p.dir, lots: p.lots, entry: p.entry, sl: p.sl || null, tp: p.tp || null, openedAt: p.openedAt || p.openTime, closedAt: p.closedAt || null, exit: p.exit != null ? p.exit : null, pnl: p.pnl != null ? p.pnl : null, swap: p.swap || 0, commission: p.commission || 0, spreadPx: p.spreadPx != null ? p.spreadPx : null, reason: p.reason || null } });
