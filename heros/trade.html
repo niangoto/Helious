@@ -1024,7 +1024,6 @@
             };
             const hitTp = d.reason === 'TP', hitSl = d.reason === 'SL';
             line(d.entry, '#cbd5e1', 'Вход ' + d.dir, 0);
-            if (d.spreadPx > 0) line(d.dir === 'BUY' ? d.entry - d.spreadPx : d.entry + d.spreadPx, '#a78bfa', 'Със спреда', 3);
             line(d.tp, '#00ff66', 'TP' + (hitTp ? ' ✓ тук е затворена' : ''), 2);
             line(d.sl, '#ff0055', 'SL' + (hitSl ? ' ✓ тук е затворена' : ''), 2);
             if (d.exit != null && !hitTp && !hitSl) line(d.exit, '#ffb37a', 'Изход (' + (d.reason || '') + ')', 1);
@@ -1082,7 +1081,6 @@
             }
             lastFirstT = candles.length ? candles[0].time : null;
             candleSeries.setData(candles);
-            drawOpenLines(state);
             const step = IV_SEC_UI[iv] || 60;
             // Само маркери във видимо заредения диапазон — иначе графиката ги струпва в края.
             const t0 = candles.length ? candles[0].time : 0, t1 = candles.length ? candles[candles.length - 1].time : 0;
