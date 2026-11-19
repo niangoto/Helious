@@ -17,7 +17,7 @@ const mt5 = require('./mt5');
 const { normalizeParams, entryDecision } = require('./strategy');
 
 const IV_SEC = { '1m': 60, '5m': 300, '15m': 900, '30m': 1800, '1h': 3600, '4h': 14400, '1d': 86400 };
-const WINDOW = 2000;          // свещи за модела/ATR
+const WINDOW = 3000;          // свещи за модела/ATR
 const TICK_MS = 3000;         // период на непрекъснатата проверка
 const RAW_SEC = 7200;         // последните 2 часа — всички точки (на ~3с)
 const MID_SEC = 172800;       // до 2 дни — по една на 60с; по-старите — по една на 300с
@@ -94,6 +94,13 @@ class Session {
   }
 
   window() { return this.P.lookback || WINDOW; }
+  // Колко свещи се теглят/пазят. Като в HERMES при изключена „Само прозорец назад“:
+  // max(3000, lookback) + lookback (допълнителна история пред прозореца за статистиката);
+  // индикаторите се смятат върху цялата серия. При включена — само `lookback` (+ малък запас).
+  histLen() {
+    const L = this.window();
+    return this.P.strictWindow ? L : Math.min(40000, Math.max(3000, L) + L);
+  }
 
   on(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
   emit() { const st = this.getState(); for (const fn of this.listeners) { try { fn(st); } catch (e) {} } }
@@ -114,12 +121,12 @@ class Session {
       const st = this.state[name];
       const last = st.candles.length ? st.candles[st.candles.length - 1].time : 0;
       const gap = last > 0 && (now - last) > 4 * iv;      // дупка → тегли отначало
-      return { name, interval: this.interval, count: this.window(), from: (last > 0 && !gap && st.candles.length >= 30) ? last : 0 };
+      return { name, interval: this.interval, count: this.histLen(), from: (last > 0 && !gap && st.candles.length >= 30) ? last : 0 };
     });
     return mt5.call(this.agentId, 'snapshot', {
       symbols: req, magic: this.magic, historyFrom: Math.max(0, (this.startedAt || now) - 3600),
       pnlFrom: Math.floor(Math.min(startOfMonth(), startOfWeek(), startOfDay()) / 1000) - 3600
-    });
+    }, this.histLen() > 5000 ? 60000 : undefined);
   }
 
   ingest(snap) {
@@ -147,7 +154,7 @@ class Session {
         const first = add[0].time;
         let keep = st.candles.filter(c => c.time < first);
         if (d.candles_full) keep = [];
-        st.candles = keep.concat(add).slice(-(this.window() + 50));
+        st.candles = keep.concat(add).slice(-(this.histLen() + 50));
         const iv = IV_SEC[this.interval];
         const arr = st.candles, last = arr[arr.length - 1];
         const closed = (last.time + iv) <= nowSec() ? last : (arr[arr.length - 2] || last);
@@ -264,11 +271,20 @@ class Session {
     let prob = null;
     if (arr.length >= 30) {
       try {
-        // Както computeModelProbSeriesStrict в HERMES за последния бар: моделът се
-        // смята САМО върху последните `lookback` свещи (индикаторите — от началото им).
+        // Като в HERMES: при изключена „Само прозорец назад“ — обикновеното причинно изчисление
+        // върху цялата серия (lookback ограничава статистиката); при включена — само последните
+        // `lookback` свещи (индикаторите — от началото им).
         const W = Math.max(30, this.window());
-        const win = arr.length > W ? arr.slice(arr.length - W) : arr;
-        const vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W });
+        const win = (this.P.strictWindow && arr.length > W) ? arr.slice(arr.length - W) : arr;
+        // Тежките модели (5 Средна, 6 Фурие: ~секунди върху цялата серия) — веднъж на бар, останалите — при промяна на цената.
+        const heavy = this.model === 5 || this.model === 6;
+        const key = win.length + '|' + win[0].time + '|' + bar.time + (heavy ? '' : '|' + bar.close + '|' + bar.high + '|' + bar.low);
+        let vals;
+        if (st._pk === key) vals = st._pv;
+        else {
+          vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W });
+          st._pk = key; st._pv = vals;
+        }
         const v = vals ? vals[vals.length - 1] : null;
         prob = v != null ? { time: bar.time, buyPct: v, sellPct: 100 - v } : null;
       } catch (e) { prob = null; }

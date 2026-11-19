@@ -327,13 +327,14 @@
                     <label class="f">Кели (част)<input id="inpKelly" type="number" value="0.25" min="0.01" step="0.05"></label>
                     <label class="f">Кели макс.<input id="inpMaxKelly" type="number" value="0.05" min="0.01" max="1" step="0.05"></label>
                     <label class="f" title="Макс. спред (ask−bid) като дял от по-близкото ниво TP/SL. Над него не се отваря. 0 = без проверка">Макс. спред (дял от TP/SL)<input id="inpMaxSpread" type="number" value="0.5" min="0" max="1" step="0.05"></label>
-                    <label class="f" title="Колко свещи назад гледа моделът (HERMES „Поглед назад“)">Поглед назад (свещи)<input id="inpLookback" type="number" value="2000" min="100" max="5000" step="100"></label>
+                    <label class="f" title="Колко свещи назад гледа моделът (HERMES „Поглед назад“)">Поглед назад (свещи)<input id="inpLookback" type="number" value="3000" min="100" max="20000" step="100"></label>
                     <label class="f" title="Лимит на очакваната загуба за процентното затваряне; 0 = загубата до SL">Лимит проц. затв. (0 = до SL)<input id="inpPctCloseLimit" type="number" value="0" min="0" step="any"></label>
                     <label class="f">Макс. позиции<input id="inpMaxPos" type="number" value="5" min="1" step="1"></label>
                 </div>
                 <div class="note" style="color:var(--text-dim)">Обемът, спредът, суапът, маржинът и леверидж идват директно от MT5 (реални стойности на брокера).</div>
                 <div class="row"><input type="checkbox" id="inpSkipNegSwap"> Не отваряй при отрицателен суап за посоката</div>
                 <div class="row"><input type="checkbox" id="inpReverse"> Обърната посока (контра със същия обем)</div>
+                <div class="row"><input type="checkbox" id="inpStrictWindow"> Само прозорец назад (като в HERMES; изключено = цяла серия, статистика в „Поглед назад“)</div>
                 <div class="row"><input type="checkbox" id="inpReversal"> Реверс (при обратен сигнал: първо затваря позицията, после отваря обратната; важи и за хеджинг)</div>
                 <div class="row"><input type="checkbox" id="inpPctClose"> Процентно затваряне (вероятност срещу позицията)</div>
                 </div>
@@ -541,7 +542,7 @@
             inpTp: 'inpTp', inpSl: 'inpSl', inpHold: 'inpHold', inpKelly: 'inpKelly', inpMaxKelly: 'inpMaxKelly',
             inpModel: 'inpModel', inpLookback: 'inpLookback', inpInterval: 'inpInterval', inpPctCloseLimit: 'inpPctCloseLimit'
         };
-        const HERMES_CHECKS = { inpReverse: 'inpReverse', inpReversal: 'inpReversal', inpPctClose: 'inpPctClose', contraModel0: 'c0', contraModel1: 'c1', contraModel2: 'c2', contraModel3: 'c3', contraModel4: 'c4' };
+        const HERMES_CHECKS = { inpReverse: 'inpReverse', inpReversal: 'inpReversal', inpStrictWindow: 'inpStrictWindow', inpPctClose: 'inpPctClose', contraModel0: 'c0', contraModel1: 'c1', contraModel2: 'c2', contraModel3: 'c3', contraModel4: 'c4' };
         function importHermes(ev) {
             const input = ev.target, f = input.files && input.files[0];
             if (!f) return;
@@ -602,7 +603,8 @@
                     pctClose: document.getElementById('inpPctClose').checked,
                     pctCloseLimit: parseFloat(v('inpPctCloseLimit')) || 0,
                     reverse: document.getElementById('inpReverse').checked,
-                    reversal: document.getElementById('inpReversal').checked
+                    reversal: document.getElementById('inpReversal').checked,
+                    strictWindow: document.getElementById('inpStrictWindow').checked
                 }
             };
         }
@@ -695,6 +697,7 @@
             set('inpKelly', P.kellyF); set('inpMaxKelly', P.maxKelly);
             document.getElementById('inpReverse').checked = !!P.reverse;
             document.getElementById('inpReversal').checked = !!P.reversal;
+            document.getElementById('inpStrictWindow').checked = !!P.strictWindow;
         }
 
         function setControls(hasSession) {
