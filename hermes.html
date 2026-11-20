@@ -224,6 +224,15 @@
             color: #ff5577;
         }
 
+        .checks { flex: 0 0 auto; margin-left: auto; align-self: flex-start; border: 1px solid var(--panel-border); border-radius: 8px; padding: 8px 12px; background: rgba(255,255,255,0.02); min-width: 220px; }
+        .checks-title { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-dim); margin-bottom: 4px; }
+        .checks-grid { display: flex; flex-direction: column; gap: 7px; }
+        .checks .contra-box { flex-direction: column; align-items: flex-start; margin-top: 6px; }
+        .chk small { display: block; margin-left: 2px; }
+        .controls .chk { display: flex; flex-direction: row; align-items: center; gap: 8px; text-transform: none; letter-spacing: 0.2px; font-size: 13px; font-weight: 600; color: var(--text-main); cursor: pointer; justify-content: flex-start; max-width: none; }
+        .controls .chk input[type="checkbox"] { width: auto; }
+        .chk input[type="checkbox"] { width: auto; }
+        .chk small { color: var(--text-dim); font-size: 10.5px; }
         .btn {
             padding: 8px 14px;
             border-radius: 7px;
@@ -279,14 +288,15 @@
 
         .controls {
             display: flex;
-            flex-wrap: wrap;
+            flex-wrap: nowrap;
             gap: 10px;
             padding: 12px 18px;
             background: rgba(13, 18, 30, 0.5);
             border-bottom: 1px solid var(--panel-border);
             flex-shrink: 0;
-            align-items: flex-end;
+            align-items: flex-start;
         }
+        .ctl-main { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; flex: 1 1 auto; min-width: 0; }
 
         .controls label {
             display: flex;
@@ -1190,6 +1200,7 @@
     </div>
 
     <section class="controls">
+        <div class="ctl-main">
         <label>Начален бюджет (€)
             <input type="number" id="inpBudget" value="1000" min="10" step="100">
         </label>
@@ -1215,28 +1226,8 @@
                 <option value="1">1/сек</option>
             </select>
         </label>
-        <label class="cal-label">Реверс
+                <label class="cal-label">Период от/до
             <span class="cal-controls">
-                <input type="checkbox" id="inpReversal" title="При достигнати нива за нова позиция в ОБРАТНА посока, отворената се затваря (по цената на свещта) и се отваря новата — за сметка на старата. Сигнал в същата посока не прави нищо.">
-                <span class="cal-sep" style="font-size:11px;text-transform:none;letter-spacing:0.3px">обратен сигнал затваря старата</span>
-            </span>
-        </label>
-        <label class="cal-label">Обърната посока
-            <span class="cal-controls">
-                <input type="checkbox" id="inpReverse" title="Отваря се само обратната поръчка (контра) вместо определената, със същия обем">
-                <span class="cal-sep" style="font-size:11px;text-transform:none;letter-spacing:0.3px">контра със същия обем</span>
-            </span>
-        </label>
-        <label class="cal-label">Процентно затваряне
-            <span class="cal-controls">
-                <input type="checkbox" id="inpPctClose" title="Вместо фиксиран SL: затваря, когато P(обратна посока) [0..1] × плаващата загуба достигне лимита. TP по цена продължава да работи.">
-                <span class="cal-sep" style="font-size:11px;text-transform:none;letter-spacing:0.3px">вместо SL · лимит</span>
-                <input type="number" id="inpPctCloseLimit" value="0" min="0" step="1" style="width:90px" title="Лимит (€). 0 = авто: дължината до SL в €.">
-            </span>
-        </label>
-        <label class="cal-label">Времеви период
-            <span class="cal-controls">
-                <input type="checkbox" id="inpUseDates" checked onchange="toggleDates()">
                 <span class="cal-dates">
                     <input type="date" id="inpDateFrom" title="Начало на периода">
                     <span class="cal-sep">—</span>
@@ -1262,17 +1253,6 @@
         <label>Период (свещи)
             <input type="number" id="inpDynPeriod" value="200" min="60" max="50000" step="10" title="На колко свещи се прави проверката на динамичния „Поглед назад“. Чувствителността и оптимизацията по двойки гледат последните 10 дни назад, независимо от периода и интервала на свещите. Проверките започват, когато има 10 дни данни.">
         </label>
-        <label style="flex-direction:row;align-items:center;gap:6px;text-transform:none;letter-spacing:0.2px" title="При включване: проверките започват, когато има 10 дни история назад. После на всеки „Период (свещи)“ се прави чувствителност на lookback и се оптимизират по двойки BUY/SELL прагове и TP/SL (по 20 стойности) върху последните 10 дни.">
-            <input type="checkbox" id="inpLookbackGrow" style="width:auto"> променлив поглед
-        </label>
-        <div class="contra-box" id="contraBox" style="display:none">
-            <span class="contra-title">Контра по модели (при „Средна вероятност“)</span>
-            <label class="contra-item"><input type="checkbox" id="contraModel0"> Историческа</label>
-            <label class="contra-item"><input type="checkbox" id="contraModel1"> Логистична</label>
-            <label class="contra-item"><input type="checkbox" id="contraModel2"> Марковска</label>
-            <label class="contra-item"><input type="checkbox" id="contraModel3"> Очаквана стойност</label>
-            <label class="contra-item"><input type="checkbox" id="contraModel4"> Уейвлет</label>
-        </div>
         <details class="adv">
             <summary>Разширени настройки (EV / Кели / TP-SL)</summary>
             <div class="adv-grid">
@@ -1286,11 +1266,30 @@
                 <label>Кели (макс. фракция) <input type="number" id="inpMaxKelly" value="0.05" min="0.01" max="1" step="0.05"></label>
                 <label title="Минималният обем: в лотове или като МАРЖИН (€) за един минимален обем. При маржин реалната позиция (нотионал) = маржин × ливъридж.">Мин. обем <select id="inpMinLotUnit" style="width:auto"><option value="lot">лот</option><option value="value">маржин (€)</option></select> <input type="number" id="inpMinLot" value="0.01" min="0.00001" step="any"></label>
                 <label title="Разход за ЕДИН минимален обем (спред + комисиона при авто-попълване от Binance). Единица: € (валидна при ТЕКУЩАТА цена, мащабира се с нея) или % от сумата, нужна за отваряне на мин. позиция (маржина = нотионал/ливъридж). Пропорционален на броя минимални обеми. Взима се директно от сметката при отваряне, освен ако е включено „Цена със спред“ (тогава влиза в цената на входа).">Спред/такса на мин. обем <select id="inpSpreadUnit" style="width:auto"><option value="eur">€</option><option value="pct">% от сумата</option></select> <input type="number" id="inpMinLotSpread" value="0" min="0" step="any"></label>
-                <label class="adv-check" title="Взимане на цена със спреда: при включване входната цена се влошава с цената на спреда — BUY влиза по-високо, SELL по-ниско. Спредът НЕ се тегли директно от сметката; използва се при преценката дали изобщо да се отвори позицията."><input type="checkbox" id="inpPriceWithSpread"> Цена със спред</label>
             </div>
         </details>
         <!-- Винаги видимо: колко струва минималният обем (маржин с левериджа). -->
         <div class="note" id="minLotSpreadHint"></div>
+        </div>
+        <section class="checks" id="checksBox">
+            <div class="checks-grid">
+                <label class="chk" title="При достигнати нива за нова позиция в ОБРАТНА посока, отворената се затваря (по цената на свещта) и се отваря новата — за сметка на старата. Сигнал в същата посока не прави нищо."><input type="checkbox" id="inpReversal"> Реверс</label>
+                <label class="chk" title="Отваря се само обратната поръчка (контра) вместо определената, със същия обем"><input type="checkbox" id="inpReverse"> Обърната посока</label>
+                <label class="chk" title="Вместо фиксиран SL: затваря, когато P(обратна посока) [0..1] × плаващата загуба достигне лимита. TP по цена продължава да работи."><input type="checkbox" id="inpPctClose"> Процентно затваряне <input type="number" id="inpPctCloseLimit" value="0" min="0" step="1" style="width:80px" title="Лимит (€). 0 = авто: дължината до SL в €."></label>
+                <label class="chk" title="Ползва датите от/до. Изключено — теглят се последните свещи."><input type="checkbox" id="inpUseDates" checked onchange="toggleDates()"> Времеви период</label>
+                <label class="chk" title="При включване: проверките започват, когато има 10 дни история назад. После на всеки „Период (свещи)“ се прави чувствителност на lookback и се оптимизират по двойки BUY/SELL прагове и TP/SL (по 20 стойности) върху последните 10 дни."><input type="checkbox" id="inpLookbackGrow"> Променлив поглед</label>
+                <label class="chk" title="За всеки бар моделът се смята САМО върху последните „Поглед назад“ свещи (индикаторите — от началото на този прозорец). Нищо от по-старата история и от началото на симулацията не влияе — както в HEROS. По-бавно е."><input type="checkbox" id="inpStrictWindow"> Само прозорец назад</label>
+                <label class="chk" title="При включване входната цена се влошава със спреда — BUY по-високо, SELL по-ниско. Спредът НЕ се тегли директно от сметката."><input type="checkbox" id="inpPriceWithSpread"> Цена със спред</label>
+            </div>
+        <div class="contra-box" id="contraBox" style="display:none">
+            <span class="contra-title">Контра по модели (при „Средна вероятност“)</span>
+            <label class="contra-item"><input type="checkbox" id="contraModel0"> Историческа</label>
+            <label class="contra-item"><input type="checkbox" id="contraModel1"> Логистична</label>
+            <label class="contra-item"><input type="checkbox" id="contraModel2"> Марковска</label>
+            <label class="contra-item"><input type="checkbox" id="contraModel3"> Очаквана стойност</label>
+            <label class="contra-item"><input type="checkbox" id="contraModel4"> Уейвлет</label>
+        </div>
+        </section>
     </section>
 
     <section class="summary" id="summary"></section>
@@ -2453,6 +2452,7 @@
                 lookback: Math.max(30, Math.min(50000, parseInt((document.getElementById('inpLookback') || {}).value, 10) || 3000)),
                 dynPeriod: Math.max(60, Math.min(50000, parseInt((document.getElementById('inpDynPeriod') || {}).value, 10) || 200)),
                 lookbackGrow: !!((document.getElementById('inpLookbackGrow') || {}).checked),
+                strictWindow: !!((document.getElementById('inpStrictWindow') || {}).checked),
                 reverse: document.getElementById('inpReverse').checked,
                 reversal: !!((document.getElementById('inpReversal') || {}).checked)
             };
@@ -2914,10 +2914,7 @@
                             const lbEl = document.getElementById('inpLookback');
                             if (lbEl) lbEl.value = best.W;
                             try {
-                                curProbs = computeModelProbSeries(candles, currentModel, {
-                                    invert: contraFlags(), intervalSec: intervalSecs(interval),
-                                    lookback: best.W, lookbackGrow: false
-                                });
+                                curProbs = await computeProbsForRun(candles, interval, best.W, P, i0);
                             } catch (e) { /* оставаме със старите вероятности */ }
                             // Черта върху графиката в бара на смяната.
                             lookbackChanges.push(opt);
@@ -3309,6 +3306,16 @@
         // (candles[i-W+1 .. i]). Индикаторите (EMA/RSI/ATR/ADX/MACD) се зареждат
         // от началото на този прозорец, така че никакви по-стари данни не влияят.
         // По-бавно е (O(n·W)); дава прогрес и може да се паузира/спре.
+        // Вероятности според отметката „Само прозорец назад“: строг прозорец за всеки бар
+        // (само последните `lookback` свещи, от fromIdx нататък) или обикновеното причинно изчисление.
+        async function computeProbsForRun(candles, interval, lookback, P, fromIdx) {
+            const opts = { invert: contraFlags(), intervalSec: intervalSecs(interval), lookback: lookback, lookbackGrow: false };
+            if (P && P.strictWindow) {
+                return computeModelProbSeriesStrict(candles, currentModel, opts, lookback, null, fromIdx, false);
+            }
+            return computeModelProbSeries(candles, currentModel, opts);
+        }
+
         async function computeModelProbSeriesStrict(candles, modelIndex, opts, W, progressCb, fromIdx, grow) {
             const n = candles ? candles.length : 0;
             const out = new Array(n).fill(null);
@@ -3551,10 +3558,7 @@
                 // чийто изход вече е известен до бар i.
                 setProgress(10, `Изчисляване на вероятностите (причинно, ${simCandles.length} свещи)...`);
                 await sleep(0);
-                const probs = computeModelProbSeries(simCandles, currentModel, {
-                    invert: contraFlags(), intervalSec: intervalSecs(interval),
-                    lookback: P.lookback, lookbackGrow: false
-                });
+                const probs = await computeProbsForRun(simCandles, interval, P.lookback, P, simStartIdx);
                 if (cancelFlag) return;
 
                 const atrSeries = computeATR(simCandles, 14);
@@ -3758,8 +3762,8 @@
             // Същото бързо причинно изчисление (без пре-изчисляване по бар).
             // „Променлив поглед“ вече се управлява от auto-оптимизацията, затова
             // при ръчна чувствителност ползваме фиксиран lookback.
-            const opts = { invert: contraFlags(), intervalSec: intervalSecs(interval), lookback: lookback, lookbackGrow: false };
-            return computeModelProbSeries(candles, currentModel, opts);
+            const sp = lastSim && lastSim.params;
+            return computeProbsForRun(candles, interval, lookback, sp, fromIdx);
         }
 
         async function runSweep(inputId, key) {
@@ -4346,6 +4350,7 @@
             { id: 'inpLookback', type: 'value' },
             { id: 'inpDynPeriod', type: 'value' },
             { id: 'inpLookbackGrow', type: 'checkbox' },
+            { id: 'inpStrictWindow', type: 'checkbox' },
             { id: 'inpInterval', type: 'value' },
             { id: 'inpSpeed', type: 'value' },
             { id: 'inpUseDates', type: 'checkbox' },
@@ -4938,12 +4943,15 @@
                 if (cmp.stop) return null;
                 const startIdx0 = candles.findIndex(c => c.time >= fromS);
                 if (startIdx0 < 0 || candles.length - startIdx0 < 30) throw new Error('Периодът покрива под 30 свещи');
-                const pkey = ckey + '|' + model + '|' + P.lookback + '|' + invert.join('');
+                const pkey = ckey + '|' + model + '|' + P.lookback + '|' + invert.join('') + '|' + (P.strictWindow ? 's' + startIdx0 : 'n');
                 let probs = cmp.probsCache.get(pkey);
                 if (!probs) {
                     row.stage = 'изчисляване на вероятностите...'; cmpRenderTable();
                     await sleep(20);
-                    probs = computeModelProbSeries(candles, model, { invert, intervalSec: iv, lookback: P.lookback, lookbackGrow: false });
+                    const o = { invert, intervalSec: iv, lookback: P.lookback, lookbackGrow: false };
+                    probs = P.strictWindow
+                        ? await computeModelProbSeriesStrict(candles, model, o, P.lookback, () => {}, startIdx0, false)
+                        : computeModelProbSeries(candles, model, o);
                     cmp.probsCache.set(pkey, probs);
                     if (cmp.probsCache.size > 6) cmp.probsCache.delete(cmp.probsCache.keys().next().value);
                 }
