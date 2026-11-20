@@ -294,6 +294,7 @@
                             <option value="5">Средна вероятност</option>
                             <option value="6">Фурие</option>
                             <option value="7">RSI анализ</option>
+                            <option value="8">Логистична 2</option>
                         </select>
                     </label>
                 </div>
@@ -334,7 +335,6 @@
                 <div class="note" style="color:var(--text-dim)">Обемът, спредът, суапът, маржинът и леверидж идват директно от MT5 (реални стойности на брокера).</div>
                 <div class="row"><input type="checkbox" id="inpSkipNegSwap"> Не отваряй при отрицателен суап за посоката</div>
                 <div class="row"><input type="checkbox" id="inpReverse"> Обърната посока (контра със същия обем)</div>
-                <div class="row"><input type="checkbox" id="inpLogisticSell" checked> Логистична: Sell чрез виртуално отваряне на SELL (не 100 − Buy)</div>
                 <div class="row"><input type="checkbox" id="inpStrictWindow"> Само прозорец назад (като в HERMES; изключено = цяла серия, статистика в „Поглед назад“)</div>
                 <div class="row"><input type="checkbox" id="inpReversal"> Реверс (при обратен сигнал: първо затваря позицията, после отваря обратната; важи и за хеджинг)</div>
                 <div class="row"><input type="checkbox" id="inpPctClose"> Процентно затваряне (вероятност срещу позицията)</div>
@@ -543,7 +543,7 @@
             inpTp: 'inpTp', inpSl: 'inpSl', inpHold: 'inpHold', inpKelly: 'inpKelly', inpMaxKelly: 'inpMaxKelly',
             inpModel: 'inpModel', inpLookback: 'inpLookback', inpInterval: 'inpInterval', inpPctCloseLimit: 'inpPctCloseLimit'
         };
-        const HERMES_CHECKS = { inpReverse: 'inpReverse', inpReversal: 'inpReversal', inpStrictWindow: 'inpStrictWindow', inpLogisticSell: 'inpLogisticSell', inpPctClose: 'inpPctClose', contraModel0: 'c0', contraModel1: 'c1', contraModel2: 'c2', contraModel3: 'c3', contraModel4: 'c4' };
+        const HERMES_CHECKS = { inpReverse: 'inpReverse', inpReversal: 'inpReversal', inpStrictWindow: 'inpStrictWindow', inpPctClose: 'inpPctClose', contraModel0: 'c0', contraModel1: 'c1', contraModel2: 'c2', contraModel3: 'c3', contraModel4: 'c4' };
         function importHermes(ev) {
             const input = ev.target, f = input.files && input.files[0];
             if (!f) return;
@@ -605,8 +605,7 @@
                     pctCloseLimit: parseFloat(v('inpPctCloseLimit')) || 0,
                     reverse: document.getElementById('inpReverse').checked,
                     reversal: document.getElementById('inpReversal').checked,
-                    strictWindow: document.getElementById('inpStrictWindow').checked,
-                    logisticSell: document.getElementById('inpLogisticSell').checked
+                    strictWindow: document.getElementById('inpStrictWindow').checked
                 }
             };
         }
@@ -700,7 +699,6 @@
             document.getElementById('inpReverse').checked = !!P.reverse;
             document.getElementById('inpReversal').checked = !!P.reversal;
             document.getElementById('inpStrictWindow').checked = !!P.strictWindow;
-            document.getElementById('inpLogisticSell').checked = !!P.logisticSell;
         }
 
         function setControls(hasSession) {
@@ -878,6 +876,7 @@
                 ['Маржин ниво', acc.marginLevel ? fmt(acc.marginLevel, 0) + '%' : '—', ''],
                 ['Нотионал', fmt(notional) + ' ' + cur(), ''],
                 ['Сделки от начало', String(s.trades), ''],
+                ['Buy / Sell сделки', (s.buyTrades + s.sellTrades) > 0 ? fmt(s.buyTrades / (s.buyTrades + s.sellTrades) * 100, 1) + '% / ' + fmt(s.sellTrades / (s.buyTrades + s.sellTrades) * 100, 1) + '%' : '—', ''],
                 ['Win rate', fmt(s.winRate, 1) + '%', ''],
                 ['За деня (сметка)', euro(s.dayPnl), cls(s.dayPnl)],
                 ['За седмицата (сметка)', euro(s.weekPnl), cls(s.weekPnl)],
@@ -1034,6 +1033,7 @@
             line(d.sl, '#ff0055', 'SL' + (hitSl ? ' ✓ тук е затворена' : ''), 2);
             if (d.exit != null && !hitTp && !hitSl) line(d.exit, '#ffb37a', 'Изход (' + (d.reason || '') + ')', 1);
             let h = '<span class="x" onclick="clearPosInfo()">✕</span><b class="' + (d.dir === 'BUY' ? 'pos' : 'neg') + '">' + d.dir + '</b> ' + fmt(d.lots, 3) + ' лота · вход ' + fmt(d.entry, priceDigits != null ? priceDigits : 5) + ' (' + sofiaDT(d.openedAt) + ')';
+            if (d.buyPct != null) h += '<br>Вероятност при вход: Buy ' + fmt(d.buyPct, 1) + '% / Sell ' + fmt(d.sellPct, 1) + '%';
             if (d.spreadPx > 0) h += '<br>Спред при вход: ' + fmt(d.spreadPx, priceDigits != null ? priceDigits : 5) + ' (' + (d.dir === 'BUY' ? 'вход по Ask, излиза по Bid' : 'вход по Bid, излиза по Ask') + ')';
             h += '<br>TP ' + (d.tp ? fmt(d.tp, 5) : '—') + ' · SL ' + (d.sl ? fmt(d.sl, 5) : '—');
             if (d.closedAt) {
@@ -1112,8 +1112,8 @@
         function renderOpenPositions(list) {
             const el = document.getElementById('openPos');
             if (!list.length) { el.innerHTML = '<div class="empty">Няма отворени позиции</div>'; return; }
-            el.innerHTML = `<div class="tblwrap"><table><thead><tr><th>Отворена (BG)</th><th>Символ</th><th>Вид</th><th>Вход</th><th>Обем (лот)</th><th>Нотионал</th><th>Маржин</th><th>Спред</th><th>TP</th><th>SL</th><th>Суап</th><th>Бруто</th><th>Текуща цена</th><th>Плаваща (нето)</th></tr></thead><tbody>` +
-                list.map(p => `<tr><td>${p.openTime ? sofiaDT(p.openTime) : '—'}</td><td>${p.symbol}</td><td class="${p.dir === 'BUY' ? 'pos' : 'neg'}">${p.dir}</td><td>${fmt(p.entry, 5)}</td><td>${fmt(p.lots, 3)}</td><td>${fmt(p.notional, 2)} ${cur()}</td><td>${fmt(p.margin, 2)} ${cur()}</td><td class="neg">${p.spread ? fmt(p.spread, 2) + ' ' + cur() : '—'}</td><td>${fmt(p.tp, 5)}</td><td>${fmt(p.sl, 5)}</td><td>${fmt(p.swap, 2)}</td><td class="${cls(p.gross)}">${fmt(p.gross, 2)}</td><td>${fmt(p.price, 5)}</td><td class="${cls(p.floating)}">${euro(p.floating)}</td></tr>`).join('') +
+            el.innerHTML = `<div class="tblwrap"><table><thead><tr><th>Отворена (BG)</th><th>Символ</th><th>Вид</th><th>Buy/Sell %</th><th>Вход</th><th>Обем (лот)</th><th>Нотионал</th><th>Маржин</th><th>Спред</th><th>TP</th><th>SL</th><th>Суап</th><th>Бруто</th><th>Текуща цена</th><th>Плаваща (нето)</th></tr></thead><tbody>` +
+                list.map(p => `<tr><td>${p.openTime ? sofiaDT(p.openTime) : '—'}</td><td>${p.symbol}</td><td class="${p.dir === 'BUY' ? 'pos' : 'neg'}">${p.dir}</td><td>${p.buyPct != null ? fmt(p.buyPct, 0) + ' / ' + fmt(p.sellPct, 0) : '—'}</td><td>${fmt(p.entry, 5)}</td><td>${fmt(p.lots, 3)}</td><td>${fmt(p.notional, 2)} ${cur()}</td><td>${fmt(p.margin, 2)} ${cur()}</td><td class="neg">${p.spread ? fmt(p.spread, 2) + ' ' + cur() : '—'}</td><td>${fmt(p.tp, 5)}</td><td>${fmt(p.sl, 5)}</td><td>${fmt(p.swap, 2)}</td><td class="${cls(p.gross)}">${fmt(p.gross, 2)}</td><td>${fmt(p.price, 5)}</td><td class="${cls(p.floating)}">${euro(p.floating)}</td></tr>`).join('') +
                 `</tbody></table></div>`;
         }
 
@@ -1159,9 +1159,9 @@
             const all = list.slice().reverse();
             const shown = tradesShowAll ? all : all.slice(0, 50);
             const rows = shown.map(t =>
-                `<tr><td>${sofiaDT(t.openedAt)}</td><td>${t.closedAt ? sofiaDT(t.closedAt) : '—'}</td><td>${t.symbol}</td><td class="${t.dir === 'BUY' ? 'pos' : 'neg'}">${t.dir}</td><td>${fmt(t.lots, 3)}</td><td>${fmt(t.entry, 5)}</td><td>${fmt(t.exit, 5)}</td><td>${t.reason}</td><td class="${cls(t.pnl - (t.swap || 0) - (t.commission || 0))}">${fmt(t.pnl - (t.swap || 0) - (t.commission || 0), 2)}</td><td>${fmt(t.swap, 2)}</td><td class="neg">${t.spread ? '-' + fmt(t.spread, 2) : '—'}</td><td class="${cls(t.pnl)}"><b>${euro(t.pnl)}</b></td></tr>`).join('');
+                `<tr><td>${sofiaDT(t.openedAt)}</td><td>${t.closedAt ? sofiaDT(t.closedAt) : '—'}</td><td>${t.symbol}</td><td class="${t.dir === 'BUY' ? 'pos' : 'neg'}">${t.dir}</td><td>${t.buyPct != null ? fmt(t.buyPct, 0) + ' / ' + fmt(t.sellPct, 0) : '—'}</td><td>${fmt(t.lots, 3)}</td><td>${fmt(t.entry, 5)}</td><td>${fmt(t.exit, 5)}</td><td>${t.reason}</td><td class="${cls(t.pnl - (t.swap || 0) - (t.commission || 0))}">${fmt(t.pnl - (t.swap || 0) - (t.commission || 0), 2)}</td><td>${fmt(t.swap, 2)}</td><td class="neg">${t.spread ? '-' + fmt(t.spread, 2) : '—'}</td><td class="${cls(t.pnl)}"><b>${euro(t.pnl)}</b></td></tr>`).join('');
             const more = all.length > 50 ? `<div style="margin-top:6px"><button class="btn" onclick="tradesShowAll=!tradesShowAll;renderTrades(lastState.trades)">${tradesShowAll ? 'Покажи само последните 50' : 'Покажи всички (' + all.length + ')'}</button></div>` : '';
-            el.innerHTML = `<table><thead><tr><th>Отваряне</th><th>Затваряне</th><th>Символ</th><th>Вид</th><th>Обем (лот)</th><th>Вход</th><th>Изход</th><th>Причина</th><th>Бруто</th><th>Суап</th><th>Спред</th><th>Нето P/L</th></tr></thead><tbody>${rows}</tbody></table>` + more;
+            el.innerHTML = `<table><thead><tr><th>Отваряне</th><th>Затваряне</th><th>Символ</th><th>Вид</th><th>Buy/Sell %</th><th>Обем (лот)</th><th>Вход</th><th>Изход</th><th>Причина</th><th>Бруто</th><th>Суап</th><th>Спред</th><th>Нето P/L</th></tr></thead><tbody>${rows}</tbody></table>` + more;
         }
 
         // Паралелна графика: промяната на капитала в % спрямо началото.

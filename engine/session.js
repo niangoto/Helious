@@ -169,14 +169,16 @@ class Session {
         ticket: p.ticket, symbol: p.symbol, dir: p.type, lots: p.volume, entry: p.price_open,
         sl: p.sl, tp: p.tp, profit: p.profit, swap: p.swap, commission: p.commission || 0,
         openTime: p.time, price: p.price_current,
-        prob: (this.positions.get(p.ticket) || {}).prob || null
+        prob: (this.positions.get(p.ticket) || {}).prob || null,
+        buyPct: (this.positions.get(p.ticket) || {}).buyPct != null ? (this.positions.get(p.ticket) || {}).buyPct : null,
+        sellPct: (this.positions.get(p.ticket) || {}).sellPct != null ? (this.positions.get(p.ticket) || {}).sellPct : null
       });
     }
     for (const p of mine.values()) {
       const lv = this.levels.get(p.ticket);
       const inf = (this.state[p.symbol] || {}).info;
       // спредът (ask−bid) при първото виждане на позицията ≈ спредът при отварянето
-      this.levels.set(p.ticket, { sl: p.sl, tp: p.tp, spreadPx: lv && lv.spreadPx != null ? lv.spreadPx : (inf ? inf.spread : null) });
+      this.levels.set(p.ticket, { sl: p.sl, tp: p.tp, buyPct: p.buyPct, sellPct: p.sellPct, spreadPx: lv && lv.spreadPx != null ? lv.spreadPx : (inf ? inf.spread : null) });
       p.spreadPx = this.levels.get(p.ticket).spreadPx;
     }
     this.positions = mine;
@@ -189,7 +191,8 @@ class Session {
         id: this.trades.length + 1, ticket: t.ticket, symbol: t.symbol, dir: t.type, lots: t.volume,
         entry: t.price_open, exit: t.price_close, openedAt: t.time_open, closedAt: t.time_close,
         pnl: (t.profit || 0) + (t.swap || 0) + (t.commission || 0), swap: t.swap || 0, commission: t.commission || 0,
-        reason, spread: (() => { const inf = (this.state[t.symbol] || {}).info, lv = this.levels.get(t.ticket) || {}; return inf && lv.spreadPx > 0 && inf.contract > 0 && inf.tickSize > 0 ? lv.spreadPx * t.volume * inf.contract * ((inf.tickValue / inf.tickSize) / inf.contract) : 0; })(), spreadPx: (this.levels.get(t.ticket) || {}).spreadPx || null, sl: (this.levels.get(t.ticket) || {}).sl || null, tp: (this.levels.get(t.ticket) || {}).tp || null
+        reason, spread: (() => { const inf = (this.state[t.symbol] || {}).info, lv = this.levels.get(t.ticket) || {}; return inf && lv.spreadPx > 0 && inf.contract > 0 && inf.tickSize > 0 ? lv.spreadPx * t.volume * inf.contract * ((inf.tickValue / inf.tickSize) / inf.contract) : 0; })(), spreadPx: (this.levels.get(t.ticket) || {}).spreadPx || null, sl: (this.levels.get(t.ticket) || {}).sl || null, tp: (this.levels.get(t.ticket) || {}).tp || null,
+        buyPct: (this.levels.get(t.ticket) || {}).buyPct != null ? this.levels.get(t.ticket).buyPct : null, sellPct: (this.levels.get(t.ticket) || {}).sellPct != null ? this.levels.get(t.ticket).sellPct : null
       });
       this.levels.delete(t.ticket);
     }
@@ -278,16 +281,15 @@ class Session {
         const win = (this.P.strictWindow && arr.length > W) ? arr.slice(arr.length - W) : arr;
         // Тежките модели (5 Средна, 6 Фурие: ~секунди върху цялата серия) — веднъж на бар, останалите — при промяна на цената.
         const heavy = this.model === 5 || this.model === 6;
-        const key = (this.P.logisticSell ? 'L|' : '') + win.length + '|' + win[0].time + '|' + bar.time + (heavy ? '' : '|' + bar.close + '|' + bar.high + '|' + bar.low);
+        const key = win.length + '|' + win[0].time + '|' + bar.time + (heavy ? '' : '|' + bar.close + '|' + bar.high + '|' + bar.low);
         let vals;
         if (st._pk === key) vals = st._pv;
         else {
-          const sellOut = this.model === 1 ? new Array(win.length).fill(null) : null;
-          vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W, logisticSell: this.P.logisticSell, sellOut, onlyLast: true });
-          st._pk = key; st._pv = vals; st._ps = sellOut ? sellOut[sellOut.length - 1] : null;
+          vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W, onlyLast: true });
+          st._pk = key; st._pv = vals;
         }
         const v = vals ? vals[vals.length - 1] : null;
-        prob = v != null ? { time: bar.time, buyPct: v, sellPct: st._ps != null ? st._ps : 100 - v } : null;
+        prob = v != null ? { time: bar.time, buyPct: v, sellPct: 100 - v } : null;
       } catch (e) { prob = null; }
     }
     if (prob && prob.buyPct) {
@@ -343,11 +345,9 @@ class Session {
       try {
         const W = Math.max(30, this.window());
         const win = (this.P.strictWindow && calcArr.length > W) ? calcArr.slice(calcArr.length - W) : calcArr;
-        const sellOut = this.model === 1 ? new Array(win.length).fill(null) : null;
-        const vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W, logisticSell: this.P.logisticSell, sellOut, onlyLast: true });
+        const vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W, onlyLast: true });
         const v = vals ? vals[vals.length - 1] : null;
-        const sv = sellOut ? sellOut[sellOut.length - 1] : null;
-        prob = v != null ? { time: closedT, buyPct: v, sellPct: sv != null ? sv : 100 - v } : null;
+        prob = v != null ? { time: closedT, buyPct: v, sellPct: 100 - v } : null;
       } catch (e) { prob = null; }
       if (!prob || !prob.buyPct) { why('block', 'Реверс: няма вероятност върху затворените свещи'); return; }
       st.revBar = closedT;
@@ -417,7 +417,7 @@ class Session {
       }, 30000);
       this.positions.set(r.ticket, {
         ticket: r.ticket, symbol, dir: dec.dir, lots: r.volume || dec.lots, entry: r.price || fill, sl, tp,
-        profit: 0, swap: 0, commission: 0, openTime: nowSec(), price: r.price || fill, prob: dec.prob
+        profit: 0, swap: 0, commission: 0, openTime: nowSec(), price: r.price || fill, prob: dec.prob, buyPct: prob ? prob.buyPct : null, sellPct: prob ? prob.sellPct : null
       });
       st.error = null;
     } catch (e) {
@@ -515,6 +515,7 @@ class Session {
       totalPnl: equity - start, totalPct: start > 0 ? (equity - start) / start * 100 : 0,
       trades: this.trades.length, wins,
       winRate: this.trades.length ? wins / this.trades.length * 100 : 0,
+      buyTrades: this.trades.filter(t => t.dir === 'BUY').length, sellTrades: this.trades.filter(t => t.dir === 'SELL').length,
       openCount: this.positions.size, maxDD: this.maxDD || 0,
       dayPnl: this.periodPnl(startOfDay(), equity),
       weekPnl: this.periodPnl(startOfWeek(), equity),
@@ -527,8 +528,8 @@ class Session {
     const bar = t => t;   // точното време; клиентът го закръгля до свещта на избрания интервал
     const out = [];
     const mk = (p, t, o) => ({ time: bar(t), position: o.position, color: o.color, shape: o.shape, text: o.text,
-      d: { ticket: p.ticket, dir: p.dir, lots: p.lots, entry: p.entry, sl: p.sl || null, tp: p.tp || null, openedAt: p.openedAt || p.openTime, closedAt: p.closedAt || null, exit: p.exit != null ? p.exit : null, pnl: p.pnl != null ? p.pnl : null, swap: p.swap || 0, commission: p.commission || 0, spreadPx: p.spreadPx != null ? p.spreadPx : null, spreadCost: p.spread || 0, reason: p.reason || null } });
-    const open = (p, t) => out.push(mk(p, t, { position: p.dir === 'BUY' ? 'belowBar' : 'aboveBar', color: p.dir === 'BUY' ? '#00ff66' : '#ff0055', shape: p.dir === 'BUY' ? 'arrowUp' : 'arrowDown', text: p.dir + ' ' + p.lots + 'л' }));
+      d: { ticket: p.ticket, dir: p.dir, lots: p.lots, entry: p.entry, sl: p.sl || null, tp: p.tp || null, openedAt: p.openedAt || p.openTime, closedAt: p.closedAt || null, exit: p.exit != null ? p.exit : null, pnl: p.pnl != null ? p.pnl : null, swap: p.swap || 0, commission: p.commission || 0, buyPct: p.buyPct != null ? p.buyPct : null, sellPct: p.sellPct != null ? p.sellPct : null, spreadPx: p.spreadPx != null ? p.spreadPx : null, spreadCost: p.spread || 0, reason: p.reason || null } });
+    const open = (p, t) => out.push(mk(p, t, { position: p.dir === 'BUY' ? 'belowBar' : 'aboveBar', color: p.dir === 'BUY' ? '#00ff66' : '#ff0055', shape: p.dir === 'BUY' ? 'arrowUp' : 'arrowDown', text: p.dir + ' ' + p.lots + 'л' + (p.buyPct != null ? ' · ' + Math.round(p.buyPct) + '/' + Math.round(p.sellPct) : '') }));
     for (const t of this.trades) {
       if (t.symbol !== sym) continue;
       open(t, t.openedAt);
@@ -571,7 +572,7 @@ class Session {
       return {
         ticket: p.ticket, symbol: p.symbol, dir: p.dir, entry: p.entry, lots: p.lots, contract: i.contract,
         units, notional: units * p.entry * fx, margin: i.margin1 ? i.margin1 * p.lots : null, tp: p.tp, sl: p.sl,
-        openTime: p.openTime, prob: p.prob, spread: (p.spreadPx != null ? p.spreadPx : i.spread) ? (p.spreadPx != null ? p.spreadPx : i.spread) * units * fx : 0, fx,
+        openTime: p.openTime, prob: p.prob, buyPct: p.buyPct, sellPct: p.sellPct, spread: (p.spreadPx != null ? p.spreadPx : i.spread) ? (p.spreadPx != null ? p.spreadPx : i.spread) * units * fx : 0, fx,
         swap: p.swap, commission: p.commission || 0, gross: p.profit || 0, price: p.price, spreadPx: p.spreadPx != null ? p.spreadPx : null, floating: (p.profit || 0) + (p.swap || 0) + (p.commission || 0)
       };
     });

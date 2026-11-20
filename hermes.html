@@ -703,7 +703,7 @@
 
         .orders-head {
             display: grid;
-            grid-template-columns: 44px 130px 64px 90px 90px 140px 100px 110px 90px 120px;
+            grid-template-columns: 44px 130px 64px 110px 90px 90px 140px 100px 110px 90px 120px;
             gap: 8px;
             padding: 8px 10px;
             border-bottom: 1px solid var(--panel-border);
@@ -723,7 +723,7 @@
 
         .order-row {
             display: grid;
-            grid-template-columns: 44px 130px 64px 90px 90px 140px 100px 110px 90px 120px;
+            grid-template-columns: 44px 130px 64px 110px 90px 90px 140px 100px 110px 90px 120px;
             gap: 8px;
             align-items: center;
             padding: 7px 10px;
@@ -1050,7 +1050,7 @@
         @media (max-width: 900px) {
             .orders-head,
             .order-row {
-                grid-template-columns: 44px 120px 56px 80px 80px 120px 90px 100px 80px 110px;
+                grid-template-columns: 44px 120px 56px 100px 80px 80px 120px 90px 100px 80px 110px;
                 font-size: 10px;
             }
             .controls input,
@@ -1275,7 +1275,6 @@
                 <label class="chk" title="Вместо фиксиран SL: затваря, когато P(обратна посока) [0..1] × плаващата загуба достигне лимита. TP по цена продължава да работи."><input type="checkbox" id="inpPctClose"> Процентно затваряне <input type="number" id="inpPctCloseLimit" value="0" min="0" step="1" style="width:80px" title="Лимит (€). 0 = авто: дължината до SL в €."></label>
                 <label class="chk" title="Ползва датите от/до. Изключено — теглят се последните свещи."><input type="checkbox" id="inpUseDates" checked onchange="toggleDates()"> Времеви период</label>
                 <label class="chk" title="За всеки бар моделът се смята САМО върху последните „Поглед назад“ свещи (индикаторите — от началото на този прозорец). Нищо от по-старата история и от началото на симулацията не влияе — както в HEROS. По-бавно е."><input type="checkbox" id="inpStrictWindow"> Само прозорец назад</label>
-                <label class="chk" title="Логистична: Sell % се смята чрез собствено виртуално отваряне на SELL позиции (TP надолу, SL нагоре) със своя статистика по маски, а не като 100 − Buy %."><input type="checkbox" id="inpLogisticSell" checked> Логистична: Sell виртуално</label>
                 <label class="chk" title="При включване входната цена се влошава със спреда — BUY по-високо, SELL по-ниско. Спредът НЕ се тегли директно от сметката."><input type="checkbox" id="inpPriceWithSpread"> Цена със спред</label>
             </div>
         <div class="contra-box" id="contraBox" style="display:none">
@@ -1329,6 +1328,7 @@
             <span>#</span>
             <span>Отваряне</span>
             <span>Вид</span>
+            <span>Buy / Sell %</span>
             <span>Обем</span>
             <span>Вход</span>
             <span>TP / SL</span>
@@ -1486,7 +1486,7 @@
         // напр. 1м за ~34 дни; над това периодът се скъсява (вижда се в #periodInfo).
         const MAX_FETCH = 50000;
 
-        const modelNames = ['Историческа', 'Логистична', 'Марковска', 'Очаквана стойност', 'Уейвлет', 'Средна вероятност', 'Фурие', 'RSI анализ'];
+        const modelNames = ['Историческа', 'Логистична', 'Марковска', 'Очаквана стойност', 'Уейвлет', 'Средна вероятност', 'Фурие', 'RSI анализ', 'Логистична 2'];
 
         let cancelFlag = false;
         let running = false;
@@ -2450,7 +2450,6 @@
                 dynPeriod: 200,
                 lookbackGrow: false,   // променливият поглед е премахнат
                 strictWindow: !!((document.getElementById('inpStrictWindow') || {}).checked),
-                logisticSell: !!((document.getElementById('inpLogisticSell') || {}).checked),
                 reverse: document.getElementById('inpReverse').checked,
                 reversal: !!((document.getElementById('inpReversal') || {}).checked)
             };
@@ -2466,6 +2465,7 @@
                 <span class="c-num">#${seq}</span>
                 <span class="c-time">${fmtTime(pos.openTime)}</span>
                 <span class="c-dir ${pos.dir === 'BUY' ? 'buy' : 'sell'}">${pos.dir === 'BUY' ? 'BUY' : 'SELL'}</span>
+                <span class="c-bs">${pos.buyPct != null ? pos.buyPct.toFixed(0) + ' / ' + pos.sellPct.toFixed(0) : '—'}</span>
                 <span class="c-vol">${(pos.lots != null ? pos.lots : pos.units).toFixed(2)} лот</span>
                 <span class="c-entry">${fmt(pos.entry)}</span>
                 <span class="c-tpsl">${fmt(pos.tp)} / ${fmt(pos.sl)}</span>
@@ -2497,14 +2497,14 @@
                         <span>TP ${fmt(pos.tp)}</span>
                         <span>SL ${fmt(pos.sl)}</span>
                         <span>Спред ${pos.spread ? fmt(pos.spread) + ' €' : '—'}</span>
-                        <span>Вер. ${pos.prob.toFixed(1)}%</span>
+                        <span>Buy ${pos.buyPct != null ? pos.buyPct.toFixed(1) : '—'}% / Sell ${pos.sellPct != null ? pos.sellPct.toFixed(1) : '—'}%</span>
                     </div>
                 `;
                 // Панелът остава постоянно видим и с еднаква структура (за да не мърда
                 // графиката). При липса на позиция редът стои с тирета, а не изчезва.
                 const legHtml = hasOpen
                     ? open.map(legRow).join('')
-                    : '<div class="cp-leg"><b>—</b><span>Обем —</span><span>Вход —</span><span>TP —</span><span>SL —</span><span>Спред —</span><span>Вер. —</span></div>';
+                    : '<div class="cp-leg"><b>—</b><span>Обем —</span><span>Вход —</span><span>TP —</span><span>SL —</span><span>Спред —</span><span>Buy / Sell —</span></div>';
                 el.innerHTML = `
                     <div class="cp-head">Отворени позиции — зает маржин: <span id="cpUsed">—</span> · свободен маржин: <span id="cpFree">—</span> · маржин ниво: <span id="cpLevel">—</span></div>
                     <div class="cp-grid">
@@ -2543,7 +2543,7 @@
             }
         }
 
-        function renderSummary(P, equity, trades, wins, maxDD, pnlExSum, minLotsSum) {
+        function renderSummary(P, equity, trades, wins, maxDD, pnlExSum, minLotsSum, buyN, sellN) {
             const pnl = equity - P.budget;
             const pct = P.budget > 0 ? (pnl / P.budget) * 100 : 0;
             const winRate = trades > 0 ? (wins / trades) * 100 : 0;
@@ -2555,6 +2555,7 @@
                 <div class="sum-item"><span>Краен капитал</span><b>${equity.toFixed(2)} €</b></div>
                 <div class="sum-item ${pnl >= 0 ? 'pos' : 'neg'}"><span>Печалба / Загуба</span><b>${(pnl >= 0 ? '+' : '') + pnl.toFixed(2)} € (${(pct >= 0 ? '+' : '') + pct.toFixed(2)}%)</b></div>
                 <div class="sum-item"><span>Сделки</span><b>${trades}</b></div>
+                <div class="sum-item" title="Дял на сделките по посока"><span>Buy / Sell</span><b>${(() => { const t = (buyN || 0) + (sellN || 0); return t > 0 ? (buyN / t * 100).toFixed(1) + '% / ' + (sellN / t * 100).toFixed(1) + '%' : '—'; })()}</b></div>
                 <div class="sum-item ${avgEx >= 0 ? 'pos' : 'neg'}" title="Средна печалба на минимален обем без спреда (Σ P/L без спред / Σ минимални обеми)"><span>Средна печалба/мин. обем (без спред)</span><b>${(avgEx >= 0 ? '+' : '') + fmtAmt(avgEx)} €</b></div>
                 <div class="sum-item"><span>Win rate</span><b>${winRate.toFixed(1)}%</b></div>
                 <div class="sum-item ${maxDD > 0 ? 'neg' : 'pos'}"><span>Макс. теглене</span><b>${maxDD.toFixed(2)}%</b></div>
@@ -2799,6 +2800,7 @@
             let peak = equity;
             let maxDD = 0;
             let tradeCount = 0, winsCount = 0;
+            let buyOpened = 0, sellOpened = 0;   // колко позиции са отворени като BUY / SELL
             let legs = [];
             // P/L без спреда: ползваме пазарния вход (връщаме отместването fillShift).
             const pnlExOf = (pos, exitPrice) => {
@@ -3179,6 +3181,7 @@
                                             for (const old of legs) closeLeg(old, entry, 'Реверс', candles[i]);
                                             legs = [];
                                         }
+                                        if (dir === 'BUY') buyOpened++; else sellOpened++;
                                         legs = [{
                                             dir,
                                             entry: fill,
@@ -3190,6 +3193,7 @@
                                             atr,
                                             openIdx: i,
                                             prob: (dir === 'BUY' ? pRise : pFall) * 100,
+                                            buyPct, sellPct,
                                             margin,
                                             notional,
                                             openTime: t,
@@ -3211,7 +3215,7 @@
                                                 position: dir === 'BUY' ? 'belowBar' : 'aboveBar',
                                                 color: dir === 'BUY' ? '#00ff66' : '#ff0055',
                                                 shape: dir === 'BUY' ? 'arrowUp' : 'arrowDown',
-                                                text: dir + ' ' + lots + 'л'
+                                                text: dir + ' ' + lots + 'л · ' + buyPct.toFixed(0) + '/' + sellPct.toFixed(0)
                                             });
                                             markersDirty = true;
                                         }
@@ -3291,7 +3295,7 @@
                 lastSim.probs = curProbs;
                 lastSim.params = P;
             }
-            renderSummary(P, equity, tradeCount, winsCount, maxDD, pnlExSum, minLotsSum);
+            renderSummary(P, equity, tradeCount, winsCount, maxDD, pnlExSum, minLotsSum, buyOpened, sellOpened);
             if (tradeCount === 0) {
                 setProgress(100, '0 сделки — провери: „Мин. обем“ (твърде голям за бюджета → няма вход), праговете Buy/Sell, и че пазарът е отворен (не-крипто не търгува събота/неделя).');
             } else {
@@ -3307,7 +3311,6 @@
         // Вероятности според отметката „Само прозорец назад“: строг прозорец за всеки бар
         // (само последните `lookback` свещи, от fromIdx нататък) или обикновеното причинно изчисление.
         async function computeProbsForRun(candles, interval, lookback, P, fromIdx) {
-            if (P && typeof setLogisticSellVirtual === 'function') setLogisticSellVirtual(P.logisticSell);
             const opts = { invert: contraFlags(), intervalSec: intervalSecs(interval), lookback: lookback, lookbackGrow: false };
             if (P && P.strictWindow) {
                 return computeModelProbSeriesStrict(candles, currentModel, opts, lookback, null, fromIdx, false);
@@ -3338,22 +3341,20 @@
                 const effW = grow ? (w + Math.max(0, i - start)) : w;
                 const s0 = Math.max(0, i - effW + 1);
                 const win = candles.slice(s0, i + 1);
-                let v = null, sv = null;
+                let v = null;
                 try {
-                    const sellOut = (modelIndex === 1) ? new Array(win.length).fill(null) : null;
                     const vals = (typeof computeModelProbCore === 'function')
-                        ? computeModelProbCore(win, modelIndex, Object.assign({}, opts, { lookback: effW, onlyLast: true }, sellOut ? { sellOut } : null))
+                        ? computeModelProbCore(win, modelIndex, Object.assign({}, opts, { lookback: effW, onlyLast: true }))
                         : null;
                     if (vals && vals[vals.length - 1] != null) {
                         v = vals[vals.length - 1];
-                        if (sellOut && sellOut[sellOut.length - 1] != null) sv = sellOut[sellOut.length - 1];
                     } else {
                         const ser = computeModelProbSeries(win, modelIndex, Object.assign({}, opts, { lookback: w }));
                         const last = ser && ser[ser.length - 1];
                         if (last) v = last.buyPct;
                     }
                 } catch (e) { v = null; }
-                if (v != null) out[i] = { time: candles[i].time, buyPct: v, sellPct: sv != null ? sv : 100 - v };
+                if (v != null) out[i] = { time: candles[i].time, buyPct: v, sellPct: 100 - v };
                 if (((i - start) % 20 === 0) || i === n - 1) {
                     if (typeof progressCb === 'function') progressCb(i, n, w);
                     else setProgress(Math.round(((i - start + 1) / total) * 100), 'Строг прозорец (' + w + '): бар ' + (i + 1) + '/' + n + '...');
@@ -4350,7 +4351,6 @@
             { id: 'inpModel', type: 'value' },
             { id: 'inpLookback', type: 'value' },
             { id: 'inpStrictWindow', type: 'checkbox' },
-            { id: 'inpLogisticSell', type: 'checkbox' },
             { id: 'inpInterval', type: 'value' },
             { id: 'inpSpeed', type: 'value' },
             { id: 'inpUseDates', type: 'checkbox' },
@@ -4943,12 +4943,11 @@
                 if (cmp.stop) return null;
                 const startIdx0 = candles.findIndex(c => c.time >= fromS);
                 if (startIdx0 < 0 || candles.length - startIdx0 < 30) throw new Error('Периодът покрива под 30 свещи');
-                const pkey = ckey + '|' + model + '|' + P.lookback + '|' + invert.join('') + '|' + (P.logisticSell ? 'ls' : '') + '|' + (P.strictWindow ? 's' + startIdx0 : 'n');
+                const pkey = ckey + '|' + model + '|' + P.lookback + '|' + invert.join('') + '|' + '|' + (P.strictWindow ? 's' + startIdx0 : 'n');
                 let probs = cmp.probsCache.get(pkey);
                 if (!probs) {
                     row.stage = 'изчисляване на вероятностите...'; cmpRenderTable();
                     await sleep(20);
-                    setLogisticSellVirtual(P.logisticSell);
                     const o = { invert, intervalSec: iv, lookback: P.lookback, lookbackGrow: false };
                     probs = P.strictWindow
                         ? await computeModelProbSeriesStrict(candles, model, o, P.lookback, () => {}, startIdx0, false)
