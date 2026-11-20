@@ -850,6 +850,10 @@ function computeModelProbCore(candles, modelIndex, opts) {
       }
     }
 
+    // opts.onlyLast: нужна е само стойността за последния бар (строг прозорец / живо) — скъпите модели
+    // (Уейвлет, Средна, Фурие) не се смятат за останалите барове. Статистиката по-горе е вече натрупана,
+    // така че последната стойност е идентична.
+    if (opts && opts.onlyLast && i < n - 1 && (modelIndex === 4 || modelIndex === 5 || modelIndex === 6)) continue;
     let val;
     if (modelIndex === 0) {
       val = amplify(directionalProb(dirs));

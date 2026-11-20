@@ -283,7 +283,7 @@ class Session {
         if (st._pk === key) vals = st._pv;
         else {
           const sellOut = this.model === 1 ? new Array(win.length).fill(null) : null;
-          vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W, logisticSell: this.P.logisticSell, sellOut });
+          vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W, logisticSell: this.P.logisticSell, sellOut, onlyLast: true });
           st._pk = key; st._pv = vals; st._ps = sellOut ? sellOut[sellOut.length - 1] : null;
         }
         const v = vals ? vals[vals.length - 1] : null;
@@ -344,7 +344,7 @@ class Session {
         const W = Math.max(30, this.window());
         const win = (this.P.strictWindow && calcArr.length > W) ? calcArr.slice(calcArr.length - W) : calcArr;
         const sellOut = this.model === 1 ? new Array(win.length).fill(null) : null;
-        const vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W, logisticSell: this.P.logisticSell, sellOut });
+        const vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W, logisticSell: this.P.logisticSell, sellOut, onlyLast: true });
         const v = vals ? vals[vals.length - 1] : null;
         const sv = sellOut ? sellOut[sellOut.length - 1] : null;
         prob = v != null ? { time: closedT, buyPct: v, sellPct: sv != null ? sv : 100 - v } : null;
