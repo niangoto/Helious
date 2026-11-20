@@ -1250,9 +1250,6 @@
         <label>Поглед назад (свещи)
             <input type="number" id="inpLookback" value="3000" min="30" max="50000" step="100" title="Колко свещи назад да гледат моделите (статистика/прозорци). По подразбиране 3000.">
         </label>
-        <label>Период (свещи)
-            <input type="number" id="inpDynPeriod" value="200" min="60" max="50000" step="10" title="На колко свещи се прави проверката на динамичния „Поглед назад“. Чувствителността и оптимизацията по двойки гледат последните 10 дни назад, независимо от периода и интервала на свещите. Проверките започват, когато има 10 дни данни.">
-        </label>
         <details class="adv">
             <summary>Разширени настройки (EV / Кели / TP-SL)</summary>
             <div class="adv-grid">
@@ -1277,7 +1274,6 @@
                 <label class="chk" title="Отваря се само обратната поръчка (контра) вместо определената, със същия обем"><input type="checkbox" id="inpReverse"> Обърната посока</label>
                 <label class="chk" title="Вместо фиксиран SL: затваря, когато P(обратна посока) [0..1] × плаващата загуба достигне лимита. TP по цена продължава да работи."><input type="checkbox" id="inpPctClose"> Процентно затваряне <input type="number" id="inpPctCloseLimit" value="0" min="0" step="1" style="width:80px" title="Лимит (€). 0 = авто: дължината до SL в €."></label>
                 <label class="chk" title="Ползва датите от/до. Изключено — теглят се последните свещи."><input type="checkbox" id="inpUseDates" checked onchange="toggleDates()"> Времеви период</label>
-                <label class="chk" title="При включване: проверките започват, когато има 10 дни история назад. После на всеки „Период (свещи)“ се прави чувствителност на lookback и се оптимизират по двойки BUY/SELL прагове и TP/SL (по 20 стойности) върху последните 10 дни."><input type="checkbox" id="inpLookbackGrow"> Променлив поглед</label>
                 <label class="chk" title="За всеки бар моделът се смята САМО върху последните „Поглед назад“ свещи (индикаторите — от началото на този прозорец). Нищо от по-старата история и от началото на симулацията не влияе — както в HEROS. По-бавно е."><input type="checkbox" id="inpStrictWindow"> Само прозорец назад</label>
                 <label class="chk" title="Логистична: Sell % се смята чрез собствено виртуално отваряне на SELL позиции (TP надолу, SL нагоре) със своя статистика по маски, а не като 100 − Buy %."><input type="checkbox" id="inpLogisticSell" checked> Логистична: Sell виртуално</label>
                 <label class="chk" title="При включване входната цена се влошава със спреда — BUY по-високо, SELL по-ниско. Спредът НЕ се тегли директно от сметката."><input type="checkbox" id="inpPriceWithSpread"> Цена със спред</label>
@@ -2451,8 +2447,8 @@
                 pctClose: !!((document.getElementById('inpPctClose') || {}).checked),
                 pctCloseLimit: Math.max(0, parseFloat((document.getElementById('inpPctCloseLimit') || {}).value) || 0),
                 lookback: Math.max(30, Math.min(50000, parseInt((document.getElementById('inpLookback') || {}).value, 10) || 3000)),
-                dynPeriod: Math.max(60, Math.min(50000, parseInt((document.getElementById('inpDynPeriod') || {}).value, 10) || 200)),
-                lookbackGrow: !!((document.getElementById('inpLookbackGrow') || {}).checked),
+                dynPeriod: 200,
+                lookbackGrow: false,   // променливият поглед е премахнат
                 strictWindow: !!((document.getElementById('inpStrictWindow') || {}).checked),
                 logisticSell: !!((document.getElementById('inpLogisticSell') || {}).checked),
                 reverse: document.getElementById('inpReverse').checked,
@@ -4353,8 +4349,6 @@
             { id: 'inpReversal', type: 'checkbox' },
             { id: 'inpModel', type: 'value' },
             { id: 'inpLookback', type: 'value' },
-            { id: 'inpDynPeriod', type: 'value' },
-            { id: 'inpLookbackGrow', type: 'checkbox' },
             { id: 'inpStrictWindow', type: 'checkbox' },
             { id: 'inpLogisticSell', type: 'checkbox' },
             { id: 'inpInterval', type: 'value' },

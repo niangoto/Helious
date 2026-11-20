@@ -626,11 +626,19 @@ function computeAllModels(candles, opts) {
     return vals ? vals[n - 1] : null;
   };
   const wrap = (v) => ({ buyPct: v == null ? 50 : v, sellPct: 100 - (v == null ? 50 : v) });
+  // Логистична: Sell % от виртуално отваряне на SELL (както в Hermes/HEROS), а не 100 − Buy.
+  const logisticCard = () => {
+    const sellOut = new Array(n).fill(null);
+    const vals = computeModelProbCore(candles, 1, Object.assign({}, opts || {}, { sellOut }));
+    const b = vals ? vals[n - 1] : null;
+    if (b == null) return wrap(null);
+    return { buyPct: b, sellPct: sellOut[n - 1] != null ? sellOut[n - 1] : 100 - b };
+  };
   // Фурие: като модел 6 в Hermes — последните FOURIER_LOOKBACK (500) свещи.
   const f = computeFourierProbability(candles.slice(Math.max(0, n - FOURIER_LOOKBACK), n));
   return { models: {
     historical: wrap(atLast(0)),
-    logistic: wrap(atLast(1)),
+    logistic: logisticCard(),
     markov: wrap(atLast(2)),
     expectedValue: wrap(atLast(3)),
     wavelet: wrap(atLast(4)),
@@ -692,8 +700,8 @@ function resolveTradeSell(candles, j, atrVal, tpMult, slMult, maxBars) {
 }
 
 // „Логистична“: Sell % да се смята чрез собствени виртуални SELL позиции (със своя статистика по
-// маски), а не като 100 − Buy %. Глобален превключвател (по подразбиране изкл.); opts.logisticSell го замества.
-let LOGISTIC_SELL_VIRTUAL = false;
+// маски), а не като 100 − Buy %. Глобален превключвател (по подразбиране ВКЛ.); opts.logisticSell го замества.
+let LOGISTIC_SELL_VIRTUAL = true;
 function setLogisticSellVirtual(v) { LOGISTIC_SELL_VIRTUAL = !!v; }
 
 // Causal (walk-forward) core shared by the bot series and the chart sequence.
