@@ -22,6 +22,7 @@ function normalizeParams(p) {
     skipNegSwap: !!p.skipNegSwap,                                       // не отваряй, ако суапът за посоката е отрицателен
     maxPositions: Math.max(1, parseInt(p.maxPositions, 10) || 5),
     lookback: Math.min(20000, Math.max(100, parseInt(p.lookback, 10) || 3000)), // „Поглед назад“ (като в HERMES)
+    logisticSell: p.logisticSell == null ? false : !!p.logisticSell,   // Логистична: Sell % чрез виртуални SELL позиции (като в HERMES)
     strictWindow: !!p.strictWindow,                          // false = както HERMES по подразбиране (цяла серия + прозорец за статистиката); true = само последните `lookback` свещи
     pctClose: !!p.pctClose,                                  // процентно затваряне (вероятност срещу позицията)
     pctCloseLimit: Math.max(0, num(p.pctCloseLimit, 0)),     // лимит на очакваната загуба; 0 = загубата до SL

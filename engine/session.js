@@ -278,15 +278,16 @@ class Session {
         const win = (this.P.strictWindow && arr.length > W) ? arr.slice(arr.length - W) : arr;
         // Тежките модели (5 Средна, 6 Фурие: ~секунди върху цялата серия) — веднъж на бар, останалите — при промяна на цената.
         const heavy = this.model === 5 || this.model === 6;
-        const key = win.length + '|' + win[0].time + '|' + bar.time + (heavy ? '' : '|' + bar.close + '|' + bar.high + '|' + bar.low);
+        const key = (this.P.logisticSell ? 'L|' : '') + win.length + '|' + win[0].time + '|' + bar.time + (heavy ? '' : '|' + bar.close + '|' + bar.high + '|' + bar.low);
         let vals;
         if (st._pk === key) vals = st._pv;
         else {
-          vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W });
-          st._pk = key; st._pv = vals;
+          const sellOut = this.model === 1 ? new Array(win.length).fill(null) : null;
+          vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W, logisticSell: this.P.logisticSell, sellOut });
+          st._pk = key; st._pv = vals; st._ps = sellOut ? sellOut[sellOut.length - 1] : null;
         }
         const v = vals ? vals[vals.length - 1] : null;
-        prob = v != null ? { time: bar.time, buyPct: v, sellPct: 100 - v } : null;
+        prob = v != null ? { time: bar.time, buyPct: v, sellPct: st._ps != null ? st._ps : 100 - v } : null;
       } catch (e) { prob = null; }
     }
     if (prob && prob.buyPct) {
@@ -342,9 +343,11 @@ class Session {
       try {
         const W = Math.max(30, this.window());
         const win = (this.P.strictWindow && calcArr.length > W) ? calcArr.slice(calcArr.length - W) : calcArr;
-        const vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W });
+        const sellOut = this.model === 1 ? new Array(win.length).fill(null) : null;
+        const vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W, logisticSell: this.P.logisticSell, sellOut });
         const v = vals ? vals[vals.length - 1] : null;
-        prob = v != null ? { time: closedT, buyPct: v, sellPct: 100 - v } : null;
+        const sv = sellOut ? sellOut[sellOut.length - 1] : null;
+        prob = v != null ? { time: closedT, buyPct: v, sellPct: sv != null ? sv : 100 - v } : null;
       } catch (e) { prob = null; }
       if (!prob || !prob.buyPct) { why('block', 'Реверс: няма вероятност върху затворените свещи'); return; }
       st.revBar = closedT;

@@ -1279,6 +1279,7 @@
                 <label class="chk" title="Ползва датите от/до. Изключено — теглят се последните свещи."><input type="checkbox" id="inpUseDates" checked onchange="toggleDates()"> Времеви период</label>
                 <label class="chk" title="При включване: проверките започват, когато има 10 дни история назад. После на всеки „Период (свещи)“ се прави чувствителност на lookback и се оптимизират по двойки BUY/SELL прагове и TP/SL (по 20 стойности) върху последните 10 дни."><input type="checkbox" id="inpLookbackGrow"> Променлив поглед</label>
                 <label class="chk" title="За всеки бар моделът се смята САМО върху последните „Поглед назад“ свещи (индикаторите — от началото на този прозорец). Нищо от по-старата история и от началото на симулацията не влияе — както в HEROS. По-бавно е."><input type="checkbox" id="inpStrictWindow"> Само прозорец назад</label>
+                <label class="chk" title="Логистична: Sell % се смята чрез собствено виртуално отваряне на SELL позиции (TP надолу, SL нагоре) със своя статистика по маски, а не като 100 − Buy %."><input type="checkbox" id="inpLogisticSell"> Логистична: Sell виртуално</label>
                 <label class="chk" title="При включване входната цена се влошава със спреда — BUY по-високо, SELL по-ниско. Спредът НЕ се тегли директно от сметката."><input type="checkbox" id="inpPriceWithSpread"> Цена със спред</label>
             </div>
         <div class="contra-box" id="contraBox" style="display:none">
@@ -2453,6 +2454,7 @@
                 dynPeriod: Math.max(60, Math.min(50000, parseInt((document.getElementById('inpDynPeriod') || {}).value, 10) || 200)),
                 lookbackGrow: !!((document.getElementById('inpLookbackGrow') || {}).checked),
                 strictWindow: !!((document.getElementById('inpStrictWindow') || {}).checked),
+                logisticSell: !!((document.getElementById('inpLogisticSell') || {}).checked),
                 reverse: document.getElementById('inpReverse').checked,
                 reversal: !!((document.getElementById('inpReversal') || {}).checked)
             };
@@ -3309,6 +3311,7 @@
         // Вероятности според отметката „Само прозорец назад“: строг прозорец за всеки бар
         // (само последните `lookback` свещи, от fromIdx нататък) или обикновеното причинно изчисление.
         async function computeProbsForRun(candles, interval, lookback, P, fromIdx) {
+            if (P && typeof setLogisticSellVirtual === 'function') setLogisticSellVirtual(P.logisticSell);
             const opts = { invert: contraFlags(), intervalSec: intervalSecs(interval), lookback: lookback, lookbackGrow: false };
             if (P && P.strictWindow) {
                 return computeModelProbSeriesStrict(candles, currentModel, opts, lookback, null, fromIdx, false);
@@ -3339,20 +3342,22 @@
                 const effW = grow ? (w + Math.max(0, i - start)) : w;
                 const s0 = Math.max(0, i - effW + 1);
                 const win = candles.slice(s0, i + 1);
-                let v = null;
+                let v = null, sv = null;
                 try {
+                    const sellOut = (modelIndex === 1) ? new Array(win.length).fill(null) : null;
                     const vals = (typeof computeModelProbCore === 'function')
-                        ? computeModelProbCore(win, modelIndex, Object.assign({}, opts, { lookback: effW }))
+                        ? computeModelProbCore(win, modelIndex, Object.assign({}, opts, { lookback: effW }, sellOut ? { sellOut } : null))
                         : null;
                     if (vals && vals[vals.length - 1] != null) {
                         v = vals[vals.length - 1];
+                        if (sellOut && sellOut[sellOut.length - 1] != null) sv = sellOut[sellOut.length - 1];
                     } else {
                         const ser = computeModelProbSeries(win, modelIndex, Object.assign({}, opts, { lookback: w }));
                         const last = ser && ser[ser.length - 1];
                         if (last) v = last.buyPct;
                     }
                 } catch (e) { v = null; }
-                if (v != null) out[i] = { time: candles[i].time, buyPct: v, sellPct: 100 - v };
+                if (v != null) out[i] = { time: candles[i].time, buyPct: v, sellPct: sv != null ? sv : 100 - v };
                 if (((i - start) % 20 === 0) || i === n - 1) {
                     if (typeof progressCb === 'function') progressCb(i, n, w);
                     else setProgress(Math.round(((i - start + 1) / total) * 100), 'Строг прозорец (' + w + '): бар ' + (i + 1) + '/' + n + '...');
@@ -4351,6 +4356,7 @@
             { id: 'inpDynPeriod', type: 'value' },
             { id: 'inpLookbackGrow', type: 'checkbox' },
             { id: 'inpStrictWindow', type: 'checkbox' },
+            { id: 'inpLogisticSell', type: 'checkbox' },
             { id: 'inpInterval', type: 'value' },
             { id: 'inpSpeed', type: 'value' },
             { id: 'inpUseDates', type: 'checkbox' },
@@ -4943,11 +4949,12 @@
                 if (cmp.stop) return null;
                 const startIdx0 = candles.findIndex(c => c.time >= fromS);
                 if (startIdx0 < 0 || candles.length - startIdx0 < 30) throw new Error('Периодът покрива под 30 свещи');
-                const pkey = ckey + '|' + model + '|' + P.lookback + '|' + invert.join('') + '|' + (P.strictWindow ? 's' + startIdx0 : 'n');
+                const pkey = ckey + '|' + model + '|' + P.lookback + '|' + invert.join('') + '|' + (P.logisticSell ? 'ls' : '') + '|' + (P.strictWindow ? 's' + startIdx0 : 'n');
                 let probs = cmp.probsCache.get(pkey);
                 if (!probs) {
                     row.stage = 'изчисляване на вероятностите...'; cmpRenderTable();
                     await sleep(20);
+                    setLogisticSellVirtual(P.logisticSell);
                     const o = { invert, intervalSec: iv, lookback: P.lookback, lookbackGrow: false };
                     probs = P.strictWindow
                         ? await computeModelProbSeriesStrict(candles, model, o, P.lookback, () => {}, startIdx0, false)

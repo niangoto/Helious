@@ -678,6 +678,24 @@ function resolveTrade(candles, j, atrVal, tpMult, slMult, maxBars) {
   return null;
 }
 
+// Виртуален SELL: TP = entry − tpMult×ATR, SL = entry + slMult×ATR. При бар с и двете → SL.
+function resolveTradeSell(candles, j, atrVal, tpMult, slMult, maxBars) {
+  const entry = candles[j].close;
+  const tp = entry - tpMult * atrVal;
+  const sl = entry + slMult * atrVal;
+  const limit = Math.min(j + maxBars, candles.length);
+  for (let k = j + 1; k < limit; k++) {
+    if (candles[k].high >= sl) return { win: 0, closeIdx: k };
+    if (candles[k].low <= tp) return { win: 1, closeIdx: k };
+  }
+  return null;
+}
+
+// „Логистична“: Sell % да се смята чрез собствени виртуални SELL позиции (със своя статистика по
+// маски), а не като 100 − Buy %. Глобален превключвател (по подразбиране изкл.); opts.logisticSell го замества.
+let LOGISTIC_SELL_VIRTUAL = false;
+function setLogisticSellVirtual(v) { LOGISTIC_SELL_VIRTUAL = !!v; }
+
 // Causal (walk-forward) core shared by the bot series and the chart sequence.
 // At index i the statistics only include trades entered before i whose outcome
 // was already known by time i, and every baseline (ATR/volume mean, RSI) is
@@ -730,18 +748,26 @@ function computeModelProbCore(candles, modelIndex, opts) {
   }
 
   // Pre-resolve every historical trade outcome and bucket by resolution index.
+  const sellOn = (modelIndex === 1) && !!(opts && opts.sellOut) && (opts.logisticSell != null ? !!opts.logisticSell : LOGISTIC_SELL_VIRTUAL);
+  const sellOut = sellOn ? opts.sellOut : null;
   const entries = new Array(n).fill(null);
   const resolvedAt = new Array(n).fill(null).map(() => []);
+  const resolvedAtS = sellOn ? new Array(n).fill(null).map(() => []) : null;
   for (let j = 30; j < n - 1; j++) {
     const r = resolveTrade(candles, j, atrV[j] || 1, 1.5, 1.0, maxBars);
-    if (r) {
+    const rs = sellOn ? resolveTradeSell(candles, j, atrV[j] || 1, 1.5, 1.0, maxBars) : null;
+    if (r || rs) {
       const mask = signalMask(j, rsiAt(rsiV, j, 14), ema20[j], ema50[j], ema200[j], macd.macdLine[j], macd.signal[j], macd.histogram[j], atrV[j], adxR.adx[j], volV[j], meanAtrV[j], meanVolV[j]);
-      entries[j] = { mask, win: r.win };
-      resolvedAt[r.closeIdx].push(j);
+      entries[j] = { mask, win: r ? r.win : null, swin: rs ? rs.win : null };
+      if (r) resolvedAt[r.closeIdx].push(j);
+      if (rs) resolvedAtS[rs.closeIdx].push(j);
     }
   }
 
   const combos = new Map();
+  const combosS = new Map();
+  let totalWinsS = 0, totalTradesS = 0;
+  const resolvedQS = [];
   let totalWins = 0, totalTrades = 0;
   const recentTrades = [];
   const dirs = [];
@@ -802,6 +828,28 @@ function computeModelProbCore(candles, modelIndex, opts) {
       }
     }
 
+    if (sellOn) {
+      if (resolvedAtS[i].length) {
+        resolvedAtS[i].sort((a, b) => a - b);
+        for (const j of resolvedAtS[i]) {
+          const e = entries[j];
+          totalTradesS++;
+          if (e.swin === 1) totalWinsS++;
+          if (!combosS.has(e.mask)) combosS.set(e.mask, { total: 0, wins: 0 });
+          const c = combosS.get(e.mask); c.total++;
+          if (e.swin === 1) c.wins++;
+          resolvedQS.push({ mask: e.mask, win: e.swin, closeIdx: i });
+        }
+      }
+      while (resolvedQS.length && resolvedQS[0].closeIdx < i - (curLogisticLb - 1)) {
+        const old = resolvedQS.shift();
+        totalTradesS--;
+        if (old.win === 1) totalWinsS--;
+        const oc = combosS.get(old.mask);
+        if (oc) { oc.total--; if (old.win === 1) oc.wins--; if (oc.total <= 0) combosS.delete(old.mask); }
+      }
+    }
+
     let val;
     if (modelIndex === 0) {
       val = amplify(directionalProb(dirs));
@@ -809,6 +857,11 @@ function computeModelProbCore(candles, modelIndex, opts) {
       const mask = maskAt(i);
       val = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
       if (combos.has(mask)) { const cc = combos.get(mask); if (cc.total > 0) val = (cc.wins / cc.total) * 100; }
+      if (sellOn) {
+        let sv = totalTradesS > 0 ? (totalWinsS / totalTradesS) * 100 : 50;
+        if (combosS.has(mask)) { const cs = combosS.get(mask); if (cs.total > 0) sv = (cs.wins / cs.total) * 100; }
+        sellOut[i] = noClamp ? sv : Math.max(1, Math.min(99, sv));
+      }
     } else if (modelIndex === 2) {
       val = amplify(markovProb(dirs));
     } else if (modelIndex === 3) {
@@ -854,13 +907,14 @@ function computeModelProbCore(candles, modelIndex, opts) {
 // Връща масив, подравнен с `candles` (null за загряващия прозорец), всеки
 // елемент { time, buyPct, sellPct } — строго причинен (без бъдеще).
 function computeModelProbSeries(candles, modelIndex, opts) {
-  const vals = computeModelProbCore(candles, modelIndex, opts);
+  const sellOut = (modelIndex === 1) ? new Array(candles.length).fill(null) : null;
+  const vals = computeModelProbCore(candles, modelIndex, sellOut ? Object.assign({}, opts, { sellOut }) : opts);
   if (!vals) return [];
   const n = candles.length;
   const result = new Array(n).fill(null);
   for (let i = 0; i < n; i++) {
     if (vals[i] == null) continue;
-    result[i] = { time: candles[i].time, buyPct: vals[i], sellPct: 100 - vals[i] };
+    result[i] = { time: candles[i].time, buyPct: vals[i], sellPct: (sellOut && sellOut[i] != null) ? sellOut[i] : 100 - vals[i] };
   }
   return result;
 }
