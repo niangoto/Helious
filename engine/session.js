@@ -315,7 +315,7 @@ class Session {
 
     // 2) Вход — при всеки отказ записваме ПРИЧИНАТА в st.why (показва се в UI).
     const why = (level, text) => { st.why = { level, text, time: nowSec() }; };
-    const probTxt = (prob && prob.buyPct) ? ' (Buy ' + prob.buyPct.toFixed(1) + '% / Sell ' + prob.sellPct.toFixed(1) + '%)' : '';
+    let probTxt = (prob && prob.buyPct) ? ' (Buy ' + prob.buyPct.toFixed(1) + '% / Sell ' + prob.sellPct.toFixed(1) + '%)' : '';
     if (this.status !== 'running') { why('block', 'Сесията е на пауза'); return; }
     if (Date.now() < st.cooldown) { why('block', 'Пауза ' + Math.ceil((st.cooldown - Date.now()) / 1000) + 'с след отказана поръчка — ' + (st.error || '')); return; }
     // „Реверс“: при отворена позиция по символа чакаме обратен сигнал; тогава първо затваряме
@@ -331,7 +331,26 @@ class Session {
     if (!prob || !prob.buyPct) { why('block', 'Няма вероятност — малко свещи (' + arr.length + ', трябват ≥ 30)'); return; }
     if (!(info.contract > 0) || !(info.tickValue > 0) || !(info.tickSize > 0)) { why('block', 'MT5 не дава contract size / tick value за символа'); return; }
 
-    const atrArr = models.computeATR(arr, 14);
+    // „Реверс“ като в HERMES: решава се веднъж на затворена свещ, върху затворените свещи
+    // (без формиращата се). Нормалният вход (без отворена позиция) остава на всеки tick.
+    let calcArr = arr;
+    if (reversing) {
+      const closedT = st.lastBarTime;
+      if (st.revBar === closedT) { why('info', 'Реверс: проверява се веднъж на затворена свещ — следваща след затваряне на текущата'); return; }
+      calcArr = arr.filter(c => c.time <= closedT);
+      if (calcArr.length < 30) { why('block', 'Реверс: малко затворени свещи'); return; }
+      try {
+        const W = Math.max(30, this.window());
+        const win = (this.P.strictWindow && calcArr.length > W) ? calcArr.slice(calcArr.length - W) : calcArr;
+        const vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W });
+        const v = vals ? vals[vals.length - 1] : null;
+        prob = v != null ? { time: closedT, buyPct: v, sellPct: 100 - v } : null;
+      } catch (e) { prob = null; }
+      if (!prob || !prob.buyPct) { why('block', 'Реверс: няма вероятност върху затворените свещи'); return; }
+      st.revBar = closedT;
+      probTxt = ' (затворена свещ, Buy ' + prob.buyPct.toFixed(1) + '% / Sell ' + prob.sellPct.toFixed(1) + '%)';
+    }
+    const atrArr = models.computeATR(calcArr, 14);
     const atr = atrArr[atrArr.length - 1];
     const mid = (info.bid + info.ask) / 2;
     const fx = (info.tickValue / info.tickSize) / info.contract;     // валута на сметката за 1 единица от цената
