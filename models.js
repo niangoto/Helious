@@ -603,7 +603,7 @@ function lookbackOf(opts) {
 function windowFor(modelIndex, opts) {
   const lb = lookbackOf(opts);
   if (lb > 0) return lb;
-  return (modelIndex === 1 || modelIndex === 8) ? LOGISTIC_LOOKBACK : MODEL_LOOKBACK;
+  return (modelIndex === 1 || modelIndex === 8 || modelIndex === 10) ? LOGISTIC_LOOKBACK : MODEL_LOOKBACK;
 }
 function computeModelProbAt(candles, i, modelIndex, opts, W) {
   const w = Math.max(30, Math.floor(W) || 1);
@@ -866,8 +866,8 @@ function computeModelProbCore(candles, modelIndex, opts) {
   const maxBars = Math.min(50, n);
   // Логистична 2 (8): виртуалните сделки ползват TP/SL от настройките (в ATR множители,
   // подават се в opts.tpMult/opts.slMult); останалите модели — фиксирани 1.5/1.
-  const vTp = (modelIndex === 8 && opts && opts.tpMult > 0) ? opts.tpMult : 1.5;
-  const vSl = (modelIndex === 8 && opts && opts.slMult > 0) ? opts.slMult : 1.0;
+  const vTp = ((modelIndex === 8 || modelIndex === 10) && opts && opts.tpMult > 0) ? opts.tpMult : 1.5;
+  const vSl = ((modelIndex === 8 || modelIndex === 10) && opts && opts.slMult > 0) ? opts.slMult : 1.0;
 
   // RSI модел: усредняваме buyPct само за таймфреймове >= избрания период за
   // свещ (по-големи или равни). Ресемплираме входните свещи (k = tf/интервал).
@@ -897,7 +897,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
 
   // Логистична 2 (8): нормирана — отделна статистика за къси сделки (TP −1.5/SL +1).
   // Buy = wL/(wL+wS): при шум и двата дяла са ~40% → 50/50 (няма наклон към Sell).
-  const norm8 = (modelIndex === 8);
+  const norm8 = (modelIndex === 8 || modelIndex === 10);
   const resolvedAtS = norm8 ? new Array(n).fill(null).map(() => []) : null;
   const entriesS = norm8 ? new Array(n).fill(null) : null;
   if (norm8) {
@@ -913,8 +913,14 @@ function computeModelProbCore(candles, modelIndex, opts) {
   const combosS = new Map();
   let totalWinsS = 0, totalTradesS = 0;
   const resolvedQS = [];
+  // Модел 10: линия на Аналози (двойна средна на buyPct на модел 9) → наклон (производна).
+  const slopeN = (opts && opts.analogAvg > 0) ? Math.floor(opts.analogAvg) : 5;
+  const slopeK = (opts && opts.slopeK > 0) ? opts.slopeK : 0.1;
+  const anaBuy = (modelIndex === 10) ? new Float64Array(n).fill(NaN) : null;
+  const anaAvg1 = (modelIndex === 10) ? new Float64Array(n).fill(NaN) : null;
+  const anaLine = (modelIndex === 10) ? new Float64Array(n).fill(NaN) : null;
   const analogH = (opts && opts.holdBars > 0) ? Math.min(500, Math.floor(opts.holdBars)) : 50;
-  const analog = (modelIndex === 9)
+  const analog = (modelIndex === 9 || modelIndex === 10)
     ? createAnalogEngine(candles, { rsiV, ema20, ema50, macd, atrV, adxR, volV, meanAtrV, meanVolV }, analogH, modelLb, (opts && opts.analogTop > 0) ? Math.floor(opts.analogTop) : ANALOG_TOP_K, !!(opts && opts.analogSimple))
     : null;
   const combos = new Map();
@@ -1005,13 +1011,14 @@ function computeModelProbCore(candles, modelIndex, opts) {
     }
 
     if (analog) analog.add(i);
+    if (modelIndex === 10 && opts && opts.onlyLast && i < n - 2 * slopeN - 4) continue;
     // opts.onlyLast: нужна е само стойността за последния бар — скъпите модели (Уейвлет, Средна, Фурие)
     // не се смятат за останалите барове; статистиката по-горе е вече натрупана → последната стойност е идентична.
     if (opts && opts.onlyLast && i < n - 1 && (modelIndex === 4 || modelIndex === 5 || modelIndex === 6 || modelIndex === 9)) continue;
     let val;
     if (modelIndex === 0) {
       val = amplify(directionalProb(dirs));
-    } else if (modelIndex === 8) {
+    } else if (modelIndex === 8 || modelIndex === 10) {
       const mask = maskAt(i);
       // Смекчаване към общия дял (prior k): малките извадки по маска не дават 0/100.
       const K8 = 25;
@@ -1023,6 +1030,24 @@ function computeModelProbCore(candles, modelIndex, opts) {
       const wL = (cL.wins + K8 * baseL) / (cL.total + K8);
       const wS = (cS.wins + K8 * baseS) / (cS.total + K8);
       val = (wL + wS) > 0 ? (wL / (wL + wS)) * 100 : 50;
+      if (modelIndex === 10) {
+        // Линия от Аналози: avg1 = средна на последните N buyPct, линия = средна на последните N avg1.
+        anaBuy[i] = analog.evalAt(i).buyPct;
+        let sm = 0, c1 = 0;
+        for (let q = i; q > i - slopeN && q >= 0; q--) if (!isNaN(anaBuy[q])) { sm += anaBuy[q]; c1++; }
+        if (c1) anaAvg1[i] = sm / c1;
+        let s2 = 0, c2 = 0;
+        for (let q = i; q > i - slopeN && q >= 0; q--) if (!isNaN(anaAvg1[q])) { s2 += anaAvg1[q]; c2++; }
+        if (c2) anaLine[i] = s2 / c2;
+        if (i > 0 && !isNaN(anaLine[i]) && !isNaN(anaLine[i - 1])) {
+          // tg(ъгъл) = производна на линията (процентни пункта на бар) × slopeK
+          const tg = Math.max(-0.9, Math.min(0.9, (anaLine[i] - anaLine[i - 1]) * slopeK));
+          const kB = 1 + tg, kS = 1 - tg;
+          const b = val, sl2 = 100 - val;
+          val = (b * kB + sl2 * kS) > 0 ? (b * kB) / (b * kB + sl2 * kS) * 100 : 50;
+          if (opts && opts.slopeOut) opts.slopeOut[i] = tg;
+        }
+      }
     } else if (modelIndex === 1) {
       const mask = maskAt(i);
       val = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
