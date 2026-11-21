@@ -814,15 +814,19 @@ function createAnalogEngine(candles, c, H, lb, K, simple) {
       if (wb + ws <= 0) return { buyPct: 50, plan: null };
       const buyPct = 100 * wb / (wb + ws);
       const dir = wb >= ws ? 1 : 0;
-      let sw = 0, tp = 0, sl = 0, hd = 0;
-      for (let q = 0; q < tId.length; q++) {
-        const id = tId[q]; if (rDir[id] !== dir) continue;
-        sw += tW[q]; tp += tW[q] * rTp[id]; sl += tW[q] * rSl[id]; hd += tW[q] * rHold[id];
-      }
-      const plan = sw > 0 ? {
-        dir: dir === 1 ? 'BUY' : 'SELL',
-        tpMult: Math.max(0.1, tp / sw), slMult: Math.max(0.2, 2 * sl / sw), hold: Math.max(1, Math.round(hd / sw))
-      } : null;
+      // План за всяка посока (претеглено по точки от записите на тази посока в топ K);
+      // plan = планът на доминиращата посока, plan.plans = {BUY, SELL}.
+      const mk = (d) => {
+        let sw = 0, tp = 0, sl = 0, hd = 0;
+        for (let q = 0; q < tId.length; q++) {
+          const id = tId[q]; if (rDir[id] !== d) continue;
+          sw += tW[q]; tp += tW[q] * rTp[id]; sl += tW[q] * rSl[id]; hd += tW[q] * rHold[id];
+        }
+        return sw > 0 ? { dir: d === 1 ? 'BUY' : 'SELL', tpMult: Math.max(0.1, tp / sw), slMult: Math.max(0.2, 2 * sl / sw), hold: Math.max(1, Math.round(hd / sw)) } : null;
+      };
+      const pB = mk(1), pS = mk(0);
+      const base = (dir === 1 ? pB : pS) || pB || pS;
+      const plan = base ? Object.assign({}, base, { plans: { BUY: pB, SELL: pS } }) : null;
       return { buyPct, plan };
     }
   };

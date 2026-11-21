@@ -2129,6 +2129,7 @@
 
         let probPctArr = [];
         let probAvgArr = [];
+        let slopeProbArr = [];
         let probHover = [];
         function onProbHover(ev) {
             const tip = document.getElementById('probHoverTip');
@@ -2143,8 +2144,8 @@
             const tstr = dt.toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
             tip.style.display = 'block';
             tip.style.left = Math.max(2, Math.min(Math.max(2, rect.width - 190), best.x - 80)) + 'px';
-            const av = probAvgArr[best.idx];
-            tip.innerHTML = `${tstr}<br>Buy <b style="color:#00ff66">${best.v.toFixed(1)}%</b> / Sell <b style="color:#ff0055">${(100 - best.v).toFixed(1)}%</b>` + (av != null ? `<br>Средна: <b style="color:#ffd400">${av.toFixed(1)}%</b>` : '');
+            const av = probAvgArr[best.idx]; const sp = slopeProbArr[best.idx];
+            tip.innerHTML = `${tstr}<br>Buy <b style="color:#00ff66">${best.v.toFixed(1)}%</b> / Sell <b style="color:#ff0055">${(100 - best.v).toFixed(1)}%</b>` + (av != null ? `<br>Средна: <b style="color:#ffd400">${av.toFixed(1)}%</b>` : '') + (sp != null ? `<br>Наклон → Buy <b>${sp.toFixed(1)}%</b> / Sell <b>${(100 - sp).toFixed(1)}%</b>` : '');
         }
         function hideProbTip() {
             const tip = document.getElementById('probHoverTip');
@@ -2973,7 +2974,8 @@
                 probPctArr = new Array(n).fill(null);
                 probAvgArr = new Array(n).fill(null);
             }
-            const avg1Arr = new Array(n).fill(null);
+            const avg1Arr = new Array(n).fill(null), avg2Arr = new Array(n).fill(null);
+            if (!silent) slopeProbArr = new Array(n).fill(null);
             let simLastYield = performance.now();
             for (let i = i0; i < n; i++) {
                 // При тих (sweep) режим гледаме sweepCancel; иначе — cancelFlag.
@@ -3085,8 +3087,19 @@
                     if (cnt) avg1Arr[i] = sum / cnt;
                     let s2 = 0, c2 = 0;
                     for (let q = i; q > i - N && q >= 0; q--) { if (avg1Arr[q] != null) { s2 += avg1Arr[q]; c2++; } }
-                    if (c2) prAvg = { buyPct: s2 / c2, sellPct: 100 - s2 / c2, plan: prScaled.plan };
-                    if (!silent && prAvg) probAvgArr[i] = prAvg.buyPct;
+                    if (c2) {
+                        avg2Arr[i] = s2 / c2;
+                        // Вероятността = наклонът (производната) на средната линия: нагоре → Buy, надолу → Sell.
+                        // buyPct = 50 + 50·tg, tg = clamp(d·0.1, −0.9, 0.9), d = линия[i] − линия[i−1] (п.п./бар).
+                        let bp = 50;
+                        if (i > 0 && avg2Arr[i - 1] != null) {
+                            const tg = Math.max(-0.9, Math.min(0.9, (avg2Arr[i] - avg2Arr[i - 1]) * 0.1));
+                            bp = 50 + 50 * tg;
+                        }
+                        prAvg = { buyPct: bp, sellPct: 100 - bp, plan: prScaled.plan };
+                        if (!silent) slopeProbArr[i] = bp;
+                    }
+                    if (!silent && avg2Arr[i] != null) probAvgArr[i] = avg2Arr[i];
                 }
 
                 if (legs.length) {
@@ -3206,7 +3219,10 @@
 
                         // (3) R:R — рискът разширява/стеснява TP и SL (агресивен: далечен SL + голям TP)
                         // Модел 9 („Аналози“) сам предлага TP/SL (в ATR) и времево затваряне.
-                        const plan = (currentModel === 9 && pr.plan) ? pr.plan : null;
+                        // План за посоката, която сочи наклонът (buyPct ≥ 50 → BUY).
+                        const plan = (currentModel === 9 && pr.plan)
+                            ? ((pr.plan.plans && pr.plan.plans[buyPct >= 50 ? 'BUY' : 'SELL']) || null) : null;
+                        const noPlan9 = currentModel === 9 && !plan;
                         const tpDist = plan ? plan.tpMult * atr : P.tpMult * alpha * atr;
                         const slDist = plan ? plan.slMult * atr : P.slMult * alpha * atr;
                         const gain = tpDist;
@@ -3223,6 +3239,7 @@
                         let dir = null;
                         if (buyPct >= buyPmin && evLong > P.minEv) dir = 'BUY';
                         else if (sellPct >= sellPmin && evShort > P.minEv) dir = 'SELL';
+                        if (noPlan9) dir = null;
                         if (plan && dir && dir !== plan.dir) dir = null;
 
                         if (dir) {
