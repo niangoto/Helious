@@ -704,7 +704,7 @@ function resolveTrade(candles, j, atrVal, tpMult, slMult, maxBars) {
 const ANALOG_TOP_K = 20;
 const ANALOG_FEATURES = 7;
 
-function createAnalogEngine(candles, c, H, lb, K, simple) {
+function createAnalogEngine(candles, c, H, lb, K, simple, boltz) {
   const n = candles.length;
   const NF = ANALOG_FEATURES;
   const F = [];
@@ -808,6 +808,15 @@ function createAnalogEngine(candles, c, H, lb, K, simple) {
           tId.splice(p, 0, id); tW.splice(p, 0, tw);
           if (tId.length > K) { tId.pop(); tW.pop(); }
         }
+      }
+      // Болцман: точките на топ K стават тегла exp((s − s_max)/T), T = стандартно отклонение на точките
+      // в топ K (адаптивна „температура“) — реалното съотношение според разликите в близостта.
+      if (boltz && tW.length > 1) {
+        let mu = 0; for (const x of tW) mu += x; mu /= tW.length;
+        let va = 0; for (const x of tW) va += (x - mu) * (x - mu);
+        const T = Math.max(Math.sqrt(va / tW.length), 1e-9);
+        const sMax = tW[0];
+        for (let q = 0; q < tW.length; q++) tW[q] = Math.exp((tW[q] - sMax) / T);
       }
       let wb = 0, ws = 0;
       for (let q = 0; q < tId.length; q++) { if (rDir[tId[q]] === 1) wb += tW[q]; else ws += tW[q]; }
@@ -925,7 +934,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
   const anaLine = (modelIndex === 10) ? new Float64Array(n).fill(NaN) : null;
   const analogH = (opts && opts.holdBars > 0) ? Math.min(500, Math.floor(opts.holdBars)) : 50;
   const analog = (modelIndex === 9 || modelIndex === 10)
-    ? createAnalogEngine(candles, { rsiV, ema20, ema50, macd, atrV, adxR, volV, meanAtrV, meanVolV }, analogH, modelLb, (opts && opts.analogTop > 0) ? Math.floor(opts.analogTop) : ANALOG_TOP_K, !!(opts && opts.analogSimple))
+    ? createAnalogEngine(candles, { rsiV, ema20, ema50, macd, atrV, adxR, volV, meanAtrV, meanVolV }, analogH, modelLb, (opts && opts.analogTop > 0) ? Math.floor(opts.analogTop) : ANALOG_TOP_K, !!(opts && opts.analogSimple), modelIndex === 9)
     : null;
   const combos = new Map();
   let totalWins = 0, totalTrades = 0;
