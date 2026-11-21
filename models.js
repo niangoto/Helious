@@ -691,6 +691,143 @@ function resolveTrade(candles, j, atrVal, tpMult, slMult, maxBars) {
   return null;
 }
 
+
+// ─── Модел 9: „Аналози“ (близост по показатели) ───
+// За всяка минала свещ j (само с данни до j) се записват показателите ѝ и се симулират
+// въображаеми BUY и SELL с вход close[j] за до H бара напред (H = времево затваряне).
+// За всяка посока: MFE = макс. печалба (в ATR), tBest = бар на максимума, MAE = макс. загуба
+// до този бар (в ATR). По-успешна е посоката с по-голям резултат score = MFE − MAE;
+// записват се: посока, tp = MFE, sl = MAE, hold = tBest. Запис j е известен едва на бар j+H.
+// За текущата свещ i: за всеки показател известните записи се подреждат по близост до
+// стойността му (ранг → тежест 1 − ранг/N), тежестите се сумират; от топ K по обща тежест
+// buyPct = дял на тежестта на BUY-записите; tp/sl/hold = претеглено средно за доминиращата посока.
+const ANALOG_TOP_K = 20;
+const ANALOG_FEATURES = 7;
+
+function createAnalogEngine(candles, c, H, lb, K, simple) {
+  const n = candles.length;
+  const NF = ANALOG_FEATURES;
+  const F = [];
+  for (let f = 0; f < NF; f++) F.push(new Float64Array(n));
+  for (let j = 0; j < n; j++) {
+    const atr = c.atrV[j] || 1;
+    const ma = c.meanAtrV[j] || atr, mv = c.meanVolV[j] || 1;
+    const fv = [
+      rsiAt(c.rsiV, j, 14),
+      (c.ema20[j] - c.ema50[j]) / atr,
+      (c.macd.macdLine[j] - c.macd.signal[j]) / atr,
+      c.adxR.adx[j] || 0,
+      atr / (ma || 1),
+      (c.volV[j] || 0) / (mv || 1),
+      c.macd.histogram[j] / atr
+    ];
+    for (let f = 0; f < NF; f++) F[f][j] = isFinite(fv[f]) ? fv[f] : 0;
+  }
+  // Записи (известни от бар j+H нататък).
+  const rDir = new Int8Array(n), rTp = new Float64Array(n), rSl = new Float64Array(n), rHold = new Float64Array(n);
+  const valid = new Uint8Array(n);
+  for (let j = 30; j + H <= n - 1; j++) {
+    const atr = c.atrV[j] || 1, entry = candles[j].close;
+    let maxH = -Infinity, minL = Infinity;
+    let bMfe = 0, bMae = 0, bK = 1, sMfe = 0, sMae = 0, sK = 1;
+    for (let k = 1; k <= H; k++) {
+      const cd = candles[j + k];
+      if (cd.high > maxH) maxH = cd.high;
+      if (cd.low < minL) minL = cd.low;
+      const bm = (maxH - entry) / atr;
+      if (bm > bMfe) { bMfe = bm; bK = k; bMae = Math.max(0, (entry - minL) / atr); }
+      const sm = (entry - minL) / atr;
+      if (sm > sMfe) { sMfe = sm; sK = k; sMae = Math.max(0, (maxH - entry) / atr); }
+    }
+    const bScore = bMfe - bMae, sScore = sMfe - sMae;
+    if (bScore >= sScore) { rDir[j] = 1; rTp[j] = bMfe; rSl[j] = bMae; rHold[j] = bK; }
+    else { rDir[j] = 0; rTp[j] = sMfe; rSl[j] = sMae; rHold[j] = sK; }
+    valid[j] = 1;
+  }
+  // Сортирани по стойност масиви (по показател) на записите в прозореца.
+  const cap = Math.max(16, lb + 2);
+  const sv = [], si = [];
+  for (let f = 0; f < NF; f++) { sv.push(new Float64Array(cap)); si.push(new Int32Array(cap)); }
+  let m = 0;
+  const lowerBound = (arr, x) => { let lo = 0, hi = m; while (lo < hi) { const mid = (lo + hi) >> 1; if (arr[mid] < x) lo = mid + 1; else hi = mid; } return lo; };
+  const insert = (j) => {
+    for (let f = 0; f < NF; f++) {
+      const v = F[f][j], a = sv[f], b = si[f];
+      const pos = lowerBound(a, v);
+      a.copyWithin(pos + 1, pos, m); b.copyWithin(pos + 1, pos, m);
+      a[pos] = v; b[pos] = j;
+    }
+    m++;
+  };
+  const remove = (j) => {
+    for (let f = 0; f < NF; f++) {
+      const v = F[f][j], a = sv[f], b = si[f];
+      let pos = lowerBound(a, v);
+      while (pos < m && b[pos] !== j) pos++;
+      if (pos >= m) continue;
+      a.copyWithin(pos, pos + 1, m); b.copyWithin(pos, pos + 1, m);
+    }
+    m--;
+  };
+  const w = new Float64Array(n);
+  return {
+    // Към бар i в прозореца влиза записът j = i−H и излиза j = i−lb (прозорец j ∈ [i−lb+1, i−H]).
+    add(i) {
+      const jn = i - H;
+      if (jn >= 30 && valid[jn]) insert(jn);
+      const jo = i - lb;
+      if (jo >= 30 && valid[jo]) remove(jo);
+    },
+    evalAt(i) {
+      if (m < Math.max(K, 30)) return { buyPct: 50, plan: null };
+      // За всеки показател поотделно ВСИЧКИ известни записи се подреждат по близост;
+      // точките на записа = номерът му отзад напред (най-близкият = m, най-далечният = 1).
+      // Точките от всички показатели се сумират в общата тежест на записа.
+      const touched = [];
+      for (let f = 0; f < NF; f++) {
+        const a = sv[f], b = si[f], x = F[f][i];
+        let l = lowerBound(a, x) - 1, r = l + 1, pts = simple ? K : m;
+        // „Проста тежест“: само първите K най-близки записа (точки K…1), иначе всички (m…1).
+        for (let cnt = 0; (l >= 0 || r < m) && (!simple || cnt < K); cnt++) {
+          let id;
+          if (l < 0) id = b[r++];
+          else if (r >= m) id = b[l--];
+          else if (x - a[l] <= a[r] - x) id = b[l--];
+          else id = b[r++];
+          if (w[id] === 0) touched.push(id);
+          w[id] += pts--;
+        }
+      }
+      // Топ K записа по обща тежест.
+      const tId = [], tW = [];
+      for (let q = 0; q < touched.length; q++) {
+        const id = touched[q], tw = w[id]; w[id] = 0;
+        if (tId.length < K || tw > tW[tW.length - 1]) {
+          let p = tId.length;
+          while (p > 0 && tW[p - 1] < tw) p--;
+          tId.splice(p, 0, id); tW.splice(p, 0, tw);
+          if (tId.length > K) { tId.pop(); tW.pop(); }
+        }
+      }
+      let wb = 0, ws = 0;
+      for (let q = 0; q < tId.length; q++) { if (rDir[tId[q]] === 1) wb += tW[q]; else ws += tW[q]; }
+      if (wb + ws <= 0) return { buyPct: 50, plan: null };
+      const buyPct = 100 * wb / (wb + ws);
+      const dir = wb >= ws ? 1 : 0;
+      let sw = 0, tp = 0, sl = 0, hd = 0;
+      for (let q = 0; q < tId.length; q++) {
+        const id = tId[q]; if (rDir[id] !== dir) continue;
+        sw += tW[q]; tp += tW[q] * rTp[id]; sl += tW[q] * rSl[id]; hd += tW[q] * rHold[id];
+      }
+      const plan = sw > 0 ? {
+        dir: dir === 1 ? 'BUY' : 'SELL',
+        tpMult: Math.max(0.1, tp / sw), slMult: Math.max(0.2, 2 * sl / sw), hold: Math.max(1, Math.round(hd / sw))
+      } : null;
+      return { buyPct, plan };
+    }
+  };
+}
+
 // Causal (walk-forward) core shared by the bot series and the chart sequence.
 // At index i the statistics only include trades entered before i whose outcome
 // was already known by time i, and every baseline (ATR/volume mean, RSI) is
@@ -776,6 +913,10 @@ function computeModelProbCore(candles, modelIndex, opts) {
   const combosS = new Map();
   let totalWinsS = 0, totalTradesS = 0;
   const resolvedQS = [];
+  const analogH = (opts && opts.holdBars > 0) ? Math.min(500, Math.floor(opts.holdBars)) : 50;
+  const analog = (modelIndex === 9)
+    ? createAnalogEngine(candles, { rsiV, ema20, ema50, macd, atrV, adxR, volV, meanAtrV, meanVolV }, analogH, modelLb, (opts && opts.analogTop > 0) ? Math.floor(opts.analogTop) : ANALOG_TOP_K, !!(opts && opts.analogSimple))
+    : null;
   const combos = new Map();
   let totalWins = 0, totalTrades = 0;
   const recentTrades = [];
@@ -863,9 +1004,10 @@ function computeModelProbCore(candles, modelIndex, opts) {
       }
     }
 
+    if (analog) analog.add(i);
     // opts.onlyLast: нужна е само стойността за последния бар — скъпите модели (Уейвлет, Средна, Фурие)
     // не се смятат за останалите барове; статистиката по-горе е вече натрупана → последната стойност е идентична.
-    if (opts && opts.onlyLast && i < n - 1 && (modelIndex === 4 || modelIndex === 5 || modelIndex === 6)) continue;
+    if (opts && opts.onlyLast && i < n - 1 && (modelIndex === 4 || modelIndex === 5 || modelIndex === 6 || modelIndex === 9)) continue;
     let val;
     if (modelIndex === 0) {
       val = amplify(directionalProb(dirs));
@@ -885,6 +1027,10 @@ function computeModelProbCore(candles, modelIndex, opts) {
       const mask = maskAt(i);
       val = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
       if (combos.has(mask)) { const cc = combos.get(mask); if (cc.total > 0) val = (cc.wins / cc.total) * 100; }
+    } else if (modelIndex === 9) {
+      const ar = analog.evalAt(i);
+      val = ar.buyPct;
+      if (opts && opts.planOut) opts.planOut[i] = ar.plan;
     } else if (modelIndex === 2) {
       val = amplify(markovProb(dirs));
     } else if (modelIndex === 3) {
@@ -930,6 +1076,8 @@ function computeModelProbCore(candles, modelIndex, opts) {
 // Връща масив, подравнен с `candles` (null за загряващия прозорец), всеки
 // елемент { time, buyPct, sellPct } — строго причинен (без бъдеще).
 function computeModelProbSeries(candles, modelIndex, opts) {
+  let planOut = null;
+  if (modelIndex === 9) { planOut = []; opts = Object.assign({}, opts, { planOut }); }
   const vals = computeModelProbCore(candles, modelIndex, opts);
   if (!vals) return [];
   const n = candles.length;
@@ -937,6 +1085,7 @@ function computeModelProbSeries(candles, modelIndex, opts) {
   for (let i = 0; i < n; i++) {
     if (vals[i] == null) continue;
     result[i] = { time: candles[i].time, buyPct: vals[i], sellPct: 100 - vals[i] };
+    if (planOut && planOut[i]) result[i].plan = planOut[i];
   }
   return result;
 }

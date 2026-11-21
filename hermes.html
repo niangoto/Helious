@@ -1275,7 +1275,7 @@
                 <label class="chk" title="Вместо фиксиран SL: затваря, когато P(обратна посока) [0..1] × плаващата загуба достигне лимита. TP по цена продължава да работи."><input type="checkbox" id="inpPctClose"> Процентно затваряне <input type="number" id="inpPctCloseLimit" value="0" min="0" step="1" style="width:80px" title="Лимит (€). 0 = авто: дължината до SL в €."></label>
                 <label class="chk" title="Ползва датите от/до. Изключено — теглят се последните свещи."><input type="checkbox" id="inpUseDates" checked onchange="toggleDates()"> Времеви период</label>
                 <label class="chk" title="За всеки бар моделът се смята САМО върху последните „Поглед назад“ свещи (индикаторите — от началото на този прозорец). Нищо от по-старата история и от началото на симулацията не влияе — както в HEROS. По-бавно е."><input type="checkbox" id="inpStrictWindow"> Само прозорец назад</label>
-                <label class="chk" title="При включване входната цена се влошава със спреда — BUY по-високо, SELL по-ниско. Спредът НЕ се тегли директно от сметката."><input type="checkbox" id="inpPriceWithSpread"> Цена със спред</label>
+                <label class="chk" id="analogSimpleBox" style="display:none" title="Модел „Аналози“: за всеки показател се взимат само първите 20 най-близки записа (точки 20…1); иначе се подреждат всички записи (точки N…1)."><input type="checkbox" id="inpAnalogSimple"> Проста тежест</label>
             </div>
         <div class="contra-box" id="contraBox" style="display:none">
             <span class="contra-title">Контра по модели (при „Средна вероятност“)</span>
@@ -1313,6 +1313,10 @@
             <canvas id="simPnlCanvas" onmousemove="onPnlHover(event)" onmouseleave="hidePnlTip()"></canvas>
             <div class="chart-tip" id="pnlHoverTip"></div>
             <span class="pnl-label" id="simPnlLabel">Печалба/Загуба %</span>
+        </div>
+        <div class="pnl-wrap" id="simProbWrap">
+            <canvas id="simProbCanvas"></canvas>
+            <span class="pnl-label">Вероятност Buy % (сметната)</span>
         </div>
     </section>
 
@@ -1398,7 +1402,7 @@
         // По подразбиране: интервал 1ч (период '7d' → интервал '1h'), модел „Логистична“ (1).
         let activePeriod = params.get('period') || '7d';
         let currentModel = parseInt(params.get('model') || '1', 10);
-        if (isNaN(currentModel) || currentModel < 0 || currentModel > 7) currentModel = 1;
+        if (isNaN(currentModel) || currentModel < 0 || currentModel > 9) currentModel = 1;
 
         const periodConfigs = {
             '5m': { interval: '1m', limit: 500 },
@@ -1486,7 +1490,7 @@
         // напр. 1м за ~34 дни; над това периодът се скъсява (вижда се в #periodInfo).
         const MAX_FETCH = 50000;
 
-        const modelNames = ['Историческа', 'Логистична', 'Марковска', 'Очаквана стойност', 'Уейвлет', 'Средна вероятност', 'Фурие', 'RSI анализ', 'Логистична 2'];
+        const modelNames = ['Историческа', 'Логистична', 'Марковска', 'Очаквана стойност', 'Уейвлет', 'Средна вероятност', 'Фурие', 'RSI анализ', 'Логистична 2', 'Аналози (близост)'];
 
         let cancelFlag = false;
         let running = false;
@@ -1637,6 +1641,24 @@
             const mSel = document.getElementById('inpModel');
             if (!box || !mSel) return;
             box.style.display = parseInt(mSel.value, 10) === 5 ? 'flex' : 'none';
+            // „Аналози“ (9) сам определя TP, SL и времето за затваряне → скриваме ненужните полета/отметки.
+            const an = parseInt(mSel.value, 10) === 9;
+            const asb = document.getElementById('analogSimpleBox'); if (asb) asb.style.display = an ? '' : 'none';
+            const hideEl = (el, on) => { if (el) el.style.display = on ? 'none' : ''; };
+            ['inpTp', 'inpSl'].forEach(id => { const el = document.getElementById(id); hideEl(el && el.closest('label'), an); });
+            const pc = document.getElementById('inpPctClose'); hideEl(pc && pc.closest('label'), an);
+            if (an && pc) pc.checked = false;
+            const hold = document.getElementById('inpHold');
+            if (hold && hold.closest('label')) {
+                const lab = hold.closest('label');
+                if (!lab.dataset.orig) lab.dataset.orig = lab.firstChild.textContent;
+                lab.firstChild.textContent = an ? 'Макс. време за анализ/затваряне (барове) ' : lab.dataset.orig;
+            }
+            document.querySelectorAll('#sweepFactors .swf').forEach(cb => {
+                const hide = an && (cb.dataset.input === 'inpTp' || cb.dataset.input === 'inpSl');
+                hideEl(cb.closest('label'), hide);
+                if (hide) cb.checked = false;
+            });
         }
 
         // Флагове за обръщане на Buy↔Sell по всеки от 5-те модела в средната.
@@ -2101,7 +2123,54 @@
             }
         }
 
+        let probPctArr = [];
         function drawPnlChart(upto) {
+            drawPnlChartCore(upto);
+            drawProbChart(upto);
+        }
+        // Табло с Buy % (сметната вероятност) по бар; над 50 зелено, под 50 червено.
+        function drawProbChart(upto) {
+            const cvs = document.getElementById('simProbCanvas');
+            if (!cvs || !simChart || !simChartCandles.length) return;
+            const w = cvs.clientWidth, h = cvs.clientHeight;
+            if (w <= 0 || h <= 0) return;
+            const dpr = window.devicePixelRatio || 1;
+            cvs.width = w * dpr; cvs.height = h * dpr;
+            const ctx = cvs.getContext('2d');
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            ctx.clearRect(0, 0, w, h);
+            const end = (typeof upto === 'number') ? Math.min(upto, simChartCandles.length - 1) : simChartCandles.length - 1;
+            const toY = v => h - 6 - (v / 100) * (h - 12);
+            const midY = toY(50);
+            ctx.fillStyle = 'rgba(0,255,102,0.05)'; ctx.fillRect(0, 0, w, midY);
+            ctx.fillStyle = 'rgba(255,0,85,0.05)'; ctx.fillRect(0, midY, w, h - midY);
+            ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+            ctx.beginPath(); ctx.moveTo(0, midY); ctx.lineTo(w, midY); ctx.stroke();
+            ctx.font = '9px JetBrains Mono'; ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+            ctx.fillStyle = 'rgba(255,255,255,0.6)';
+            ctx.fillText('100%', w - 4, toY(100)); ctx.fillText('50%', w - 4, midY); ctx.fillText('0%', w - 4, toY(0));
+            const pts = [];
+            for (let i = 30; i <= end; i++) {
+                const v = probPctArr[i];
+                if (v == null) continue;
+                const x = simChart.timeScale().timeToCoordinate(simChartCandles[i].time);
+                if (x == null || x < -20) continue;
+                if (x > w + 20) break;
+                pts.push({ x, v });
+            }
+            if (pts.length < 2) return;
+            ctx.lineWidth = 1.4;
+            for (let i = 1; i < pts.length; i++) {
+                const a = pts[i - 1], b = pts[i];
+                ctx.beginPath(); ctx.moveTo(a.x, toY(a.v)); ctx.lineTo(b.x, toY(b.v));
+                ctx.strokeStyle = b.v >= 50 ? 'rgba(0,255,102,0.9)' : 'rgba(255,0,85,0.9)';
+                ctx.stroke();
+            }
+            const L = pts[pts.length - 1];
+            ctx.textAlign = 'left'; ctx.fillStyle = '#fff';
+            ctx.fillText('Buy ' + L.v.toFixed(1) + '% / Sell ' + (100 - L.v).toFixed(1) + '%', 8, 22);
+        }
+        function drawPnlChartCore(upto) {
             const cvs = document.getElementById('simPnlCanvas');
             if (!cvs || !simChart || !simChartCandles.length) return;
             const w = cvs.clientWidth, h = cvs.clientHeight;
@@ -2429,7 +2498,7 @@
         // TP/SL (ATR множители) на реалните поръчки — ползват се и от виртуалните сделки на модел 8.
         function virtTpSl(P) {
             const al = (P && P.alpha > 0) ? P.alpha : 1;
-            return { tpMult: ((P && P.tpMult > 0) ? P.tpMult : 2) * al, slMult: ((P && P.slMult > 0) ? P.slMult : 1) * al };
+            return { tpMult: ((P && P.tpMult > 0) ? P.tpMult : 2) * al, slMult: ((P && P.slMult > 0) ? P.slMult : 1) * al, holdBars: (P && P.holdBars > 0) ? P.holdBars : 50, analogSimple: !!(P && P.analogSimple) };
         }
 
         function readParams() {
@@ -2449,13 +2518,13 @@
                 minLotUnit: ((document.getElementById('inpMinLotUnit') || {}).value === 'value') ? 'value' : 'lot',
                 minLotSpread: Math.max(0, parseFloat((document.getElementById('inpMinLotSpread') || {}).value) || 0),
                 spreadUnit: ((document.getElementById('inpSpreadUnit') || {}).value === 'pct') ? 'pct' : 'eur',
-                priceWithSpread: !!((document.getElementById('inpPriceWithSpread') || {}).checked),
                 pctClose: !!((document.getElementById('inpPctClose') || {}).checked),
                 pctCloseLimit: Math.max(0, parseFloat((document.getElementById('inpPctCloseLimit') || {}).value) || 0),
                 lookback: Math.max(30, Math.min(50000, parseInt((document.getElementById('inpLookback') || {}).value, 10) || 3000)),
                 dynPeriod: 200,
                 lookbackGrow: false,   // променливият поглед е премахнат
                 strictWindow: !!((document.getElementById('inpStrictWindow') || {}).checked),
+                analogSimple: !!((document.getElementById('inpAnalogSimple') || {}).checked),
                 reverse: document.getElementById('inpReverse').checked,
                 reversal: !!((document.getElementById('inpReversal') || {}).checked)
             };
@@ -2809,10 +2878,9 @@
             let tradeCount = 0, winsCount = 0;
             let buyOpened = 0, sellOpened = 0;   // колко позиции са отворени като BUY / SELL
             let legs = [];
-            // P/L без спреда: ползваме пазарния вход (връщаме отместването fillShift).
+            // P/L без спреда (спредът се тегли директно от капитала, входът е по пазарната цена).
             const pnlExOf = (pos, exitPrice) => {
-                const entryEx = pos.dir === 'BUY' ? pos.entry - (pos.fillShift || 0) : pos.entry + (pos.fillShift || 0);
-                return (pos.dir === 'BUY' ? (exitPrice - entryEx) : (entryEx - exitPrice)) * pos.units * (pos.fx || 1);
+                return (pos.dir === 'BUY' ? (exitPrice - pos.entry) : (pos.entry - exitPrice)) * pos.units * (pos.fx || 1);
             };
             let pnlExSum = 0;
             // „Минимален обем“ за нормализиране на печалбата (конфигурираният мин. лот).
@@ -2863,6 +2931,7 @@
                 simBudget = P.budget;
                 simI0 = i0;
                 equityPct = new Array(n).fill(null);
+                probPctArr = new Array(n).fill(null);
             }
             let simLastYield = performance.now();
             for (let i = i0; i < n; i++) {
@@ -2964,6 +3033,7 @@
                 }
 
                 const prScaled = curProbs[i];
+                if (!silent) probPctArr[i] = prScaled ? prScaled.buyPct : null;
 
                 if (legs.length) {
                     const c = candles[i];
@@ -3000,7 +3070,7 @@
                                 if (pOpp * loss >= limit - 1e-9) { exitPrice = c.close; reason = 'Процентно'; }
                             }
                         }
-                        if (exitPrice === null && held >= P.holdBars) { exitPrice = c.close; reason = 'Време'; }
+                        if (exitPrice === null && held >= (pos.hold > 0 ? pos.hold : P.holdBars)) { exitPrice = c.close; reason = 'Време'; }
                         if (exitPrice !== null) {
                             const pnl = (pos.dir === 'BUY'
                                 ? (exitPrice - pos.entry) * pos.units
@@ -3081,8 +3151,10 @@
                         const fx = fxFor(currentSymbol);   // котирана валута → EUR
 
                         // (3) R:R — рискът разширява/стеснява TP и SL (агресивен: далечен SL + голям TP)
-                        const tpDist = P.tpMult * alpha * atr;
-                        const slDist = P.slMult * alpha * atr;
+                        // Модел 9 („Аналози“) сам предлага TP/SL (в ATR) и времево затваряне.
+                        const plan = (currentModel === 9 && pr.plan) ? pr.plan : null;
+                        const tpDist = plan ? plan.tpMult * atr : P.tpMult * alpha * atr;
+                        const slDist = plan ? plan.slMult * atr : P.slMult * alpha * atr;
                         const gain = tpDist;
                         const loss = slDist;
 
@@ -3097,6 +3169,7 @@
                         let dir = null;
                         if (buyPct >= buyPmin && evLong > P.minEv) dir = 'BUY';
                         else if (sellPct >= sellPmin && evShort > P.minEv) dir = 'SELL';
+                        if (plan && dir && dir !== plan.dir) dir = null;
 
                         if (dir) {
                             const p = dir === 'BUY' ? pRise : pFall;
@@ -3141,7 +3214,7 @@
                                     // При „цена със спред“ спредът е в цената на входа, а не
                                     // допълнителен разход — затова не го добавяме към
                                     // изисквания свободен маржин.
-                                    const perUnitCost = perUnitMargin + (P.priceWithSpread ? 0 : perUnitSpread);
+                                    const perUnitCost = perUnitMargin + perUnitSpread;
                                     const maxUnits = perUnitCost > 0 ? freeMargin / perUnitCost : 0;
                                     units = Math.min(units, maxUnits);
                                     let lots = Math.floor((units / spec.contract) / minLot + 1e-9) * minLot;
@@ -3152,18 +3225,7 @@
                                     // Само обратната посока, ако е избрана (влиза в посоката на спреда).
                                     if (P.reverse) dir = dir === 'BUY' ? 'SELL' : 'BUY';
                                     const spreadCost = perUnitSpread * finalUnits;
-                                    // Вход: при „Цена със спред“ смятаме при каква нова цена
-                                    // разликата спрямо текущата, процентно върху въображаемата
-                                    // (предстоящата) позиция, е равна на спреда:
-                                    //   (нова − текуща) / текуща = spreadCost / notional.
-                                    // BUY → по-висока цена, SELL → по-ниска.
-                                    const imagNotional = finalUnits * entry * fx;   // стойност на позицията сега
-                                    const spreadPct = imagNotional > 0 ? spreadCost / imagNotional : 0;
-                                    let fill = entry, fillShift = 0;
-                                    if (P.priceWithSpread && spreadPct > 0) {
-                                        fillShift = entry * spreadPct;               // ценовата разлика
-                                        fill = (dir === 'BUY') ? entry + fillShift : entry - fillShift;
-                                    }
+                                    const fill = entry;   // вход по пазарната цена; спредът се тегли от капитала
                                     // Маржинът/нотионалът са по реалната цена на входа; TP/SL са
                                     // спрямо пазарната цена (сигнала), затова при изместен вход
                                     // рискът до SL включва и спреда.
@@ -3172,16 +3234,11 @@
                                     const tpPrice = dir === 'BUY' ? entry + tpDist : entry - tpDist;
                                     const slPrice = dir === 'BUY' ? entry - slDist : entry + slDist;
                                     const riskCost = Math.abs(fill - slPrice) * finalUnits * fx;
-                                    const upfrontCost = P.priceWithSpread ? 0 : spreadCost;
-                                    // При „цена със спред“ лошият вход може вече да е зад TP
-                                    // (спредът изяжда цялата печалба) → не отваряме изобщо.
-                                    const badEntry = P.priceWithSpread && (dir === 'BUY'
-                                        ? (fill >= tpPrice || fill <= slPrice)
-                                        : (fill <= tpPrice || fill >= slPrice));
+                                    const upfrontCost = spreadCost;
                                     // Отваряме само ако свободният маржин покрива маржин +
                                     // (при директно теглене) спред + риск до SL.
                                     // Реверс: само при ОБРАТНА посока; в същата — старата си остава.
-                                    if (lots >= minLot && margin > 0 && !badEntry && margin + upfrontCost <= freeMargin + 1e-9 && riskCost <= freeMargin + 1e-9 && notional >= 1
+                                    if (lots >= minLot && margin > 0 && margin + upfrontCost <= freeMargin + 1e-9 && riskCost <= freeMargin + 1e-9 && notional >= 1
                                         && (!legs.length || legs[0].dir !== dir)) {
                                         const t = candles[i].time;
                                         if (legs.length) {
@@ -3199,6 +3256,7 @@
                                             sl: slPrice,
                                             atr,
                                             openIdx: i,
+                                            hold: plan ? plan.hold : null,
                                             prob: (dir === 'BUY' ? pRise : pFall) * 100,
                                             buyPct, sellPct,
                                             margin,
@@ -3206,7 +3264,6 @@
                                             openTime: t,
                                             alpha,
                                             spread: spreadCost,
-                                            fillShift,
                                             fx
                                         }];
                                         // При директния режим спредът се взима от капитала;
@@ -3348,20 +3405,22 @@
                 const effW = grow ? (w + Math.max(0, i - start)) : w;
                 const s0 = Math.max(0, i - effW + 1);
                 const win = candles.slice(s0, i + 1);
-                let v = null;
+                let v = null, plan = null;
                 try {
+                    const planOut = [];
                     const vals = (typeof computeModelProbCore === 'function')
-                        ? computeModelProbCore(win, modelIndex, Object.assign({}, opts, { lookback: effW, onlyLast: true }))
+                        ? computeModelProbCore(win, modelIndex, Object.assign({}, opts, { lookback: effW, onlyLast: true, planOut }))
                         : null;
                     if (vals && vals[vals.length - 1] != null) {
                         v = vals[vals.length - 1];
+                        plan = planOut[win.length - 1] || null;
                     } else {
                         const ser = computeModelProbSeries(win, modelIndex, Object.assign({}, opts, { lookback: w }));
                         const last = ser && ser[ser.length - 1];
                         if (last) v = last.buyPct;
                     }
                 } catch (e) { v = null; }
-                if (v != null) out[i] = { time: candles[i].time, buyPct: v, sellPct: 100 - v };
+                if (v != null) { out[i] = { time: candles[i].time, buyPct: v, sellPct: 100 - v }; if (plan) out[i].plan = plan; }
                 if (((i - start) % 20 === 0) || i === n - 1) {
                     if (typeof progressCb === 'function') progressCb(i, n, w);
                     else setProgress(Math.round(((i - start + 1) / total) * 100), 'Строг прозорец (' + w + '): бар ' + (i + 1) + '/' + n + '...');
@@ -3864,6 +3923,7 @@
                     + '<input type="checkbox" class="swf" data-input="' + inputId + '" data-key="' + key + '"> '
                     + SWEEP_LABELS[inputId] + '</label>';
             }).join('');
+            updateContraVisibility();
         }
 
         // Връща достатъчно точна стойност за запис в поле (без закръгляне на
@@ -4267,7 +4327,6 @@
                 el.textContent = txt;
                 return;
             }
-            const priceWithSpread = !!((document.getElementById('inpPriceWithSpread') || {}).checked);
             // € стойност за 1 мин. обем: при '€' е въведената сума (валидна при текущата
             // цена и мащабирана с нея), при '%' е процент от сумата (нотионала) на мин. лот.
             const spreadUnit = ((document.getElementById('inpSpreadUnit') || {}).value === 'pct') ? 'pct' : 'eur';
@@ -4276,18 +4335,8 @@
             const spreadTxt = (spreadUnit === 'pct')
                 ? 'Спред ' + spread + '% от сумата за отваряне = ' + fmtAmt(spreadEur) + ' €'
                 : 'Спред ' + fmtAmt(spreadEur) + ' € (при текущата цена)';
-            const modeTxt = priceWithSpread
-                ? ' влиза в цената на входа (BUY по-високо / SELL по-ниско; N мин. обема = N×).'
-                : ' взима се от сметката при отваряне (N мин. обема = N×).';
+            const modeTxt = ' взима се от сметката при отваряне (N мин. обема = N×).';
             txt += ' ' + spreadTxt + ' на мин. обем (' + minLot.toFixed(2) + ' лот),' + modeTxt;
-            if (priceWithSpread && price > 0 && units > 0) {
-                // Процентът на спреда спрямо стойността на (въображаемата) позиция
-                // определя с колко се измества цената на входа.
-                const notionalMin = units * price * fx;
-                const shPct = notionalMin > 0 ? (spreadEur / notionalMin) * 100 : 0;
-                const shAbs = price * shPct / 100;
-                txt += ' → цената се измества с ' + shPct.toFixed(3) + '% (' + fmtAmt(shAbs) + ' при цена ' + price.toFixed(dec) + ').';
-            }
             if (atr > 0) {
                 const tpEur = tpDist * units * fx;          // потенциална печалба до TP за мин. обем
                 if (spreadEur >= tpEur) {
@@ -4350,7 +4399,6 @@
             { id: 'inpMinLotUnit', type: 'value' },
             { id: 'inpMinLotSpread', type: 'value' },
             { id: 'inpSpreadUnit', type: 'value' },
-            { id: 'inpPriceWithSpread', type: 'checkbox' },
             { id: 'inpPctClose', type: 'checkbox' },
             { id: 'inpPctCloseLimit', type: 'value' },
             { id: 'inpReverse', type: 'checkbox' },
@@ -4358,6 +4406,7 @@
             { id: 'inpModel', type: 'value' },
             { id: 'inpLookback', type: 'value' },
             { id: 'inpStrictWindow', type: 'checkbox' },
+            { id: 'inpAnalogSimple', type: 'checkbox' },
             { id: 'inpInterval', type: 'value' },
             { id: 'inpSpeed', type: 'value' },
             { id: 'inpUseDates', type: 'checkbox' },
@@ -4950,7 +4999,7 @@
                 if (cmp.stop) return null;
                 const startIdx0 = candles.findIndex(c => c.time >= fromS);
                 if (startIdx0 < 0 || candles.length - startIdx0 < 30) throw new Error('Периодът покрива под 30 свещи');
-                const pkey = ckey + '|' + model + '|' + P.lookback + '|' + (model === 8 ? virtTpSl(P).tpMult + '/' + virtTpSl(P).slMult : '') + '|' + invert.join('') + '|' + '|' + (P.strictWindow ? 's' + startIdx0 : 'n');
+                const pkey = ckey + '|' + model + '|' + P.lookback + '|' + (model === 8 ? virtTpSl(P).tpMult + '/' + virtTpSl(P).slMult : (model === 9 ? 'h' + virtTpSl(P).holdBars + (P.analogSimple ? 's' : '') : '')) + '|' + invert.join('') + '|' + '|' + (P.strictWindow ? 's' + startIdx0 : 'n');
                 let probs = cmp.probsCache.get(pkey);
                 if (!probs) {
                     row.stage = 'изчисляване на вероятностите...'; cmpRenderTable();
@@ -5386,8 +5435,6 @@
             });
             const unitSel = document.getElementById('inpSpreadUnit');
             if (unitSel) unitSel.addEventListener('change', updateMinLotSpreadHint);
-            const pwsEl = document.getElementById('inpPriceWithSpread');
-            if (pwsEl) pwsEl.addEventListener('change', updateMinLotSpreadHint);
             // Смяна на единицата на мин. обем → преизчислява от Binance (лот/цена).
             const mlUnitSel = document.getElementById('inpMinLotUnit');
             if (mlUnitSel) mlUnitSel.addEventListener('change', () => autoFillInstrument());
