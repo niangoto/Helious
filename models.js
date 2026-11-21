@@ -918,7 +918,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
   let totalWinsS = 0, totalTradesS = 0;
   const resolvedQS = [];
   // Модел 10: линия на Аналози (двойна средна на buyPct на модел 9) → наклон (производна).
-  const slopeN = (opts && opts.analogAvg > 0) ? Math.floor(opts.analogAvg) : 50;
+  const slopeN = (opts && opts.analogAvg > 0) ? Math.floor(opts.analogAvg) : 200;
   const slopeK = (opts && opts.slopeK > 0) ? opts.slopeK : 0.03;
   const anaBuy = (modelIndex === 10) ? new Float64Array(n).fill(NaN) : null;
   const anaAvg1 = (modelIndex === 10) ? new Float64Array(n).fill(NaN) : null;
