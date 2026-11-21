@@ -1259,6 +1259,7 @@
                 <label>TP = ×ATR (α=1) <input type="number" id="inpTp" value="2" min="0.1" step="0.1"></label>
                 <label>SL = ×ATR (α=1) <input type="number" id="inpSl" value="1.0" min="0.1" step="0.1"></label>
                 <label>Времево затваряне (барове) <input type="number" id="inpHold" value="200" min="1" step="1"></label>
+                <label id="analogAvgBox" style="display:none" title="Модел „Аналози“: средна на Buy % за последните N свещи. Рисува се като жълта линия и се ползва вместо суровата стойност при проверката за вход. 1 = без осредняване.">Средна вероятност (свещи) <input type="number" id="inpAnalogAvg" value="5" min="1" max="500" step="1"></label>
                 <label>Кели (дробна част) <input type="number" id="inpKelly" value="0.25" min="0.01" step="0.05"></label>
                 <label>Кели (макс. фракция) <input type="number" id="inpMaxKelly" value="0.05" min="0.01" max="1" step="0.05"></label>
                 <label title="Минималният обем: в лотове или като МАРЖИН (€) за един минимален обем. При маржин реалната позиция (нотионал) = маржин × ливъридж.">Мин. обем <select id="inpMinLotUnit" style="width:auto"><option value="lot">лот</option><option value="value">маржин (€)</option></select> <input type="number" id="inpMinLot" value="0.01" min="0.00001" step="any"></label>
@@ -1644,6 +1645,7 @@
             box.style.display = parseInt(mSel.value, 10) === 5 ? 'flex' : 'none';
             // „Аналози“ (9) сам определя TP, SL и времето за затваряне → скриваме ненужните полета/отметки.
             const an = parseInt(mSel.value, 10) === 9;
+            const aab = document.getElementById('analogAvgBox'); if (aab) aab.style.display = an ? '' : 'none';
             const asb = document.getElementById('analogSimpleBox'); if (asb) asb.style.display = an ? '' : 'none';
             const hideEl = (el, on) => { if (el) el.style.display = on ? 'none' : ''; };
             ['inpTp', 'inpSl'].forEach(id => { const el = document.getElementById(id); hideEl(el && el.closest('label'), an); });
@@ -2125,6 +2127,7 @@
         }
 
         let probPctArr = [];
+        let probAvgArr = [];
         let probHover = [];
         function onProbHover(ev) {
             const tip = document.getElementById('probHoverTip');
@@ -2139,7 +2142,8 @@
             const tstr = dt.toLocaleString('bg-BG', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
             tip.style.display = 'block';
             tip.style.left = Math.max(2, Math.min(Math.max(2, rect.width - 190), best.x - 80)) + 'px';
-            tip.innerHTML = `${tstr}<br>Buy <b style="color:#00ff66">${best.v.toFixed(1)}%</b> / Sell <b style="color:#ff0055">${(100 - best.v).toFixed(1)}%</b>`;
+            const av = probAvgArr[best.idx];
+            tip.innerHTML = `${tstr}<br>Buy <b style="color:#00ff66">${best.v.toFixed(1)}%</b> / Sell <b style="color:#ff0055">${(100 - best.v).toFixed(1)}%</b>` + (av != null ? `<br>Средна: <b style="color:#ffd400">${av.toFixed(1)}%</b>` : '');
         }
         function hideProbTip() {
             const tip = document.getElementById('probHoverTip');
@@ -2177,7 +2181,7 @@
                 const x = simChart.timeScale().timeToCoordinate(simChartCandles[i].time);
                 if (x == null || x < -20) continue;
                 if (x > w + 20) break;
-                pts.push({ x, v, time: simChartCandles[i].time });
+                pts.push({ x, v, time: simChartCandles[i].time, idx: i });
             }
             probHover = pts;
             if (pts.length < 2) return;
@@ -2188,6 +2192,17 @@
                 ctx.strokeStyle = b.v >= 50 ? 'rgba(0,255,102,0.9)' : 'rgba(255,0,85,0.9)';
                 ctx.stroke();
             }
+            // Средна линия на вероятността (модел 9)
+            ctx.beginPath(); let started = false;
+            for (let i = 30; i <= end; i++) {
+                const v = probAvgArr[i];
+                if (v == null) continue;
+                const x = simChart.timeScale().timeToCoordinate(simChartCandles[i].time);
+                if (x == null || x < -20) continue;
+                if (x > w + 20) break;
+                if (!started) { ctx.moveTo(x, toY(v)); started = true; } else ctx.lineTo(x, toY(v));
+            }
+            if (started) { ctx.lineWidth = 1.8; ctx.strokeStyle = '#ffd400'; ctx.stroke(); }
             const L = pts[pts.length - 1];
             ctx.textAlign = 'left'; ctx.fillStyle = '#fff';
             ctx.fillText('Buy ' + L.v.toFixed(1) + '% / Sell ' + (100 - L.v).toFixed(1) + '%', 8, 22);
@@ -2546,6 +2561,7 @@
                 dynPeriod: 200,
                 lookbackGrow: false,   // променливият поглед е премахнат
                 strictWindow: !!((document.getElementById('inpStrictWindow') || {}).checked),
+                analogAvg: Math.max(1, Math.min(500, parseInt((document.getElementById('inpAnalogAvg') || {}).value) || 1)),
                 analogSimple: !!((document.getElementById('inpAnalogSimple') || {}).checked),
                 reverse: document.getElementById('inpReverse').checked,
                 reversal: !!((document.getElementById('inpReversal') || {}).checked)
@@ -2954,6 +2970,7 @@
                 simI0 = i0;
                 equityPct = new Array(n).fill(null);
                 probPctArr = new Array(n).fill(null);
+                probAvgArr = new Array(n).fill(null);
             }
             let simLastYield = performance.now();
             for (let i = i0; i < n; i++) {
@@ -3056,6 +3073,15 @@
 
                 const prScaled = curProbs[i];
                 if (!silent) probPctArr[i] = prScaled ? prScaled.buyPct : null;
+                // Модел 9: средна на Buy % за последните N свещи (ползва се при входа и се рисува).
+                let prAvg = null;
+                if (currentModel === 9 && prScaled) {
+                    const N = Math.max(1, P.analogAvg || 1);
+                    let sum = 0, cnt = 0;
+                    for (let q = i; q > i - N && q >= 0; q--) { const e = curProbs[q]; if (e) { sum += e.buyPct; cnt++; } }
+                    if (cnt) prAvg = { buyPct: sum / cnt, sellPct: 100 - sum / cnt, plan: prScaled.plan };
+                    if (!silent && prAvg) probAvgArr[i] = prAvg.buyPct;
+                }
 
                 if (legs.length) {
                     const c = candles[i];
@@ -3164,7 +3190,7 @@
                 }
 
                 if ((!legs.length || P.reversal) && i < n - 1 && marketOpen(currentSymbol, candles[i].time)) {
-                    const pr = prScaled;
+                    const pr = prAvg || prScaled;
                     if (pr) {
                         const buyPct = pr.buyPct, sellPct = pr.sellPct;
                         const atr = atrSeries[i] || atrSeries[atrSeries.length - 1] || 1;
@@ -4429,6 +4455,7 @@
             { id: 'inpLookback', type: 'value' },
             { id: 'inpStrictWindow', type: 'checkbox' },
             { id: 'inpAnalogSimple', type: 'checkbox' },
+            { id: 'inpAnalogAvg', type: 'value' },
             { id: 'inpInterval', type: 'value' },
             { id: 'inpSpeed', type: 'value' },
             { id: 'inpUseDates', type: 'checkbox' },
