@@ -918,8 +918,8 @@ function computeModelProbCore(candles, modelIndex, opts) {
   let totalWinsS = 0, totalTradesS = 0;
   const resolvedQS = [];
   // Модел 10: линия на Аналози (двойна средна на buyPct на модел 9) → наклон (производна).
-  const slopeN = (opts && opts.analogAvg > 0) ? Math.floor(opts.analogAvg) : 5;
-  const slopeK = (opts && opts.slopeK > 0) ? opts.slopeK : 0.1;
+  const slopeN = (opts && opts.analogAvg > 0) ? Math.floor(opts.analogAvg) : 50;
+  const slopeK = (opts && opts.slopeK > 0) ? opts.slopeK : 0.03;
   const anaBuy = (modelIndex === 10) ? new Float64Array(n).fill(NaN) : null;
   const anaAvg1 = (modelIndex === 10) ? new Float64Array(n).fill(NaN) : null;
   const anaLine = (modelIndex === 10) ? new Float64Array(n).fill(NaN) : null;
@@ -1015,7 +1015,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
     }
 
     if (analog) analog.add(i);
-    if (modelIndex === 10 && opts && opts.onlyLast && i < n - 2 * slopeN - 4) continue;
+    if (modelIndex === 10 && opts && opts.onlyLast && i < n - 1 - 6 * slopeN) continue;
     // opts.onlyLast: нужна е само стойността за последния бар — скъпите модели (Уейвлет, Средна, Фурие)
     // не се смятат за останалите барове; статистиката по-горе е вече натрупана → последната стойност е идентична.
     if (opts && opts.onlyLast && i < n - 1 && (modelIndex === 4 || modelIndex === 5 || modelIndex === 6 || modelIndex === 9)) continue;
@@ -1035,17 +1035,13 @@ function computeModelProbCore(candles, modelIndex, opts) {
       const wS = (cS.wins + K8 * baseS) / (cS.total + K8);
       val = (wL + wS) > 0 ? (wL / (wL + wS)) * 100 : 50;
       if (modelIndex === 10) {
-        // Линия от Аналози: avg1 = средна на последните N buyPct, линия = средна на последните N avg1.
+        // Линия от Аналози: EMA(N) на сурови buyPct (N = analogAvg, по подразбиране 50).
         anaBuy[i] = analog.evalAt(i).buyPct;
-        let sm = 0, c1 = 0;
-        for (let q = i; q > i - slopeN && q >= 0; q--) if (!isNaN(anaBuy[q])) { sm += anaBuy[q]; c1++; }
-        if (c1) anaAvg1[i] = sm / c1;
-        let s2 = 0, c2 = 0;
-        for (let q = i; q > i - slopeN && q >= 0; q--) if (!isNaN(anaAvg1[q])) { s2 += anaAvg1[q]; c2++; }
-        if (c2) anaLine[i] = s2 / c2;
+        const aE = 2 / (slopeN + 1);
+        anaLine[i] = (i > 0 && !isNaN(anaLine[i - 1])) ? anaLine[i - 1] + aE * (anaBuy[i] - anaLine[i - 1]) : anaBuy[i];
         if (i > 0 && !isNaN(anaLine[i]) && !isNaN(anaLine[i - 1])) {
-          // tg(ъгъл) = производна на линията (процентни пункта на бар) × slopeK
-          const tg = Math.max(-0.9, Math.min(0.9, (anaLine[i] - anaLine[i - 1]) * slopeK));
+          // tg = производна на линията × (N+1)/2 × slopeK (≈ сурова − EMA; мащабът не зависи от N)
+          const tg = Math.max(-0.9, Math.min(0.9, (anaLine[i] - anaLine[i - 1]) * (slopeN + 1) / 2 * slopeK));
           const kB = 1 + tg, kS = 1 - tg;
           const b = val, sl2 = 100 - val;
           val = (b * kB + sl2 * kS) > 0 ? (b * kB) / (b * kB + sl2 * kS) * 100 : 50;

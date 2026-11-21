@@ -1259,7 +1259,7 @@
                 <label>TP = ×ATR (α=1) <input type="number" id="inpTp" value="2" min="0.1" step="0.1"></label>
                 <label>SL = ×ATR (α=1) <input type="number" id="inpSl" value="1.0" min="0.1" step="0.1"></label>
                 <label>Времево затваряне (барове) <input type="number" id="inpHold" value="200" min="1" step="1"></label>
-                <label id="analogAvgBox" style="display:none" title="Модел „Аналози“: средна на Buy % за последните N свещи. Рисува се като жълта линия и се ползва вместо суровата стойност при проверката за вход. 1 = без осредняване.">Средна вероятност (свещи) <input type="number" id="inpAnalogAvg" value="5" min="1" max="500" step="1"></label>
+                <label id="analogAvgBox" style="display:none" title="Модел „Аналози“: средна на Buy % за последните N свещи. Рисува се като жълта линия и се ползва вместо суровата стойност при проверката за вход. 1 = без осредняване.">Средна (EMA, свещи) <input type="number" id="inpAnalogAvg" value="50" min="1" max="500" step="1"></label>
                 <label>Кели (дробна част) <input type="number" id="inpKelly" value="0.25" min="0.01" step="0.05"></label>
                 <label>Кели (макс. фракция) <input type="number" id="inpMaxKelly" value="0.05" min="0.01" max="1" step="0.05"></label>
                 <label title="Минималният обем: в лотове или като МАРЖИН (€) за един минимален обем. При маржин реалната позиция (нотионал) = маржин × ливъридж.">Мин. обем <select id="inpMinLotUnit" style="width:auto"><option value="lot">лот</option><option value="value">маржин (€)</option></select> <input type="number" id="inpMinLot" value="0.01" min="0.00001" step="any"></label>
@@ -2559,7 +2559,7 @@
         // TP/SL (ATR множители) на реалните поръчки — ползват се и от виртуалните сделки на модел 8.
         function virtTpSl(P) {
             const al = (P && P.alpha > 0) ? P.alpha : 1;
-            return { tpMult: ((P && P.tpMult > 0) ? P.tpMult : 2) * al, slMult: ((P && P.slMult > 0) ? P.slMult : 1) * al, holdBars: (P && P.holdBars > 0) ? P.holdBars : 50, analogSimple: !!(P && P.analogSimple), analogAvg: (P && P.analogAvg > 0) ? P.analogAvg : 5 };
+            return { tpMult: ((P && P.tpMult > 0) ? P.tpMult : 2) * al, slMult: ((P && P.slMult > 0) ? P.slMult : 1) * al, holdBars: (P && P.holdBars > 0) ? P.holdBars : 50, analogSimple: !!(P && P.analogSimple), analogAvg: (P && P.analogAvg > 0) ? P.analogAvg : 50 };
         }
 
         function readParams() {
@@ -3103,19 +3103,18 @@
                 let prAvg = null;
                 if (currentModel === 9 && prScaled) {
                     const N = Math.max(1, P.analogAvg || 1);
-                    // Двойна средна: средна на последните N стойности на средната (по-гладка линия).
-                    let sum = 0, cnt = 0;
-                    for (let q = i; q > i - N && q >= 0; q--) { const e = curProbs[q]; if (e) { sum += e.buyPct; cnt++; } }
-                    if (cnt) avg1Arr[i] = sum / cnt;
-                    let s2 = 0, c2 = 0;
-                    for (let q = i; q > i - N && q >= 0; q--) { if (avg1Arr[q] != null) { s2 += avg1Arr[q]; c2++; } }
-                    if (c2) {
-                        avg2Arr[i] = s2 / c2;
-                        // Вероятността = наклонът (производната) на средната линия: нагоре → Buy, надолу → Sell.
-                        // buyPct = 50 + 50·tg, tg = clamp(d·0.1, −0.9, 0.9), d = линия[i] − линия[i−1] (п.п./бар).
+                    // Линия = EMA(N) на сурови Buy % (N като „200-дневната ема“ — по-гладка, по-малко чувствителна).
+                    const aE = 2 / (N + 1);
+                    let ema = prScaled.buyPct;
+                    if (i > 0 && avg2Arr[i - 1] != null) ema = avg2Arr[i - 1] + aE * (prScaled.buyPct - avg2Arr[i - 1]);
+                    {
+                        avg2Arr[i] = ema;
+                        // Вероятността = наклонът (производната) на линията: нагоре → Buy, надолу → Sell.
+                        // buyPct = 50 + 50·tg, tg = clamp(d·(N+1)/2·0.03, −0.9, 0.9), d = линия[i] − линия[i−1]
+                        // (d·(N+1)/2 ≈ сурова − EMA, така че мащабът не зависи от N).
                         let bp = 50;
                         if (i > 0 && avg2Arr[i - 1] != null) {
-                            const tg = Math.max(-0.9, Math.min(0.9, (avg2Arr[i] - avg2Arr[i - 1]) * 0.1));
+                            const tg = Math.max(-0.9, Math.min(0.9, (avg2Arr[i] - avg2Arr[i - 1]) * (N + 1) / 2 * 0.03));
                             bp = 50 + 50 * tg;
                         }
                         prAvg = { buyPct: bp, sellPct: 100 - bp, plan: prScaled.plan };
