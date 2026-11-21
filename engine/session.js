@@ -285,7 +285,7 @@ class Session {
         let vals;
         if (st._pk === key) vals = st._pv;
         else {
-          vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W, onlyLast: true });
+          vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W, onlyLast: true, tpMult: this.P.tpMult * this.P.alpha, slMult: this.P.slMult * this.P.alpha });
           st._pk = key; st._pv = vals;
         }
         const v = vals ? vals[vals.length - 1] : null;
@@ -345,7 +345,7 @@ class Session {
       try {
         const W = Math.max(30, this.window());
         const win = (this.P.strictWindow && calcArr.length > W) ? calcArr.slice(calcArr.length - W) : calcArr;
-        const vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W, onlyLast: true });
+        const vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W, onlyLast: true, tpMult: this.P.tpMult * this.P.alpha, slMult: this.P.slMult * this.P.alpha });
         const v = vals ? vals[vals.length - 1] : null;
         prob = v != null ? { time: closedT, buyPct: v, sellPct: 100 - v } : null;
       } catch (e) { prob = null; }

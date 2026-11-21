@@ -2426,6 +2426,12 @@
             if (txt) txt.textContent = text || '';
         }
 
+        // TP/SL (ATR множители) на реалните поръчки — ползват се и от виртуалните сделки на модел 8.
+        function virtTpSl(P) {
+            const al = (P && P.alpha > 0) ? P.alpha : 1;
+            return { tpMult: ((P && P.tpMult > 0) ? P.tpMult : 2) * al, slMult: ((P && P.slMult > 0) ? P.slMult : 1) * al };
+        }
+
         function readParams() {
             return {
                 budget: Math.max(1, parseFloat(document.getElementById('inpBudget').value) || 1000),
@@ -2607,7 +2613,7 @@
             const start = fromIdx - dataStart;
             if (start < AUTO_LB_MIN || data.length - start < 5) return null;
             const atr = computeATR(data, 14);
-            const baseOpts = { invert: contraFlags(), intervalSec: intervalSecs(interval), lookbackGrow: false };
+            const baseOpts = Object.assign({ invert: contraFlags(), intervalSec: intervalSecs(interval), lookbackGrow: false }, virtTpSl(P));
 
             let best = null;
             let bestOther = null;   // най-добрият, различен от текущия lookback
@@ -2712,7 +2718,8 @@
             try {
                 probs = computeModelProbSeries(data, currentModel, {
                     invert: contraFlags(), intervalSec: intervalSecs(interval),
-                    lookback: lb, lookbackGrow: false
+                    lookback: lb, lookbackGrow: false,
+                    tpMult: virtTpSl(P).tpMult, slMult: virtTpSl(P).slMult
                 });
             } catch (e) { return null; }
             if (!probs || !probs.length) return null;
@@ -3311,7 +3318,7 @@
         // Вероятности според отметката „Само прозорец назад“: строг прозорец за всеки бар
         // (само последните `lookback` свещи, от fromIdx нататък) или обикновеното причинно изчисление.
         async function computeProbsForRun(candles, interval, lookback, P, fromIdx) {
-            const opts = { invert: contraFlags(), intervalSec: intervalSecs(interval), lookback: lookback, lookbackGrow: false };
+            const opts = Object.assign({ invert: contraFlags(), intervalSec: intervalSecs(interval), lookback: lookback, lookbackGrow: false }, virtTpSl(P));
             if (P && P.strictWindow) {
                 return computeModelProbSeriesStrict(candles, currentModel, opts, lookback, null, fromIdx, false);
             }
@@ -4943,12 +4950,12 @@
                 if (cmp.stop) return null;
                 const startIdx0 = candles.findIndex(c => c.time >= fromS);
                 if (startIdx0 < 0 || candles.length - startIdx0 < 30) throw new Error('Периодът покрива под 30 свещи');
-                const pkey = ckey + '|' + model + '|' + P.lookback + '|' + invert.join('') + '|' + '|' + (P.strictWindow ? 's' + startIdx0 : 'n');
+                const pkey = ckey + '|' + model + '|' + P.lookback + '|' + (model === 8 ? virtTpSl(P).tpMult + '/' + virtTpSl(P).slMult : '') + '|' + invert.join('') + '|' + '|' + (P.strictWindow ? 's' + startIdx0 : 'n');
                 let probs = cmp.probsCache.get(pkey);
                 if (!probs) {
                     row.stage = 'изчисляване на вероятностите...'; cmpRenderTable();
                     await sleep(20);
-                    const o = { invert, intervalSec: iv, lookback: P.lookback, lookbackGrow: false };
+                    const o = Object.assign({ invert, intervalSec: iv, lookback: P.lookback, lookbackGrow: false }, virtTpSl(P));
                     probs = P.strictWindow
                         ? await computeModelProbSeriesStrict(candles, model, o, P.lookback, () => {}, startIdx0, false)
                         : computeModelProbSeries(candles, model, o);

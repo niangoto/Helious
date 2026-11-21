@@ -665,6 +665,19 @@ function computeModelProbSequence(candles, modelIndex, opts) {
 // Resolve the outcome of a trade entered at candle `j` (TP/SL hit and the
 // candle index where it resolved). Returns null if neither level is reached
 // within `maxBars` bars (used as time-exit horizon by the bot).
+// Огледално на resolveTrade за къса сделка (TP надолу, SL нагоре).
+function resolveTradeShort(candles, j, atrVal, tpMult, slMult, maxBars) {
+  const entry = candles[j].close;
+  const tp = entry - tpMult * atrVal;
+  const sl = entry + slMult * atrVal;
+  const limit = Math.min(j + maxBars, candles.length);
+  for (let k = j + 1; k < limit; k++) {
+    // Песимистично при same-bar TP+SL: приемаме SL (както при дългите).
+    if (candles[k].high >= sl) return { win: 0, closeIdx: k };
+    if (candles[k].low <= tp) return { win: 1, closeIdx: k };
+  }
+  return null;
+}
 function resolveTrade(candles, j, atrVal, tpMult, slMult, maxBars) {
   const entry = candles[j].close;
   const tp = entry + tpMult * atrVal;
@@ -714,6 +727,10 @@ function computeModelProbCore(candles, modelIndex, opts) {
   const meanAtrV = rollingMean(atrV, meanWin);
   const meanVolV = rollingMean(volV, meanWin);
   const maxBars = Math.min(50, n);
+  // Логистична 2 (8): виртуалните сделки ползват TP/SL от настройките (в ATR множители,
+  // подават се в opts.tpMult/opts.slMult); останалите модели — фиксирани 1.5/1.
+  const vTp = (modelIndex === 8 && opts && opts.tpMult > 0) ? opts.tpMult : 1.5;
+  const vSl = (modelIndex === 8 && opts && opts.slMult > 0) ? opts.slMult : 1.0;
 
   // RSI модел: усредняваме buyPct само за таймфреймове >= избрания период за
   // свещ (по-големи или равни). Ресемплираме входните свещи (k = tf/интервал).
@@ -733,7 +750,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
   const entries = new Array(n).fill(null);
   const resolvedAt = new Array(n).fill(null).map(() => []);
   for (let j = 30; j < n - 1; j++) {
-    const r = resolveTrade(candles, j, atrV[j] || 1, 1.5, 1.0, maxBars);
+    const r = resolveTrade(candles, j, atrV[j] || 1, vTp, vSl, maxBars);
     if (r) {
       const mask = signalMask(j, rsiAt(rsiV, j, 14), ema20[j], ema50[j], ema200[j], macd.macdLine[j], macd.signal[j], macd.histogram[j], atrV[j], adxR.adx[j], volV[j], meanAtrV[j], meanVolV[j]);
       entries[j] = { mask, win: r.win };
@@ -741,6 +758,24 @@ function computeModelProbCore(candles, modelIndex, opts) {
     }
   }
 
+  // Логистична 2 (8): нормирана — отделна статистика за къси сделки (TP −1.5/SL +1).
+  // Buy = wL/(wL+wS): при шум и двата дяла са ~40% → 50/50 (няма наклон към Sell).
+  const norm8 = (modelIndex === 8);
+  const resolvedAtS = norm8 ? new Array(n).fill(null).map(() => []) : null;
+  const entriesS = norm8 ? new Array(n).fill(null) : null;
+  if (norm8) {
+    for (let j = 30; j < n - 1; j++) {
+      const r = resolveTradeShort(candles, j, atrV[j] || 1, vTp, vSl, maxBars);
+      if (r) {
+        const mask = signalMask(j, rsiAt(rsiV, j, 14), ema20[j], ema50[j], ema200[j], macd.macdLine[j], macd.signal[j], macd.histogram[j], atrV[j], adxR.adx[j], volV[j], meanAtrV[j], meanVolV[j]);
+        entriesS[j] = { mask, win: r.win };
+        resolvedAtS[r.closeIdx].push(j);
+      }
+    }
+  }
+  const combosS = new Map();
+  let totalWinsS = 0, totalTradesS = 0;
+  const resolvedQS = [];
   const combos = new Map();
   let totalWins = 0, totalTrades = 0;
   const recentTrades = [];
@@ -789,6 +824,32 @@ function computeModelProbCore(candles, modelIndex, opts) {
       }
     }
 
+    if (norm8 && resolvedAtS[i].length) {
+      resolvedAtS[i].sort((a, b) => a - b);
+      for (const j of resolvedAtS[i]) {
+        const e = entriesS[j];
+        totalTradesS++;
+        if (e.win === 1) totalWinsS++;
+        if (!combosS.has(e.mask)) combosS.set(e.mask, { total: 0, wins: 0 });
+        const c = combosS.get(e.mask); c.total++;
+        if (e.win === 1) c.wins++;
+        resolvedQS.push({ mask: e.mask, win: e.win, closeIdx: i });
+      }
+    }
+    if (norm8) {
+      while (resolvedQS.length && resolvedQS[0].closeIdx < i - (curLogisticLb - 1)) {
+        const old = resolvedQS.shift();
+        totalTradesS--;
+        if (old.win === 1) totalWinsS--;
+        const oc = combosS.get(old.mask);
+        if (oc) {
+          oc.total--;
+          if (old.win === 1) oc.wins--;
+          if (oc.total <= 0) combosS.delete(old.mask);
+        }
+      }
+    }
+
     // Изхвърляме статистиката по-стара от MODEL_LOOKBACK бара (плъзгащ прозорец).
     while (resolvedQ.length && resolvedQ[0].closeIdx < i - (curLogisticLb - 1)) {
       const old = resolvedQ.shift();
@@ -808,7 +869,19 @@ function computeModelProbCore(candles, modelIndex, opts) {
     let val;
     if (modelIndex === 0) {
       val = amplify(directionalProb(dirs));
-    } else if (modelIndex === 1 || modelIndex === 8) {
+    } else if (modelIndex === 8) {
+      const mask = maskAt(i);
+      // Смекчаване към общия дял (prior k): малките извадки по маска не дават 0/100.
+      const K8 = 25;
+      const prior = vSl / (vTp + vSl);   // шанс при шум за TP преди SL
+      const baseL = totalTrades > 0 ? totalWins / totalTrades : prior;
+      const baseS = totalTradesS > 0 ? totalWinsS / totalTradesS : prior;
+      const cL = combos.get(mask) || { total: 0, wins: 0 };
+      const cS = combosS.get(mask) || { total: 0, wins: 0 };
+      const wL = (cL.wins + K8 * baseL) / (cL.total + K8);
+      const wS = (cS.wins + K8 * baseS) / (cS.total + K8);
+      val = (wL + wS) > 0 ? (wL / (wL + wS)) * 100 : 50;
+    } else if (modelIndex === 1) {
       const mask = maskAt(i);
       val = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
       if (combos.has(mask)) { const cc = combos.get(mask); if (cc.total > 0) val = (cc.wins / cc.total) * 100; }
