@@ -3148,7 +3148,7 @@
                         // загуба >= лимит. P = шансът да стане обратното на позицията
                         // (BUY → sellPct, SELL → buyPct). TP по цена остава както преди.
                         if (exitPrice === null && P.pctClose) {
-                            const pr = prScaled;
+                            const pr = prAvg || prScaled;
                             if (pr) {
                                 const pOpp = (pos.dir === 'BUY' ? pr.sellPct : pr.buyPct) / 100;
                                 const floatPnl = (pos.dir === 'BUY' ? (c.close - pos.entry) : (pos.entry - c.close)) * pos.units * (pos.fx || 1);
