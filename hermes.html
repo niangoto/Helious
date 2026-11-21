@@ -1404,7 +1404,7 @@
         // По подразбиране: интервал 1ч (период '7d' → интервал '1h'), модел „Логистична“ (1).
         let activePeriod = params.get('period') || '7d';
         let currentModel = parseInt(params.get('model') || '1', 10);
-        if (isNaN(currentModel) || currentModel < 0 || currentModel > 10) currentModel = 1;
+        if (isNaN(currentModel) || currentModel < 0 || currentModel > 11) currentModel = 1;
 
         const periodConfigs = {
             '5m': { interval: '1m', limit: 500 },
@@ -1492,7 +1492,7 @@
         // напр. 1м за ~34 дни; над това периодът се скъсява (вижда се в #periodInfo).
         const MAX_FETCH = 50000;
 
-        const modelNames = ['Историческа', 'Логистична', 'Марковска', 'Очаквана стойност', 'Уейвлет', 'Средна вероятност', 'Фурие', 'RSI анализ', 'Логистична 2', 'Аналози (близост)', 'Логистична 2 + Аналози'];
+        const modelNames = ['Историческа', 'Логистична', 'Марковска', 'Очаквана стойност', 'Уейвлет', 'Средна вероятност', 'Фурие', 'RSI анализ', 'Логистична 2', 'Аналози (близост)', 'Логистична 2 + Аналози', 'Логистична 3'];
 
         let cancelFlag = false;
         let running = false;
@@ -1646,7 +1646,8 @@
             // „Аналози“ (9) сам определя TP, SL и времето за затваряне → скриваме ненужните полета/отметки.
             const an = parseInt(mSel.value, 10) === 9;
             const mixed = parseInt(mSel.value, 10) === 10;
-            const aab = document.getElementById('analogAvgBox'); if (aab) aab.style.display = (an || mixed) ? '' : 'none';
+            const log3 = parseInt(mSel.value, 10) === 11;
+            const aab = document.getElementById('analogAvgBox'); if (aab) aab.style.display = (an || mixed || log3) ? '' : 'none';
             const asb = document.getElementById('analogSimpleBox'); if (asb) asb.style.display = (an || mixed) ? '' : 'none';
             const hideEl = (el, on) => { if (el) el.style.display = on ? 'none' : ''; };
             ['inpTp', 'inpSl'].forEach(id => { const el = document.getElementById(id); hideEl(el && el.closest('label'), an); });
@@ -5092,7 +5093,7 @@
                 if (cmp.stop) return null;
                 const startIdx0 = candles.findIndex(c => c.time >= fromS);
                 if (startIdx0 < 0 || candles.length - startIdx0 < 30) throw new Error('Периодът покрива под 30 свещи');
-                const pkey = ckey + '|' + model + '|' + P.lookback + '|' + ((model === 8 || model === 10) ? virtTpSl(P).tpMult + '/a' + virtTpSl(P).analogAvg + (P.analogSimple ? 's' : '') + '/' + virtTpSl(P).slMult + '/h' + virtTpSl(P).holdBars : (model === 9 ? 'h' + virtTpSl(P).holdBars + (P.analogSimple ? 's' : '') : '')) + '|' + invert.join('') + '|' + '|' + (P.strictWindow ? 's' + startIdx0 : 'n');
+                const pkey = ckey + '|' + model + '|' + P.lookback + '|' + ((model === 8 || model === 10 || model === 11) ? virtTpSl(P).tpMult + '/a' + virtTpSl(P).analogAvg + (P.analogSimple ? 's' : '') + '/' + virtTpSl(P).slMult + '/h' + virtTpSl(P).holdBars : (model === 9 ? 'h' + virtTpSl(P).holdBars + (P.analogSimple ? 's' : '') : '')) + '|' + invert.join('') + '|' + '|' + (P.strictWindow ? 's' + startIdx0 : 'n');
                 let probs = cmp.probsCache.get(pkey);
                 if (!probs) {
                     row.stage = 'изчисляване на вероятностите...'; cmpRenderTable();
