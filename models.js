@@ -879,8 +879,8 @@ function computeModelProbCore(candles, modelIndex, opts) {
   const maxBars = Math.min(50, n);
   // Логистична 2 (8): виртуалните сделки ползват TP/SL от настройките (в ATR множители,
   // подават се в opts.tpMult/opts.slMult); останалите модели — фиксирани 1.5/1.
-  const vTp = ((modelIndex === 8 || modelIndex === 10 || modelIndex === 11) && opts && opts.tpMult > 0) ? opts.tpMult : 1.5;
-  const vSl = ((modelIndex === 8 || modelIndex === 10 || modelIndex === 11) && opts && opts.slMult > 0) ? opts.slMult : 1.0;
+  const vTp = (modelIndex === 8) ? 1.5 : ((modelIndex === 10 || modelIndex === 11) && opts && opts.tpMult > 0) ? opts.tpMult : 1.5;
+  const vSl = (modelIndex === 8) ? 1.5 : ((modelIndex === 10 || modelIndex === 11) && opts && opts.slMult > 0) ? opts.slMult : 1.0;
 
   // RSI модел: усредняваме buyPct само за таймфреймове >= избрания период за
   // свещ (по-големи или равни). Ресемплираме входните свещи (k = tf/интервал).
@@ -910,7 +910,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
 
   // Логистична 2 (8): нормирана — отделна статистика за къси сделки (TP −1.5/SL +1).
   // Buy = wL/(wL+wS): при шум и двата дяла са ~40% → 50/50 (няма наклон към Sell).
-  const norm8 = (modelIndex === 8 || modelIndex === 10 || modelIndex === 11);
+  const norm8 = (modelIndex === 10 || modelIndex === 11);
   // Модел 11 (Логистична 3): EMA на вероятността на модел 8; крайната вероятност е наклонът ѝ.
   let ema11 = NaN;
   const resolvedAtS = norm8 ? new Array(n).fill(null).map(() => []) : null;
@@ -1033,7 +1033,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
     let val;
     if (modelIndex === 0) {
       val = amplify(directionalProb(dirs));
-    } else if (modelIndex === 8 || modelIndex === 10 || modelIndex === 11) {
+    } else if (modelIndex === 10 || modelIndex === 11) {
       const mask = maskAt(i);
       // Смекчаване към общия дял (prior k): малките извадки по маска не дават 0/100.
       const K8 = 25;
@@ -1069,7 +1069,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
           if (opts && opts.slopeOut) opts.slopeOut[i] = tg;
         }
       }
-    } else if (modelIndex === 1) {
+    } else if (modelIndex === 1 || modelIndex === 8) {
       const mask = maskAt(i);
       val = totalTrades > 0 ? (totalWins / totalTrades) * 100 : 50;
       if (combos.has(mask)) { const cc = combos.get(mask); if (cc.total > 0) val = (cc.wins / cc.total) * 100; }
