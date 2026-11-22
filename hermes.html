@@ -1496,6 +1496,7 @@
 
         let cancelFlag = false;
         let running = false;
+        let simPaused = false;    // „Стоп“ = пауза; повторно натискане продължава
         let runPending = false;   // има ли чакащ рестарт след текущата симулация
         let datesTouched = false;
         let lastCandles = [];
@@ -3001,6 +3002,8 @@
             if (!silent) slopeProbArr = new Array(n).fill(null);
             let simLastYield = performance.now();
             for (let i = i0; i < n; i++) {
+                // Пауза („Стоп“): чакаме, докато не бъде продължено или рестартирано.
+                if (!silent && simPaused) { while (simPaused && !cancelFlag) await sleep(50); }
                 // При тих (sweep) режим гледаме sweepCancel; иначе — cancelFlag.
                 // Вътрешните кандидати на динамичния lookback също трябва да
                 // реагират на „Стоп“/смяна на интервала (cancelFlag).
@@ -3493,6 +3496,7 @@
             let lastYield = performance.now();
             for (let i = start; i < n; i++) {
                 if (sweepPaused) { while (sweepPaused && !sweepCancel) await sleep(50); }
+                if (simPaused && !sweepActive) { while (simPaused && !cancelFlag) await sleep(50); }
                 if (cancelFlag || (sweepActive && sweepCancel)) return out;
                 // При „разширявай“: първоначално зададеният поглед, после +1 на бар.
                 const effW = grow ? (w + Math.max(0, i - start)) : w;
@@ -3537,6 +3541,7 @@
             if (running) {
                 cancelFlag = true;
                 runPending = true;
+                setSimPaused(false);
                 const b = document.getElementById('btnStart');
                 if (b) { b.disabled = false; b.textContent = '⏳ Спиране...'; }
                 setProgress(0, 'Спиране на текущата симулация...');
@@ -3544,6 +3549,7 @@
             }
             running = true;
             cancelFlag = false;
+            setSimPaused(false);
             // Изчистваме и евентуални остатъци от предишен sweep — иначе вътрешните
             // кандидати на динамичния „Поглед назад“ се отменят и изглежда, че
             // „няма сделки за избор“.
@@ -3602,7 +3608,7 @@
             // Бутонът остава активен и по време на симулация — натискането му
             // отменя текущата и пуска нова отначало с новите настройки.
             document.getElementById('btnStart').disabled = false;
-            document.getElementById('btnStart').textContent = '⏳ Работи... (натисни за рестарт)';
+            document.getElementById('btnStart').textContent = '⏳ Работи... (натисни за рестарт отначало)';
             document.getElementById('progBar').classList.remove('err');
 
             try {
@@ -3769,15 +3775,24 @@
                 document.getElementById('progBar').classList.add('err');
             } finally {
                 running = false;
+                setSimPaused(false);
                 document.getElementById('btnStart').disabled = false;
                 document.getElementById('btnStart').textContent = '▶ Стартирай отново';
                 if (runPending) { runPending = false; runSimulation(); }
             }
         }
 
+        function setSimPaused(on) {
+            simPaused = !!on;
+            const b = document.getElementById('btnStop');
+            if (b) b.textContent = simPaused ? '▶ Продължи' : '■ Стоп';
+        }
+        // „Стоп“ е пауза: държи симулацията на място; повторното натискане я продължава.
+        // „Стартирай“ винаги започва отначало.
         function stopSimulation() {
-            cancelFlag = true;
-            setProgress(0, 'Спиране...');
+            if (!running) return;
+            setSimPaused(!simPaused);
+            setProgress(parseFloat((document.getElementById('progBar').style.width) || '0') || 0, simPaused ? 'Паузирано — натисни „Продължи“' : 'Продължава...');
         }
 
         // ── Анализ на чувствителността ──────────────────────────────
