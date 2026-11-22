@@ -879,8 +879,8 @@ function computeModelProbCore(candles, modelIndex, opts) {
   const maxBars = Math.min(50, n);
   // Логистична 2 (8): виртуалните сделки ползват TP/SL от настройките (в ATR множители,
   // подават се в opts.tpMult/opts.slMult); останалите модели — фиксирани 1.5/1.
-  const vTp = (modelIndex === 8) ? 1.5 : ((modelIndex === 10 || modelIndex === 11) && opts && opts.tpMult > 0) ? opts.tpMult : 1.5;
-  const vSl = (modelIndex === 8) ? 1.5 : ((modelIndex === 10 || modelIndex === 11) && opts && opts.slMult > 0) ? opts.slMult : 1.0;
+  const vTp = (modelIndex === 8) ? ((opts && opts.virtTp > 0) ? opts.virtTp : 1.5) : ((modelIndex === 10 || modelIndex === 11) && opts && opts.tpMult > 0) ? opts.tpMult : 1.5;
+  const vSl = (modelIndex === 8) ? ((opts && opts.virtSl > 0) ? opts.virtSl : 1.5) : ((modelIndex === 10 || modelIndex === 11) && opts && opts.slMult > 0) ? opts.slMult : 1.0;
 
   // RSI модел: усредняваме buyPct само за таймфреймове >= избрания период за
   // свещ (по-големи или равни). Ресемплираме входните свещи (k = tf/интервал).

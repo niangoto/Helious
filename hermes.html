@@ -1260,6 +1260,7 @@
                 <label>SL = ×ATR (α=1) <input type="number" id="inpSl" value="1.0" min="0.1" step="0.1"></label>
                 <label>Времево затваряне (барове) <input type="number" id="inpHold" value="200" min="1" step="1"></label>
                 <label id="analogAvgBox" style="display:none" title="Модел „Аналози“: средна на Buy % за последните N свещи. Рисува се като жълта линия и се ползва вместо суровата стойност при проверката за вход. 1 = без осредняване.">Средна (EMA, свещи) <input type="number" id="inpAnalogAvg" value="200" min="1" max="500" step="1"></label>
+                <label id="virtTpSlBox" style="display:none" title="Логистична 2: TP и SL (в ATR) на ВИРТУАЛНИТЕ позиции, по които се смята вероятността. Не са TP/SL на реалните поръчки.">Виртуални TP / SL (×ATR) <input type="number" id="inpVirtTp" value="1.5" min="0.1" step="0.1" style="width:70px"> <input type="number" id="inpVirtSl" value="1.5" min="0.1" step="0.1" style="width:70px"></label>
                 <label>Кели (дробна част) <input type="number" id="inpKelly" value="0.25" min="0.01" step="0.05"></label>
                 <label>Кели (макс. фракция) <input type="number" id="inpMaxKelly" value="0.05" min="0.01" max="1" step="0.05"></label>
                 <label title="Минималният обем: в лотове или като МАРЖИН (€) за един минимален обем. При маржин реалната позиция (нотионал) = маржин × ливъридж.">Мин. обем <select id="inpMinLotUnit" style="width:auto"><option value="lot">лот</option><option value="value">маржин (€)</option></select> <input type="number" id="inpMinLot" value="0.01" min="0.00001" step="any"></label>
@@ -1648,6 +1649,7 @@
             const an = parseInt(mSel.value, 10) === 9;
             const mixed = parseInt(mSel.value, 10) === 10;
             const log3 = parseInt(mSel.value, 10) === 11;
+            const vb = document.getElementById('virtTpSlBox'); if (vb) vb.style.display = parseInt(mSel.value, 10) === 8 ? '' : 'none';
             const aab = document.getElementById('analogAvgBox'); if (aab) aab.style.display = (an || mixed || log3) ? '' : 'none';
             const asb = document.getElementById('analogSimpleBox'); if (asb) asb.style.display = (an || mixed) ? '' : 'none';
             const hideEl = (el, on) => { if (el) el.style.display = on ? 'none' : ''; };
@@ -2561,7 +2563,7 @@
         // TP/SL (ATR множители) на реалните поръчки — ползват се и от виртуалните сделки на модел 8.
         function virtTpSl(P) {
             const al = (P && P.alpha > 0) ? P.alpha : 1;
-            return { tpMult: ((P && P.tpMult > 0) ? P.tpMult : 2) * al, slMult: ((P && P.slMult > 0) ? P.slMult : 1) * al, holdBars: (P && P.holdBars > 0) ? P.holdBars : 50, analogSimple: !!(P && P.analogSimple), analogAvg: (P && P.analogAvg > 0) ? P.analogAvg : 200 };
+            return { tpMult: ((P && P.tpMult > 0) ? P.tpMult : 2) * al, slMult: ((P && P.slMult > 0) ? P.slMult : 1) * al, holdBars: (P && P.holdBars > 0) ? P.holdBars : 50, virtTp: P && P.virtTp, virtSl: P && P.virtSl, analogSimple: !!(P && P.analogSimple), analogAvg: (P && P.analogAvg > 0) ? P.analogAvg : 200 };
         }
 
         function readParams() {
@@ -2588,6 +2590,8 @@
                 lookbackGrow: false,   // променливият поглед е премахнат
                 strictWindow: !!((document.getElementById('inpStrictWindow') || {}).checked),
                 analogAvg: Math.max(1, Math.min(500, parseInt((document.getElementById('inpAnalogAvg') || {}).value) || 1)),
+                virtTp: Math.max(0.1, parseFloat((document.getElementById('inpVirtTp') || {}).value) || 1.5),
+                virtSl: Math.max(0.1, parseFloat((document.getElementById('inpVirtSl') || {}).value) || 1.5),
                 analogSimple: !!((document.getElementById('inpAnalogSimple') || {}).checked),
                 reverse: document.getElementById('inpReverse').checked,
                 reversal: !!((document.getElementById('inpReversal') || {}).checked)
@@ -4515,6 +4519,8 @@
             { id: 'inpLookback', type: 'value' },
             { id: 'inpStrictWindow', type: 'checkbox' },
             { id: 'inpAnalogSimple', type: 'checkbox' },
+            { id: 'inpVirtTp', type: 'value' },
+            { id: 'inpVirtSl', type: 'value' },
             { id: 'inpAnalogAvg', type: 'value' },
             { id: 'inpInterval', type: 'value' },
             { id: 'inpSpeed', type: 'value' },
@@ -5108,7 +5114,7 @@
                 if (cmp.stop) return null;
                 const startIdx0 = candles.findIndex(c => c.time >= fromS);
                 if (startIdx0 < 0 || candles.length - startIdx0 < 30) throw new Error('Периодът покрива под 30 свещи');
-                const pkey = ckey + '|' + model + '|' + P.lookback + '|' + ((model === 8 || model === 10 || model === 11) ? virtTpSl(P).tpMult + '/a' + virtTpSl(P).analogAvg + (P.analogSimple ? 's' : '') + '/' + virtTpSl(P).slMult + '/h' + virtTpSl(P).holdBars : (model === 9 ? 'h' + virtTpSl(P).holdBars + (P.analogSimple ? 's' : '') : '')) + '|' + invert.join('') + '|' + '|' + (P.strictWindow ? 's' + startIdx0 : 'n');
+                const pkey = ckey + '|' + model + '|' + P.lookback + '|' + ((model === 8) ? ('v' + (P.virtTp || 1.5) + '/' + (P.virtSl || 1.5)) : (model === 10 || model === 11) ? virtTpSl(P).tpMult + '/a' + virtTpSl(P).analogAvg + (P.analogSimple ? 's' : '') + '/' + virtTpSl(P).slMult + '/h' + virtTpSl(P).holdBars : (model === 9 ? 'h' + virtTpSl(P).holdBars + (P.analogSimple ? 's' : '') : '')) + '|' + invert.join('') + '|' + '|' + (P.strictWindow ? 's' + startIdx0 : 'n');
                 let probs = cmp.probsCache.get(pkey);
                 if (!probs) {
                     row.stage = 'изчисляване на вероятностите...'; cmpRenderTable();
