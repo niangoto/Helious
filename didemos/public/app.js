@@ -13,7 +13,7 @@ function el(tag, props, ...kids) {
     else if (k === 'value' || k === 'checked') e[k] = v;
     else e.setAttribute(k, v === true ? '' : v);
   }
-  for (const kid of kids.flat()) { if (kid != null && kid !== false) e.append(kid.nodeType ? kid : document.createTextNode(String(kid))); }
+  for (const kid of kids.flat(Infinity)) { if (kid != null && kid !== false) e.append(kid.nodeType ? kid : document.createTextNode(String(kid))); }
   return e;
 }
 async function api(method, url, body) {
