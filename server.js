@@ -96,8 +96,20 @@ function clearAuthCookie(res, req) {
   res.setHeader('Set-Cookie', `${AUTH_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${sec}`);
 }
 
+// DiDemos: монтира се под /didemos (данните са в data/didemos/).
+process.env.DATA_DIR = process.env.DIDEMOS_DATA_DIR || path.join(__dirname, 'data', 'didemos');
+const didemos = require('./didemos/server');
+didemos.loadDb();
+const didemosHandler = didemos.createHandler('/didemos');
+process.on('exit', () => { try { didemos.saveNow(); } catch (e) { } });
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
+
+  // ─── DiDemos (отделно приложение под /didemos) ───────────────────
+  if (url.pathname === '/didemos' || url.pathname.startsWith('/didemos/')) {
+    return didemosHandler(req, res);
+  }
 
   // ─── Auth API (профил/вход) ──────────────────────────────────────
   if (url.pathname.startsWith('/api/auth/')) {
