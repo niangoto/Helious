@@ -841,6 +841,424 @@ function createAnalogEngine(candles, c, H, lb, K, simple, boltz) {
   };
 }
 
+
+// ── Аналози v2 (само модел 9) ───────────────────────────────────
+// Поправки спрямо стария двигател (измерено: IC ≈ 0 или леко отрицателен):
+//  1) Честен етикет: напред-доходност (close[j+H]−close[j])/ATR, а не „най-добър връх“ със задна дата.
+//  2) Истинско разстояние: евклидово върху показатели, стандартизирани със std от прозореца
+//     (вместо сума от рангове; всички 9 показателя са в сравними единици).
+//  3) Разреждане: избраните аналози са на поне `sep` бара един от друг (съседните свещи
+//     имат почти еднакви показатели и изход → иначе топ K са 2–3 епизода).
+//  4) Калибрирана вероятност: t-статистика на претеглената средна доходност,
+//     buyPct = 50 + 50·tanh(0.4·z). При липса на преимущество z ~ N(0,1) → буйни стойности са редки,
+//     а прагът на Hermes има смисъл. Не се прилага EMA/наклон (закъснява).
+//  5) TP/SL от съседите: 0.5 × претеглена средна максимална печалба / загуба в посоката (в ATR).
+// Показатели 8–9 (|MACD−сигнал|, дневен размах) помагат за предсказване на волатилността.
+function createAnalogKnn(candles, c, H, lb, K) {
+  const n = candles.length;
+  const NF = 9;
+  const F = [];
+  for (let f = 0; f < NF; f++) F.push(new Float64Array(n));
+  for (let j = 0; j < n; j++) {
+    const atr = c.atrV[j] || 1;
+    const ma = c.meanAtrV[j] || atr, mv = c.meanVolV[j] || 1;
+    const k5 = j >= 5 ? Math.abs(candles[j].close - candles[j - 5].close) / atr : 0;
+    const k20 = j >= 20 ? Math.abs(candles[j].close - candles[j - 20].close) / atr : 0;
+    const fv = [
+      rsiAt(c.rsiV, j, 14),
+      (c.ema20[j] - c.ema50[j]) / atr,
+      (c.macd.macdLine[j] - c.macd.signal[j]) / atr,
+      c.adxR.adx[j] || 0,
+      atr / (ma || 1),
+      (c.volV[j] || 0) / (mv || 1),
+      k5, k20,
+      (candles[j].high - candles[j].low) / atr
+    ];
+    for (let f = 0; f < NF; f++) F[f][j] = isFinite(fv[f]) ? fv[f] : 0;
+  }
+  // Префиксни суми за std на показателите в прозорец (O(1) на бар).
+  const PS = [], PQ = [];
+  for (let f = 0; f < NF; f++) {
+    const a = new Float64Array(n + 1), q = new Float64Array(n + 1);
+    for (let j = 0; j < n; j++) { a[j + 1] = a[j] + F[f][j]; q[j + 1] = q[j] + F[f][j] * F[f][j]; }
+    PS.push(a); PQ.push(q);
+  }
+  // Записи: известни от бар j+H.
+  const rRet = new Float64Array(n), rUp = new Float64Array(n), rDn = new Float64Array(n);
+  const valid = new Uint8Array(n);
+  const PR = new Float64Array(n + 1), PR2 = new Float64Array(n + 1);
+  for (let j = 0; j < n; j++) {
+    if (j >= 30 && j + H <= n - 1) {
+      const atr = c.atrV[j] || 1, entry = candles[j].close;
+      let mx = -Infinity, mn = Infinity;
+      for (let k = 1; k <= H; k++) {
+        const cd = candles[j + k];
+        if (cd.high > mx) mx = cd.high;
+        if (cd.low < mn) mn = cd.low;
+      }
+      rRet[j] = (candles[j + H].close - entry) / atr;
+      rUp[j] = Math.max(0, (mx - entry) / atr);
+      rDn[j] = Math.max(0, (entry - mn) / atr);
+      valid[j] = 1;
+    }
+    PR[j + 1] = PR[j] + rRet[j]; PR2[j + 1] = PR2[j] + rRet[j] * rRet[j];
+  }
+  const sd = new Float64Array(NF);
+  const distArr = new Float64Array(Math.max(16, lb + 2));
+  return {
+    add() { },
+    evalAt(i) {
+      const lo = Math.max(30, i - lb + 1), hi = i - H;
+      const m = hi - lo + 1;
+      if (m < Math.max(K * 2, 30)) return { buyPct: 50, plan: null };
+      for (let f = 0; f < NF; f++) {
+        const mu = (PS[f][hi + 1] - PS[f][lo]) / m;
+        const v = (PQ[f][hi + 1] - PQ[f][lo]) / m - mu * mu;
+        sd[f] = Math.sqrt(Math.max(v, 1e-12)) || 1;
+      }
+      const ids = new Array(m);
+      for (let j = lo; j <= hi; j++) {
+        let d = 0;
+        for (let f = 0; f < NF; f++) { const z = (F[f][j] - F[f][i]) / sd[f]; d += z * z; }
+        distArr[j - lo] = d; ids[j - lo] = j;
+      }
+      ids.sort((a, b) => distArr[a - lo] - distArr[b - lo]);
+      // Разреждане: поне sep бара между избраните.
+      const sep = Math.max(1, Math.min(H >> 1, Math.floor(m / (2 * K))));
+      const pick = [];
+      for (let q = 0; q < ids.length && pick.length < K; q++) {
+        const j = ids[q];
+        let ok = true;
+        for (let p = 0; p < pick.length; p++) if (Math.abs(pick[p] - j) < sep) { ok = false; break; }
+        if (ok) pick.push(j);
+      }
+      if (pick.length < 5) return { buyPct: 50, plan: null };
+      const dK = distArr[pick[pick.length - 1] - lo] || 1;
+      let ws = 0, ws2 = 0, mean = 0, up = 0, dn = 0;
+      const wts = new Array(pick.length);
+      for (let q = 0; q < pick.length; q++) {
+        const j = pick[q], w = Math.exp(-distArr[j - lo] / dK);
+        wts[q] = w; ws += w; ws2 += w * w;
+        mean += w * rRet[j]; up += w * rUp[j]; dn += w * rDn[j];
+      }
+      mean /= ws; up /= ws; dn /= ws;
+      const keff = ws * ws / ws2;
+      const mR = (PR[hi + 1] - PR[lo]) / m;
+      const vR = (PR2[hi + 1] - PR2[lo]) / m - mR * mR;
+      const scale = Math.sqrt(Math.max(vR, 1e-12));
+      const z = (mean - mR) / scale * Math.sqrt(keff);
+      const buyPct = 50 + 50 * Math.tanh(0.4 * z);
+      const mk = (buy) => ({
+        dir: buy ? 'BUY' : 'SELL',
+        tpMult: Math.max(0.5, 0.5 * (buy ? up : dn)),
+        slMult: Math.max(0.5, 0.5 * (buy ? dn : up)),
+        hold: H
+      });
+      const pB = mk(true), pS = mk(false);
+      const base = buyPct >= 50 ? pB : pS;
+      return { buyPct, plan: Object.assign({}, base, { plans: { BUY: pB, SELL: pS } }) };
+    }
+  };
+}
+
+
+// ── Модел 12: Невронна мрежа (само HERMES) ──────────────────────
+// Без настройки. Обучава се ВЕДНЪЖ върху свещите ПРЕДИ избрания период (бар < trainEnd):
+//  • за всяка минала свещ записва 14 показателя (стандартизирани);
+//  • симулира въображаеми позиции — BUY и SELL с няколко (TP,SL) варианта (в ATR) до H бара —
+//    и записва резултата на всеки вариант (в ATR; SL при двойно засягане);
+//  • MLP (14→32→16→V, tanh, Adam) учи очаквания резултат на всеки вариант.
+// Последните ~20% от обучението са валидация: избира се праг на очакваната печалба, който дава
+// положителен реален резултат; ако такъв няма → моделът няма предимство и НЕ отваря позиции.
+// Сега (за бар ≥ trainEnd): избира варианта с най-висока очаквана печалба; ако е под прага или
+// текущата ситуация няма аналог в обучението (разстояние до най-близките примери > 90-ия
+// персентил от валидацията) → plan = null (Hermes не отваря).
+const NN_H = 50;   // хоризонт на въображаемите позиции за разпознаване на шанса
+const NN_VARIANTS = (() => {
+  const v = [];
+  for (const dir of ['BUY', 'SELL']) for (const [tp, sl] of [[1, 1], [2, 1], [1.5, 1.5], [3, 1.5], [2, 2], [4, 2]]) v.push({ dir, tp, sl, hold: NN_H });
+  return v;
+})();
+
+function nnFeatures(candles, c, j) {
+  const atr = c.atrV[j] || 1, cl = candles[j].close;
+  const ma = c.meanAtrV[j] || atr, mv = c.meanVolV[j] || 1;
+  const rg = (k) => j >= k ? (cl - candles[j - k].close) / atr : 0;
+  const cd = candles[j];
+  return [
+    rsiAt(c.rsiV, j, 14),
+    (c.ema20[j] - c.ema50[j]) / atr,
+    (cl - c.ema200[j]) / atr,
+    (c.macd.macdLine[j] - c.macd.signal[j]) / atr,
+    c.macd.histogram[j] / atr,
+    c.adxR.adx[j] || 0,
+    atr / (ma || 1),
+    Math.log1p((c.volV[j] || 0) / (mv || 1)),
+    rg(3), rg(10), rg(30),
+    (cd.high - cd.low) / atr,
+    (cd.close - cd.open) / atr,
+    (cd.high - Math.max(cd.open, cd.close) - (Math.min(cd.open, cd.close) - cd.low)) / atr
+  ];
+}
+
+function nnOutcomes(candles, atrV, j) {
+  const atr = atrV[j] || 1, entry = candles[j].close;
+  const out = new Float64Array(NN_VARIANTS.length);
+  for (let v = 0; v < NN_VARIANTS.length; v++) {
+    const { dir, tp, sl, hold } = NN_VARIANTS[v];
+    const buy = dir === 'BUY';
+    const tpP = buy ? entry + tp * atr : entry - tp * atr, slP = buy ? entry - sl * atr : entry + sl * atr;
+    let r = null;
+    for (let k = 1; k <= hold; k++) {
+      const cd = candles[j + k];
+      const hitSl = buy ? cd.low <= slP : cd.high >= slP;
+      const hitTp = buy ? cd.high >= tpP : cd.low <= tpP;
+      if (hitSl) { r = -sl; break; }
+      if (hitTp) { r = tp; break; }
+    }
+    if (r === null) { const m = (candles[j + hold].close - entry) / atr; r = Math.max(-sl, Math.min(tp, buy ? m : -m)); }
+    out[v] = r;
+  }
+  return out;
+}
+
+function nnTrain(Xn, Y, nTr, D, V, seed0, H1, H2, maxEp) {
+  // MLP
+  let seed = seed0;
+  const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  const gauss = () => { let u = 0; for (let k = 0; k < 6; k++) u += rnd(); return (u - 3) * 1.4142; };
+  const sizes = [D, H1 || 32, H2 || 16, V];
+  const W = [], B = [];
+  for (let l = 0; l < 3; l++) {
+    const w = new Float64Array(sizes[l] * sizes[l + 1]), sc = Math.sqrt(1 / sizes[l]);
+    for (let k = 0; k < w.length; k++) w[k] = gauss() * sc;
+    W.push(w); B.push(new Float64Array(sizes[l + 1]));
+  }
+  const fwd = (x, acts) => {
+    let a = x;
+    for (let l = 0; l < 3; l++) {
+      const ni = sizes[l], no = sizes[l + 1], o = new Float64Array(no), w = W[l];
+      for (let j = 0; j < no; j++) { let t = B[l][j]; for (let i = 0; i < ni; i++) t += w[j * ni + i] * a[i]; o[j] = l < 2 ? Math.tanh(t) : t; }
+      if (acts) acts.push(o);
+      a = o;
+    }
+    return a;
+  };
+  const mW = W.map(w => new Float64Array(w.length)), vW = W.map(w => new Float64Array(w.length));
+  const mB = B.map(b => new Float64Array(b.length)), vB = B.map(b => new Float64Array(b.length));
+  let step = 0;
+  const gW = W.map(w => new Float64Array(w.length)), gB = B.map(b => new Float64Array(b.length));
+  const valMSE = () => {
+    let e = 0, m = 0;
+    for (let i = nTr; i < Xn.length; i++) { const o = fwd(Xn[i]); for (let v = 0; v < V; v++) { e += (o[v] - Y[i][v]) ** 2; m++; } }
+    return e / Math.max(1, m);
+  };
+  const snap = () => ({ W: W.map(w => w.slice()), B: B.map(b => b.slice()) });
+  const restore = (s) => { for (let l = 0; l < 3; l++) { W[l].set(s.W[l]); B[l].set(s.B[l]); } };
+  let best = Infinity, bestSnap = snap(), bad = 0;
+  const order = Array.from({ length: nTr }, (_, i) => i);
+  const BS = 64, LR = 0.003, L2 = 1e-4;
+  for (let ep = 0; ep < (maxEp || 60) && bad < 6; ep++) {
+    for (let i = order.length - 1; i > 0; i--) { const k = Math.floor(rnd() * (i + 1)); const t = order[i]; order[i] = order[k]; order[k] = t; }
+    for (let b0 = 0; b0 < nTr; b0 += BS) {
+      for (let l = 0; l < 3; l++) { gW[l].fill(0); gB[l].fill(0); }
+      const bn = Math.min(BS, nTr - b0);
+      for (let q = 0; q < bn; q++) {
+        const i = order[b0 + q], acts = [], x = Xn[i], out = fwd(x, acts);
+        let d = new Float64Array(V);
+        for (let v = 0; v < V; v++) d[v] = 2 * (out[v] - Y[i][v]) / V;
+        for (let l = 2; l >= 0; l--) {
+          const ni = sizes[l], no = sizes[l + 1], inp = l === 0 ? x : acts[l - 1];
+          const dp = new Float64Array(ni);
+          for (let j = 0; j < no; j++) {
+            const dj = d[j]; if (dj === 0) continue;
+            gB[l][j] += dj;
+            for (let k = 0; k < ni; k++) { gW[l][j * ni + k] += dj * inp[k]; dp[k] += dj * W[l][j * ni + k]; }
+          }
+          if (l > 0) { const a = acts[l - 1]; for (let k = 0; k < ni; k++) dp[k] *= (1 - a[k] * a[k]); }
+          d = dp;
+        }
+      }
+      step++;
+      const b1 = 0.9, b2 = 0.999, c1 = 1 - Math.pow(b1, step), c2 = 1 - Math.pow(b2, step);
+      for (let l = 0; l < 3; l++) {
+        const w = W[l], g = gW[l], m1 = mW[l], v1 = vW[l];
+        for (let k = 0; k < w.length; k++) { const gg = g[k] / bn + L2 * w[k]; m1[k] = b1 * m1[k] + (1 - b1) * gg; v1[k] = b2 * v1[k] + (1 - b2) * gg * gg; w[k] -= LR * (m1[k] / c1) / (Math.sqrt(v1[k] / c2) + 1e-8); }
+        const bb = B[l], gb = gB[l], mb = mB[l], vb = vB[l];
+        for (let k = 0; k < bb.length; k++) { const gg = gb[k] / bn; mb[k] = b1 * mb[k] + (1 - b1) * gg; vb[k] = b2 * vb[k] + (1 - b2) * gg * gg; bb[k] -= LR * (mb[k] / c1) / (Math.sqrt(vb[k] / c2) + 1e-8); }
+      }
+    }
+    const e = valMSE();
+    if (e < best - 1e-5) { best = e; bestSnap = snap(); bad = 0; } else bad++;
+  }
+  restore(bestSnap);
+  return (x, wantHid) => { if (!wantHid) return fwd(x); const a = []; const o = fwd(x, a); return { o, h: a[1] }; };
+}
+
+const NN_LEV = [0.4, 0.6, 0.8, 1, 1.3, 1.6, 2, 2.5, 3, 4, 5];   // нива на TP/SL (ATR), които моделът тества сам
+const NN_HOLDS = [6, 12, 20, 30, 50, 75, 100];
+const NN_HMAX = 100;
+
+// За една свещ: първия бар, в който цената достига всяко ниво нагоре/надолу, и доходността при всяко време.
+function nnPath(candles, atrV, j) {
+  const L = NN_LEV.length, atr = atrV[j] || 1, entry = candles[j].close;
+  const up = new Int16Array(L).fill(9999), dn = new Int16Array(L).fill(9999);
+  let mx = -Infinity, mn = Infinity;
+  for (let k = 1; k <= NN_HMAX; k++) {
+    const cd = candles[j + k];
+    if (cd.high > mx) mx = cd.high;
+    if (cd.low < mn) mn = cd.low;
+    const u = (mx - entry) / atr, d = (entry - mn) / atr;
+    for (let l = 0; l < L; l++) {
+      if (up[l] === 9999 && u >= NN_LEV[l]) up[l] = k;
+      if (dn[l] === 9999 && d >= NN_LEV[l]) dn[l] = k;
+    }
+  }
+  const ret = new Float64Array(NN_HOLDS.length);
+  for (let h = 0; h < NN_HOLDS.length; h++) ret[h] = (candles[j + NN_HOLDS[h]].close - entry) / atr;
+  return { up, dn, ret };
+}
+// Резултат (в ATR) на позиция dir (1=BUY,0=SELL) с TP ниво a, SL ниво b, време h. SL е първи при равенство.
+function nnOutcome(P, dir, a, b, h) {
+  const hold = NN_HOLDS[h], tp = NN_LEV[a], sl = NN_LEV[b];
+  const tpT = dir ? P.up[a] : P.dn[a], slT = dir ? P.dn[b] : P.up[b];
+  const t1 = tpT <= hold, t2 = slT <= hold;
+  if (t2 && (!t1 || slT <= tpT)) return -sl;
+  if (t1) return tp;
+  const m = dir ? P.ret[h] : -P.ret[h];
+  return Math.max(-sl, Math.min(tp, m));
+}
+
+function computeNeuralSeries(candles, opts) {
+  const n = candles.length;
+  const res = new Array(n).fill(null);
+  const trainEnd = Math.max(0, Math.min(n, Math.floor((opts && opts.trainEnd) || 0)));
+  const info = { trained: false, reason: '' };
+  res.info = info;
+  if (n < 100 || trainEnd < 400) { info.reason = 'малко данни за обучение'; return res; }
+  const prices = candles.map(c => c.close);
+  const c = {
+    rsiV: computeRSI(candles, 14), ema20: computeEMA(prices, 20), ema50: computeEMA(prices, 50), ema200: computeEMA(prices, 200),
+    macd: computeMACD(prices), atrV: computeATR(candles, 14), adxR: computeADX(candles, 14),
+    volV: candles.map(x => x.volume || 0)
+  };
+  c.meanAtrV = rollingMean(c.atrV, 2000); c.meanVolV = rollingMean(c.volV, 2000);
+  const D = 14, V = NN_VARIANTS.length, L = NN_LEV.length, NH = NN_HOLDS.length;
+  const idx = [];
+  for (let j = 60; j + NN_H < trainEnd; j++) idx.push(j);
+  if (idx.length < 300) { info.reason = 'малко обучителни свещи'; return res; }
+  const X = idx.map(j => nnFeatures(candles, c, j).map(v => isFinite(v) ? v : 0));
+  const Y = idx.map(j => nnOutcomes(candles, c.atrV, j));
+  const nTr = Math.floor(idx.length * 0.8);
+  const mu = new Float64Array(D), sd = new Float64Array(D);
+  for (let d = 0; d < D; d++) {
+    let a = 0; for (let i = 0; i < nTr; i++) a += X[i][d]; mu[d] = a / nTr;
+    let q = 0; for (let i = 0; i < nTr; i++) q += (X[i][d] - mu[d]) ** 2; sd[d] = Math.sqrt(q / nTr) || 1;
+  }
+  const norm = (x) => { const o = new Float64Array(D); for (let d = 0; d < D; d++) o[d] = Math.max(-5, Math.min(5, (x[d] - mu[d]) / sd[d])); return o; };
+  const Xn = X.map(norm);
+  // ── Разпознаване на шанса (непроменено): MLP → най-добър от 12 варианта, праг от валидацията, новост ──
+  const net = nnTrain(Xn, Y, nTr, D, V, 12345, 32, 16, 60);
+  const fwd = (z) => net(z);
+  const pickBest = (o) => { let bv = 0; for (let v = 1; v < V; v++) if (o[v] > o[bv]) bv = v; return bv; };
+  const preds = [];
+  for (let i = nTr; i < idx.length; i++) { const o = fwd(Xn[i]); const bv = pickBest(o); preds.push({ e: o[bv], r: Y[i][bv], bv, i }); }
+  let thr = null, bestTot = -Infinity;
+  for (const t of [0.05, 0.1, 0.15, 0.2, 0.3, 0.4, 0.5, 0.7]) {
+    let cnt = 0, tot = 0; for (const q of preds) if (q.e >= t) { cnt++; tot += q.r; }
+    if (cnt >= 30 && tot > bestTot) { bestTot = tot; thr = t; }
+  }
+  if (thr == null) thr = 0.15;
+  const KN = 5;
+  const knnDist = (z, limitIdx) => {
+    const ds = [];
+    for (let i = 0; i < limitIdx; i++) { const x = Xn[i]; let dd = 0; for (let d = 0; d < D; d++) { const t = x[d] - z[d]; dd += t * t; } ds.push(dd); }
+    ds.sort((a, b) => a - b);
+    return Math.sqrt(ds[Math.min(KN - 1, ds.length - 1)]);
+  };
+  const vd = [];
+  for (let i = nTr; i < idx.length; i += 3) vd.push(knnDist(Xn[i], nTr - NN_H));
+  vd.sort((a, b) => a - b);
+  const noveltyLim = vd.length ? vd[Math.floor(vd.length * 0.9)] : Infinity;
+
+  // ── Настройка на TP / SL / време: само за вече избраната посока. Върху най-близките минали случаи се тества
+  // плътна мрежа (11 TP × 11 SL × 7 времена) и се взема комбинацията с най-добра долна граница на
+  // предимството на единица риск (след изваждане на общия дрейф на комбинацията). ──
+  const nPath = idx.filter(j => j + NN_HMAX < trainEnd).length;   // примери с пълен път до 100 бара
+  const PATH = new Array(nPath);
+  for (let i = 0; i < nPath; i++) PATH[i] = nnPath(candles, c.atrV, idx[i]);
+  const E = Xn.map(z => Float64Array.from(net(z, true).h));
+  const ED = E[0].length;
+  const NC = L * L * NH, cidx = (a, b, h) => (a * L + b) * NH + h;
+  const globalMean = (upto, dir) => {
+    const g = new Float64Array(NC);
+    for (let i = 0; i < upto; i++) { const P = PATH[i]; for (let a = 0; a < L; a++) for (let b = 0; b < L; b++) for (let h = 0; h < NH; h++) g[cidx(a, b, h)] += nnOutcome(P, dir, a, b, h); }
+    for (let k = 0; k < NC; k++) g[k] /= Math.max(1, upto);
+    return g;
+  };
+  const K = 60, SEP = 12;
+  const sum = new Float64Array(NC), sq = new Float64Array(NC);
+  const tune = (z, upto, g, dir) => {
+    upto = Math.min(upto, nPath);
+    const dist = new Float64Array(upto);
+    for (let i = 0; i < upto; i++) { const e = E[i]; let t = 0; for (let d = 0; d < ED; d++) { const q = e[d] - z[d]; t += q * q; } dist[i] = t; }
+    const ord = Array.from({ length: upto }, (_, i) => i).sort((p, q) => dist[p] - dist[q]);
+    const pick = [];
+    for (let q = 0; q < ord.length && pick.length < K; q++) { const i = ord[q]; let ok = true; for (let p = 0; p < pick.length; p++) if (Math.abs(pick[p] - i) < SEP) { ok = false; break; } if (ok) pick.push(i); }
+    if (pick.length < 20) return null;
+    sum.fill(0); sq.fill(0);
+    for (const i of pick) { const P = PATH[i]; for (let a = 0; a < L; a++) for (let b = 0; b < L; b++) for (let h = 0; h < NH; h++) { const o = nnOutcome(P, dir, a, b, h), k = cidx(a, b, h); sum[k] += o; sq[k] += o * o; } }
+    const m = pick.length;
+    let best = null;
+    for (let a = 0; a < L; a++) for (let b = 0; b < L; b++) for (let h = 0; h < NH; h++) {
+      const k = cidx(a, b, h), mean = sum[k] / m, vr = Math.max(1e-9, sq[k] / m - mean * mean);
+      const slv = NN_LEV[b], score = (mean - g[k]) / slv - Math.sqrt(vr / m) / slv;
+      if (mean > 0 && (!best || score > best.score)) best = { a, b, h, score };
+    }
+    return best;
+  };
+  // Валидация: настроените стойности трябва да бият фиксираната двойка на мрежата, иначе се ползва нейната.
+  const upVal = Math.max(100, Math.min(nTr - NN_HMAX, nPath));
+  const gV = [globalMean(upVal, 0), globalMean(upVal, 1)];
+  let totTuned = 0, totFixed = 0, cntV = 0;
+  for (const q of preds) {
+    if (q.e < thr || q.i >= nPath) continue;
+    const dir = NN_VARIANTS[q.bv].dir === 'BUY' ? 1 : 0;
+    const bt = tune(E[q.i], upVal, gV[dir], dir);
+    if (!bt) continue;
+    totTuned += nnOutcome(PATH[q.i], dir, bt.a, bt.b, bt.h);
+    totFixed += q.r; cntV++;
+  }
+  const useTuned = cntV >= 20 && totTuned > totFixed;
+  info.trained = true; info.samples = idx.length; info.thr = thr; info.noveltyLim = noveltyLim;
+  info.valPicks = preds.filter(q => q.e >= thr).length;
+  info.tuned = useTuned; info.valTuned = totTuned; info.valFixed = totFixed;
+  // ── Прилагане ──
+  const gAll = [globalMean(nPath, 0), globalMean(nPath, 1)];
+  let ok = 0, tot = 0;
+  for (let i = trainEnd; i < n; i++) {
+    const x = nnFeatures(candles, c, i);
+    if (!x.every(isFinite)) continue;
+    tot++;
+    const z = norm(x), o = fwd(z), bv = pickBest(o);
+    let plan = null, buyPct = 50;
+    if (o[bv] >= thr && knnDist(z, idx.length) <= noveltyLim) {
+      const vr = NN_VARIANTS[bv], dir = vr.dir === 'BUY' ? 1 : 0;
+      plan = { dir: vr.dir, tpMult: vr.tp, slMult: vr.sl, hold: vr.hold };
+      if (useTuned) {
+        const bt = tune(Float64Array.from(net(z, true).h), nPath, gAll[dir], dir);
+        if (bt) plan = { dir: vr.dir, tpMult: NN_LEV[bt.a], slMult: NN_LEV[bt.b], hold: NN_HOLDS[bt.h] };
+      }
+      buyPct = 50 + (dir ? 1 : -1) * 50 * Math.tanh(o[bv] * 2);
+      ok++;
+    }
+    res[i] = { time: candles[i].time, buyPct, sellPct: 100 - buyPct };
+    if (plan) res[i].plan = plan;
+  }
+  info.evalBars = tot; info.signalBars = ok;
+  return res;
+}
+
 // Causal (walk-forward) core shared by the bot series and the chart sequence.
 // At index i the statistics only include trades entered before i whose outcome
 // was already known by time i, and every baseline (ATR/volume mean, RSI) is
@@ -935,8 +1353,10 @@ function computeModelProbCore(candles, modelIndex, opts) {
   const anaAvg1 = (modelIndex === 10) ? new Float64Array(n).fill(NaN) : null;
   const anaLine = (modelIndex === 10) ? new Float64Array(n).fill(NaN) : null;
   const analogH = (opts && opts.holdBars > 0) ? Math.min(500, Math.floor(opts.holdBars)) : 50;
-  const analog = (modelIndex === 9 || modelIndex === 10)
-    ? createAnalogEngine(candles, { rsiV, ema20, ema50, macd, atrV, adxR, volV, meanAtrV, meanVolV }, analogH, modelLb, (opts && opts.analogTop > 0) ? Math.floor(opts.analogTop) : ANALOG_TOP_K, !!(opts && opts.analogSimple), modelIndex === 9)
+  const analog = (modelIndex === 9)
+    ? createAnalogKnn(candles, { rsiV, ema20, ema50, macd, atrV, adxR, volV, meanAtrV, meanVolV }, analogH, modelLb, (opts && opts.analogTop > 0) ? Math.floor(opts.analogTop) : ANALOG_TOP_K)
+    : (modelIndex === 10)
+    ? createAnalogEngine(candles, { rsiV, ema20, ema50, macd, atrV, adxR, volV, meanAtrV, meanVolV }, analogH, modelLb, (opts && opts.analogTop > 0) ? Math.floor(opts.analogTop) : ANALOG_TOP_K, !!(opts && opts.analogSimple), false)
     : null;
   const combos = new Map();
   let totalWins = 0, totalTrades = 0;
@@ -1122,6 +1542,7 @@ function computeModelProbCore(candles, modelIndex, opts) {
 // Връща масив, подравнен с `candles` (null за загряващия прозорец), всеки
 // елемент { time, buyPct, sellPct } — строго причинен (без бъдеще).
 function computeModelProbSeries(candles, modelIndex, opts) {
+  if (modelIndex === 12) return computeNeuralSeries(candles, opts);
   let planOut = null;
   if (modelIndex === 9) { planOut = []; opts = Object.assign({}, opts, { planOut }); }
   const vals = computeModelProbCore(candles, modelIndex, opts);
@@ -1358,6 +1779,7 @@ if (typeof module !== 'undefined' && module.exports) {
     signalMask,
     resolveTrade,
     computeModelProbSeries,
+    computeNeuralSeries,
     computeModelProbSeriesLive,
     computeModelProbCore,
     computeModelProbSequence,

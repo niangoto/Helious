@@ -1109,6 +1109,7 @@
             <button class="btn start" id="btnStart" onclick="runSimulation()">▶ Стартирай</button>
             <button class="btn stop" id="btnStop" onclick="stopSimulation()">■ Стоп</button>
             <button class="btn" id="btnSweep" onclick="toggleSweepPick()" title="Анализ на чувствителността: цъкни бутона, после цъкни върху настройка">📈 Чувствителност</button>
+            <button class="btn" id="btnOpt" onclick="openOptPanel()" title="Оптимизатор: търси най-добрите настройки (случайно търсене + финo настройване), проверява ги върху отделен тестов период и ги прилага с един клик">🎯 Оптимизатор</button>
             <button class="btn" id="btnCompare" onclick="openCompare()" title="Сравни няколко файла с настройки върху няколко тестови периода">⚖ Сравни</button>
             <label style="display:inline-flex;align-items:center;gap:4px;font-size:10.5px;color:var(--text-dim);white-space:nowrap" title="При „Запази“ записва ВТОРИ отделен файл с точните свещи от последната симулация. При „Зареди“ избери двата файла заедно (настройки + данни) — няма да се теглят данни от сървъра.">
                 <input type="checkbox" id="inpSaveData" style="width:auto"> данни
@@ -1188,6 +1189,33 @@
             <div id="sweepFactors" style="display:grid;grid-template-columns:1fr 1fr;gap:2px 10px;font-size:10.5px;margin-top:6px"></div>
             <div id="sweepResults" style="margin-top:6px"></div>
         </div>
+    </div>
+
+    <div id="optPanel" style="display:none; position:fixed; left:12px; bottom:12px; width:480px; max-width:96vw; max-height:92vh; overflow:auto; background:#0b0f18; border:1px solid var(--panel-border); border-radius:10px; padding:8px 10px; z-index:9999; box-shadow:0 10px 34px rgba(0,0,0,0.55)">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+            <b style="font-size:12px">🎯 Оптимизатор на настройките</b>
+            <button class="btn close" onclick="closeOptPanel()" style="padding:2px 8px">✕</button>
+        </div>
+        <div style="font-size:10.5px;color:var(--text-dim);margin-bottom:6px">Търси по данните от последната симулация. Периодът се дели на <b>обучение</b> (там се търси) и <b>тест</b> (последните %, невиждани при търсенето) — ако тестът е много по-лош от обучението, настройките са преоптимизирани.</div>
+        <div id="optFactors" style="display:grid;grid-template-columns:1fr;gap:2px;font-size:10.5px"></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:6px;font-size:10.5px;color:var(--text-dim)">
+            <label>Опити <input type="number" id="optSamples" value="300" min="20" max="20000" step="10" style="width:64px"></label>
+            <label>Тест % <input type="number" id="optTestPct" value="30" min="0" max="60" step="5" style="width:44px"></label>
+            <label>Мин. сделки <input type="number" id="optMinTrades" value="20" min="0" step="5" style="width:44px"></label>
+            <label>Цел <select id="optObjective" style="width:auto">
+                <option value="dd">Печалба − ½·просадка</option>
+                <option value="profit">Само печалба</option>
+                <option value="ratio">Печалба / просадка</option>
+            </select></label>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;margin-top:6px">
+            <button class="btn" id="btnOptRun" onclick="runOptimizer()" style="padding:2px 10px">🎯 Търси</button>
+            <button class="btn" id="btnOptPause" onclick="toggleSweepPause(); this.textContent = sweepPaused ? '▶ Продължи' : '⏸ Пауза'" style="padding:2px 8px;display:none">⏸ Пауза</button>
+            <button class="btn stop" id="btnOptStop" onclick="stopSweep()" style="padding:2px 8px;display:none">⏹ Стоп</button>
+        </div>
+        <div style="height:6px;background:#141b2b;border-radius:3px;margin-top:6px;overflow:hidden"><div id="optBar" style="height:100%;width:0;background:#4aa3ff"></div></div>
+        <div id="optInfo" style="font-size:10.5px;color:var(--text-dim);margin-top:4px"></div>
+        <div id="optResults" style="margin-top:6px"></div>
     </div>
 
     <div id="lbChartPanel">
@@ -1493,7 +1521,7 @@
         // напр. 1м за ~34 дни; над това периодът се скъсява (вижда се в #periodInfo).
         const MAX_FETCH = 50000;
 
-        const modelNames = ['Историческа', 'Логистична', 'Марковска', 'Очаквана стойност', 'Уейвлет', 'Средна вероятност', 'Фурие', 'RSI анализ', 'Логистична 2', 'Аналози (близост)', 'Логистична 2 + Аналози', 'Логистична 3'];
+        const modelNames = ['Историческа', 'Логистична', 'Марковска', 'Очаквана стойност', 'Уейвлет', 'Средна вероятност', 'Фурие', 'RSI анализ', 'Логистична 2', 'Аналози (близост)', 'Логистична 2 + Аналози', 'Логистична 3', 'Невронна мрежа'];
 
         let cancelFlag = false;
         let running = false;
@@ -1650,8 +1678,8 @@
             const mixed = parseInt(mSel.value, 10) === 10;
             const log3 = parseInt(mSel.value, 10) === 11;
             const vb = document.getElementById('virtTpSlBox'); if (vb) vb.style.display = parseInt(mSel.value, 10) === 8 ? '' : 'none';
-            const aab = document.getElementById('analogAvgBox'); if (aab) aab.style.display = (an || mixed || log3) ? '' : 'none';
-            const asb = document.getElementById('analogSimpleBox'); if (asb) asb.style.display = (an || mixed) ? '' : 'none';
+            const aab = document.getElementById('analogAvgBox'); if (aab) aab.style.display = (mixed || log3) ? '' : 'none';
+            const asb = document.getElementById('analogSimpleBox'); if (asb) asb.style.display = mixed ? '' : 'none';
             const hideEl = (el, on) => { if (el) el.style.display = on ? 'none' : ''; };
             ['inpTp', 'inpSl'].forEach(id => { const el = document.getElementById(id); hideEl(el && el.closest('label'), an); });
             const pc = document.getElementById('inpPctClose'); hideEl(pc && pc.closest('label'), an);
@@ -1667,6 +1695,13 @@
                 hideEl(cb.closest('label'), hide);
                 if (hide) cb.checked = false;
             });
+            // Невронна мрежа (12): сама избира посока, TP/SL, време и праг → скриваме излишните настройки.
+            const nn12 = parseInt(mSel.value, 10) === 12;
+            ['inpAlpha', 'inpBuyTh', 'inpSellTh', 'inpMinEv', 'inpTp', 'inpSl', 'inpHold', 'inpKelly', 'inpLookback', 'inpStrictWindow', 'inpReverse', 'inpPctClose'].forEach(id => {
+                const el = document.getElementById(id); const lab = el && el.closest('label');
+                if (lab) hideEl(lab, nn12 || ((id === 'inpTp' || id === 'inpSl' || id === 'inpPctClose') && parseInt(mSel.value, 10) === 9));
+            });
+            if (nn12) { const pc2 = document.getElementById('inpPctClose'); if (pc2) pc2.checked = false; const rv = document.getElementById('inpReverse'); if (rv) rv.checked = false; }
         }
 
         // Флагове за обръщане на Buy↔Sell по всеки от 5-те модела в средната.
@@ -3125,8 +3160,10 @@
                             const tg = Math.max(-0.9, Math.min(0.9, (avg2Arr[i] - avg2Arr[i - 1]) * (N + 1) / 2 * 0.03));
                             bp = 50 + 50 * tg;
                         }
-                        prAvg = { buyPct: bp, sellPct: 100 - bp, plan: prScaled.plan };
-                        if (!silent) slopeProbArr[i] = bp;
+                        // Аналози v2: вероятността е директно калибрираната t-статистика на модела
+                        // (без наклон на EMA — той закъснява и добавя шум); EMA линията остава само за изглед.
+                        prAvg = { buyPct: prScaled.buyPct, sellPct: 100 - prScaled.buyPct, plan: prScaled.plan };
+                        if (!silent) slopeProbArr[i] = prScaled.buyPct;
                     }
                     if (!silent && avg2Arr[i] != null) probAvgArr[i] = avg2Arr[i];
                 }
@@ -3249,9 +3286,10 @@
                         // (3) R:R — рискът разширява/стеснява TP и SL (агресивен: далечен SL + голям TP)
                         // Модел 9 („Аналози“) сам предлага TP/SL (в ATR) и времево затваряне.
                         // План за посоката, която сочи наклонът (buyPct ≥ 50 → BUY).
-                        const plan = (currentModel === 9 && pr.plan)
-                            ? ((pr.plan.plans && pr.plan.plans[buyPct >= 50 ? 'BUY' : 'SELL']) || null) : null;
-                        const noPlan9 = currentModel === 9 && !plan;
+                        const nnModel = currentModel === 12;
+                        const plan = ((currentModel === 9 || nnModel) && pr.plan)
+                            ? (nnModel ? pr.plan : ((pr.plan.plans && pr.plan.plans[buyPct >= 50 ? 'BUY' : 'SELL']) || null)) : null;
+                        const noPlan9 = (currentModel === 9 || nnModel) && !plan;
                         const tpDist = plan ? plan.tpMult * atr : P.tpMult * alpha * atr;
                         const slDist = plan ? plan.slMult * atr : P.slMult * alpha * atr;
                         const gain = tpDist;
@@ -3268,6 +3306,7 @@
                         let dir = null;
                         if (buyPct >= buyPmin && evLong > P.minEv) dir = 'BUY';
                         else if (sellPct >= sellPmin && evShort > P.minEv) dir = 'SELL';
+                        if (nnModel) dir = plan ? plan.dir : null;   // невронна: сама избира посока/TP/SL; без аналог → не отваря
                         if (noPlan9) dir = null;
                         if (plan && dir && dir !== plan.dir) dir = null;
 
@@ -3275,10 +3314,10 @@
                             const p = dir === 'BUY' ? pRise : pFall;
                             const q = 1 - p;
                             const b = gain / loss;
-                            let fStar = p - q / b;
+                            let fStar = nnModel ? 1 : p - q / b;
                             if (fStar > 0) {
                                 // (1) Множител на размера на позицията: Size_final = α × Size_calc
-                                let f = Math.min(fStar * P.kellyF * alpha, P.maxKelly);
+                                let f = nnModel ? P.maxKelly : Math.min(fStar * P.kellyF * alpha, P.maxKelly);
                                 if (f > 0) {
                                     // „Реверс“: размерът се смята, сякаш старата позиция вече е затворена
                                     // по цената на свещта (капиталът включва нейния резултат, маржинът е свободен).
@@ -3476,6 +3515,19 @@
         // (само последните `lookback` свещи, от fromIdx нататък) или обикновеното причинно изчисление.
         async function computeProbsForRun(candles, interval, lookback, P, fromIdx) {
             const opts = Object.assign({ invert: contraFlags(), intervalSec: intervalSecs(interval), lookback: lookback, lookbackGrow: false }, virtTpSl(P));
+            if (currentModel === 12) {
+                // Невронна мрежа: обучение върху всичко ПРЕДИ началото на периода (fromIdx), без настройки.
+                await sleep(0);
+                const ser = computeModelProbSeries(candles, 12, { trainEnd: fromIdx || 0 });
+                const inf = ser && ser.info;
+                if (inf) {
+                    const txt = !inf.trained ? ('Невронна мрежа: ' + inf.reason)
+                        : ('Невронна мрежа: обучена върху ' + inf.samples + ' свещи · ' + ('праг ' + inf.thr + ' · сигнал в ' + inf.signalBars + ' от ' + inf.evalBars + ' бара'));
+                    setProgress(12, txt);
+                    console.log('[NN]', inf);
+                }
+                return ser;
+            }
             if (P && P.strictWindow) {
                 return computeModelProbSeriesStrict(candles, currentModel, opts, lookback, null, fromIdx, false);
             }
@@ -3672,7 +3724,7 @@
                 } else if (datePeriod) {
                     // ТОЧЕН период + фиксирана пред-история (lookback бара).
                     const iv = intervalSecs(interval);
-                    const pre = Math.max(300, P.lookback || lbDefault) * iv;
+                    const pre = Math.max(300, P.lookback || lbDefault, currentModel === 12 ? 8000 : 0) * iv;   // модел 12: ≥8000 свещи за обучение
                     setProgress(2, 'Зареждане на историческите данни за периода...');
                     candles = await fetchExactRange(currentSymbol, interval, fromS - pre, toS);
                 } else {
@@ -4209,6 +4261,230 @@
             }
             updateMinLotSpreadHint();
             closeSweepPanel();
+            runSimulation();
+        }
+
+        // ── Оптимизатор на настройките ───────────────────────────────
+        // Случайно търсене + локално финo настройване върху „обучителната“ част
+        // от симулирания период; най-добрите комбинации се проверяват върху
+        // отделен „тестов“ край (невиждан при търсенето). Така се вижда дали
+        // резултатът е реален, или е преоптимизиран към конкретния период.
+        const OPT_FACTORS = [
+            { id: 'inpAlpha',    key: 'alpha',    lo: 0.3, hi: 3,   step: 0.05, on: true },
+            { id: 'inpBuyTh',    key: 'buyTh',    lo: 50,  hi: 95,  step: 1,    on: true },
+            { id: 'inpSellTh',   key: 'sellTh',   lo: 50,  hi: 95,  step: 1,    on: true },
+            { id: 'inpTp',       key: 'tpMult',   lo: 0.5, hi: 6,   step: 0.1,  on: true },
+            { id: 'inpSl',       key: 'slMult',   lo: 0.5, hi: 4,   step: 0.1,  on: true },
+            { id: 'inpHold',     key: 'holdBars', lo: 10,  hi: 500, step: 1,    on: true },
+            { id: 'inpKelly',    key: 'kellyF',   lo: 0.05, hi: 1,  step: 0.01, on: false },
+            { id: 'inpMaxKelly', key: 'maxKelly', lo: 0.01, hi: 0.3, step: 0.01, on: false },
+            { id: 'inpLookback', key: 'lookback', lo: 300, hi: 6000, step: 100, on: false, slow: true }
+        ];
+        let optTop = [];
+
+        function buildOptFactors() {
+            const box = document.getElementById('optFactors');
+            if (!box) return;
+            const sim9 = (typeof currentModel !== 'undefined' && currentModel === 9);
+            box.innerHTML = OPT_FACTORS.map(f => {
+                const dis = (sim9 && (f.key === 'tpMult' || f.key === 'slMult')) || (currentModel === 12 && f.key !== 'maxKelly');   // 12: всичко друго се решава от мрежата
+                return '<label style="display:flex;align-items:center;gap:6px;' + (dis ? 'opacity:.4' : '') + '">'
+                    + '<input type="checkbox" class="optf" data-id="' + f.id + '"' + ((f.on && !dis) ? ' checked' : '') + (dis ? ' disabled' : '') + '> '
+                    + '<span style="flex:1">' + (SWEEP_LABELS[f.id] || f.key) + (f.slow ? ' <small style="color:var(--text-dim)">(бавно)</small>' : '') + '</span>'
+                    + '<input type="number" class="optlo" data-id="' + f.id + '" value="' + f.lo + '" step="any" style="width:62px"> –'
+                    + '<input type="number" class="opthi" data-id="' + f.id + '" value="' + f.hi + '" step="any" style="width:62px">'
+                    + '</label>';
+            }).join('');
+        }
+        function openOptPanel() {
+            const p = document.getElementById('optPanel');
+            if (!p) return;
+            buildOptFactors();
+            p.style.display = 'block';
+            const info = document.getElementById('optInfo');
+            if (info && !(lastSim && lastSim.candles && lastSim.candles.length)) info.textContent = 'Пусни първо една симулация (▶ Стартирай), за да има заредени данни.';
+        }
+        function closeOptPanel() {
+            const p = document.getElementById('optPanel');
+            if (p && p.style.display !== 'none' && sweepActive) { sweepCancel = true; sweepPaused = false; }
+            if (p) p.style.display = 'none';
+        }
+        function setOptControls(active) {
+            const r = document.getElementById('btnOptRun'), pa = document.getElementById('btnOptPause'), st = document.getElementById('btnOptStop');
+            if (r) r.disabled = active;
+            if (pa) { pa.style.display = active ? '' : 'none'; pa.textContent = '⏸ Пауза'; }
+            if (st) st.style.display = active ? '' : 'none';
+        }
+
+        async function runOptimizer() {
+            if (!lastSim || !lastSim.candles || !lastSim.candles.length) {
+                alert('Пусни първо една симулация (▶ Стартирай), за да има заредени данни.');
+                return;
+            }
+            const q = (sel) => document.querySelector(sel);
+            const dims = Array.from(document.querySelectorAll('#optFactors .optf:checked')).map(c => {
+                const f = OPT_FACTORS.find(x => x.id === c.dataset.id);
+                let lo = parseFloat(q('.optlo[data-id="' + f.id + '"]').value), hi = parseFloat(q('.opthi[data-id="' + f.id + '"]').value);
+                if (!isFinite(lo) || !isFinite(hi)) { lo = f.lo; hi = f.hi; }
+                if (lo > hi) { const t = lo; lo = hi; hi = t; }
+                return Object.assign({}, f, { lo, hi, label: SWEEP_LABELS[f.id] || f.key });
+            });
+            if (!dims.length) { alert('Избери поне един фактор за оптимизация.'); return; }
+            const samples = Math.max(20, Math.min(20000, parseInt(q('#optSamples').value, 10) || 300));
+            const testPct = Math.max(0, Math.min(60, parseFloat(q('#optTestPct').value) || 0));
+            const minTrades = Math.max(0, parseInt(q('#optMinTrades').value, 10) || 0);
+            const objective = q('#optObjective').value;
+            const info = document.getElementById('optInfo'), bar = document.getElementById('optBar'), resEl = document.getElementById('optResults');
+            resEl.innerHTML = '';
+            if (!(await acquireSweep())) { alert('Симулацията не спря навреме. Опитай отново.'); return; }
+            setSweepControls(false);   // скрива бутоните на другия панел
+            setOptControls(true);
+            try {
+                const { candles, atrSeries, probs, interval, startIdx } = lastSim;
+                const baseP = lastSim.params ? Object.assign({}, lastSim.params) : readParams();
+                const n = candles.length;
+                const i0 = Math.max(30, startIdx | 0);
+                const span = n - i0;
+                if (span < 60) { info.textContent = 'Твърде кратък период за оптимизация.'; return; }
+                const split = testPct > 0 ? Math.max(i0 + 30, Math.min(n - 30, Math.round(n - span * testPct / 100))) : n;
+                const hasTest = split < n;
+
+                // Данни (с вероятности) по поглед назад; обучение = [0..split), тест = целият ред от split.
+                const dataCache = new Map();
+                const getData = async (lb) => {
+                    const k = baseP.lookback === lb ? 'base' : Math.round(lb);
+                    if (dataCache.has(k)) return dataCache.get(k);
+                    const full = (k === 'base') ? probs
+                        : await computeSweepProbs(candles, interval, Math.round(lb), (i, nn, w) => { info.textContent = 'Вероятности за поглед ' + w + ': бар ' + (i + 1) + '/' + nn + '...'; }, startIdx, false);
+                    const d = { full, tr: { c: candles.slice(0, split), a: atrSeries.slice(0, split), p: full.slice(0, split) } };
+                    dataCache.set(k, d);
+                    return d;
+                };
+                const scoreOf = (profit, dd, trades) => {
+                    if (trades < minTrades) return -1e6 + trades;
+                    if (objective === 'profit') return profit;
+                    if (objective === 'ratio') return profit / Math.max(2, dd);
+                    return profit - 0.5 * dd;
+                };
+                const runOn = async (P, part) => {
+                    const d = await getData(P.lookback);
+                    let r;
+                    if (part === 'train') r = await simulate(d.tr.c, d.tr.a, d.tr.p, P, interval, startIdx, true);
+                    else r = await simulate(candles, atrSeries, d.full, P, interval, split, true);
+                    if (!r || r.cancelled) return null;
+                    const profit = baseP.budget > 0 ? (r.equity - baseP.budget) / baseP.budget * 100 : 0;
+                    return { profit, dd: r.maxDD, trades: r.tradeCount, score: scoreOf(profit, r.maxDD, r.tradeCount) };
+                };
+                const quant = (d, v) => {
+                    v = Math.max(d.lo, Math.min(d.hi, v));
+                    v = Math.round(v / d.step) * d.step;
+                    v = Math.max(d.lo, Math.min(d.hi, v));
+                    return Math.round(v * 1e6) / 1e6;
+                };
+                const mk = (vals) => { const P = Object.assign({}, baseP); dims.forEach((d, j) => { P[d.key] = vals[j]; }); return P; };
+                const gauss = () => { let u = 0; for (let k = 0; k < 6; k++) u += Math.random(); return (u - 3) / 0.7071; };
+
+                // База (текущите настройки) върху обучение и тест.
+                const baseTrain = await runOn(baseP, 'train');
+                const baseTest = hasTest ? await runOn(baseP, 'test') : null;
+                if (!baseTrain) return;
+                const top = [];   // най-добрите по обучение: {vals, P, train}
+                const seen = new Set();
+                const consider = async (vals) => {
+                    const key = vals.join('|');
+                    if (seen.has(key)) return false;
+                    seen.add(key);
+                    const P = mk(vals);
+                    const tr = await runOn(P, 'train');
+                    if (!tr) return null;
+                    top.push({ vals, P, train: tr });
+                    top.sort((a, b) => b.train.score - a.train.score);
+                    if (top.length > 8) top.length = 8;
+                    return true;
+                };
+                await consider(dims.map(d => quant(d, baseP[d.key])));
+                const phase1 = Math.round(samples * 0.5);
+                const t0 = performance.now();
+                let done = 0;
+                const tick = async (label) => {
+                    if (bar) bar.style.width = Math.min(100, done / samples * 100).toFixed(1) + '%';
+                    const el = (performance.now() - t0) / 1000, eta = done > 0 ? el / done * (samples - done) : 0;
+                    const b = top[0];
+                    info.textContent = label + ' ' + done + '/' + samples + ' · остават ~' + fmtDur(eta)
+                        + (b ? ' · най-добро (обучение): ' + b.train.profit.toFixed(2) + '% / просадка ' + b.train.dd.toFixed(1) + '%' : '') + (sweepPaused ? ' · пауза' : '');
+                    await sleep(0);
+                };
+                // Фаза 1: широко случайно търсене.
+                for (; done < phase1; done++) {
+                    while (sweepPaused && !sweepCancel) await sleep(50);
+                    if (sweepCancel) break;
+                    const r = await consider(dims.map(d => quant(d, d.lo + Math.random() * (d.hi - d.lo))));
+                    if (r === null) break;
+                    if (done % 5 === 0) await tick('Търсене');
+                }
+                // Фаза 2: локално финo настройване около най-добрите (сигма се свива).
+                for (; done < samples && !sweepCancel; done++) {
+                    while (sweepPaused && !sweepCancel) await sleep(50);
+                    if (sweepCancel) break;
+                    const prog = (done - phase1) / Math.max(1, samples - phase1);
+                    const sigma = 0.15 * (1 - 0.8 * prog);
+                    const parent = top[Math.min(top.length - 1, Math.floor(Math.random() * Math.random() * top.length))];
+                    const vals = parent.vals.map((v, j) => Math.random() < 0.5 ? quant(dims[j], v + gauss() * sigma * (dims[j].hi - dims[j].lo)) : v);
+                    const r = await consider(vals);
+                    if (r === null) break;
+                    if (done % 5 === 0) await tick('Донастройване');
+                }
+                const dt = ((performance.now() - t0) / 1000).toFixed(1);
+                if (bar) bar.style.width = '100%';
+                // Тест на най-добрите 3 (само информативно — не участва в избора).
+                const wasCancelled = sweepCancel;
+                sweepCancel = false;   // тестът на финалистите да не се прекъсва от „Стоп“
+                const finalists = top.slice(0, 3);
+                for (const f of finalists) {
+                    f.test = hasTest ? await runOn(f.P, 'test') : null;
+                }
+                optTop = finalists;
+                renderOptResults(finalists, dims, baseTrain, baseTest, hasTest, { dt, tested: seen.size, cancelled: wasCancelled, split, n, i0 });
+                info.textContent = (wasCancelled ? 'Спряно' : 'Готово') + ' · ' + seen.size + ' различни комбинации, ' + dt + ' s · обучение ' + (split - i0) + ' бара' + (hasTest ? ', тест ' + (n - split) + ' бара' : '');
+            } finally {
+                setOptControls(false);
+                finishSweep();
+            }
+        }
+
+        function renderOptResults(top, dims, baseTrain, baseTest, hasTest, meta) {
+            const el = document.getElementById('optResults');
+            if (!el) return;
+            const pc = (v) => '<span class="' + (v >= 0 ? 'pos' : 'neg') + '">' + (v >= 0 ? '+' : '') + v.toFixed(2) + '%</span>';
+            const line = (lbl, r) => r ? (lbl + ' ' + pc(r.profit) + ' <small>(' + r.trades + ' сд., DD ' + r.dd.toFixed(1) + '%)</small>') : '';
+            let html = '<div style="font-size:10.5px;color:var(--text-dim);margin-bottom:3px">Сегашни настройки: ' + line('обучение', baseTrain) + (hasTest ? ' · ' + line('тест', baseTest) : '') + '</div>';
+            if (!top.length) { el.innerHTML = html + '<div style="font-size:10.5px">Няма резултати.</div>'; return; }
+            top.forEach((t, i) => {
+                const params = dims.map((d, j) => d.label + ' = ' + fmtField(t.vals[j])).join(' · ');
+                let warn = '';
+                if (hasTest && t.test) {
+                    if (t.test.profit < 0 && t.train.profit > 0) warn = ' <b style="color:#ff6b6b">⚠ губи на теста — вероятно преоптимизирано</b>';
+                    else if (baseTest && t.test.profit < baseTest.profit) warn = ' <b style="color:#e0a030">⚠ на теста е под сегашните</b>';
+                    else warn = ' <b style="color:#4ade80">✓ държи на теста</b>';
+                }
+                html += '<div style="display:flex;justify-content:space-between;align-items:center;gap:6px;margin:3px 0;background:#0f1521;border:1px solid var(--panel-border);border-radius:6px;padding:4px 6px">'
+                    + '<div style="font-size:10.5px;line-height:1.4"><b>#' + (i + 1) + '</b> ' + line('обучение', t.train) + (hasTest ? ' · ' + line('тест', t.test) : '') + warn
+                    + '<div style="color:var(--text-dim)">' + params + '</div></div>'
+                    + '<button class="btn" style="padding:2px 8px;white-space:nowrap" onclick="applyOptCombo(' + i + ')">Приложи</button></div>';
+            });
+            el.innerHTML = html;
+        }
+
+        function applyOptCombo(i) {
+            const t = optTop[i];
+            if (!t || !t.P) return;
+            for (const f of OPT_FACTORS) {
+                if (!(f.key in t.P)) continue;
+                const el = document.getElementById(f.id);
+                if (el) el.value = fmtField(t.P[f.key]);
+            }
+            markSettingsDirty();
+            closeOptPanel();
             runSimulation();
         }
 
