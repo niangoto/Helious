@@ -162,6 +162,26 @@ async function route(req, res, url, ctx) {
   const user = ctx.user;
   if (!user) { sendJson(res, 401, { ok: false, error: 'Изисква вход' }); return true; }
   const parts = p.split('/').filter(Boolean);        // api mt5 agents [:id] [:action]
+  if (parts[2] === 'instrument' && req.method === 'GET') {
+    // Параметри на символ от MT5 (мин. обем, маржин, спред) през първия онлайн агент на потребителя — за HERMES.
+    const sym = (url.searchParams.get('symbol') || '').trim();
+    const ag = listFor(user.id).find(a => a.online);
+    if (!ag) { sendJson(res, 200, { ok: false, reason: 'no_agent' }); return true; }
+    try {
+      const snap = await call(ag.id, 'snapshot', { symbols: [{ name: sym, interval: '1h', count: 1, from: 1 }] });
+      const d = snap.symbols && snap.symbols[sym];
+      if (!d || d.error) { sendJson(res, 200, { ok: false, reason: 'no_symbol', error: d && d.error }); return true; }
+      const acc = snap.account || {};
+      const spread = Math.max(0, (d.ask || 0) - (d.bid || 0));
+      const spreadAcc = (d.tick_size > 0) ? spread / d.tick_size * d.tick_value * d.vmin : 0;   // в валутата на сметката, за мин. обем
+      sendJson(res, 200, {
+        ok: true, source: 'mt5', agent: ag.name, symbol: sym, currency: acc.currency || null,
+        vmin: d.vmin, vstep: d.vstep, contract: d.contract, bid: d.bid, ask: d.ask, mid: (d.bid + d.ask) / 2,
+        spread, spreadMinLot: spreadAcc, marginMinLot: (d.margin_1lot || 0) * d.vmin, margin1lot: d.margin_1lot || 0
+      });
+    } catch (e) { sendJson(res, 200, { ok: false, reason: 'error', error: e.message }); }
+    return true;
+  }
   if (parts[2] !== 'agents') { sendJson(res, 404, { ok: false, error: 'Неизвестен API път' }); return true; }
   try {
     if (parts.length === 3 && req.method === 'GET') { sendJson(res, 200, { ok: true, agents: listFor(user.id) }); return true; }

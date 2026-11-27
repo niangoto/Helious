@@ -4740,8 +4740,35 @@
         // Автоматично попълване от Binance (ако символът е листнат там):
         // минимален обем (лот) и спред (€ за мин. обем). Ливъридж не се дава.
         let instrumentFetchSeq = 0;
+        // Приоритет: MT5 (ако има свързан агент) — реален мин. обем, маржин и спред от брокера.
+        async function autoFillFromMt5(seq) {
+            try {
+                const r = await fetch('/api/mt5/instrument?symbol=' + encodeURIComponent(currentSymbol), { credentials: 'same-origin' }).then(x => x.json());
+                if (seq !== instrumentFetchSeq || !r || !r.ok || !(r.vmin > 0)) return false;
+                await ensureFxRates();
+                const accFx = (r.currency && fxRates[r.currency] > 0) ? fxRates[r.currency] : 1;   // валута на сметката → EUR
+                const unit = ((document.getElementById('inpMinLotUnit') || {}).value === 'value') ? 'value' : 'lot';
+                const marginEur = r.marginMinLot * accFx;
+                const spec = specFor(currentSymbol), fx = fxFor(currentSymbol);
+                const notional = r.vmin * (r.contract > 0 ? r.contract : spec.contract) * r.mid * fx;
+                // Ефективен ливъридж на символа = нотионал / маржин (за да съвпадне маржинът в HERMES с MT5).
+                const lev = document.getElementById('inpLev');
+                if (lev && marginEur > 0 && notional > 0) lev.value = Math.max(1, Math.round(notional / marginEur * 100) / 100);
+                const ml = document.getElementById('inpMinLot');
+                if (ml) ml.value = (unit === 'value' && marginEur > 0) ? fmtAmt(marginEur) : r.vmin;
+                const su = document.getElementById('inpSpreadUnit');
+                if (su) su.value = 'eur';
+                const sp = document.getElementById('inpMinLotSpread');
+                if (sp) sp.value = fmtAmt(r.spreadMinLot * accFx);
+                updateMinLotSpreadHint();
+                return true;
+            } catch (e) { return false; }
+        }
+
         async function autoFillInstrument() {
             const seq = ++instrumentFetchSeq;
+            if (await autoFillFromMt5(seq)) return;
+            if (seq !== instrumentFetchSeq) return;
             try {
                 const r = await fetch('/instrument?symbol=' + encodeURIComponent(currentSymbol)).then(x => x.json());
                 if (seq !== instrumentFetchSeq || !r || !r.ok) return;
