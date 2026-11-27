@@ -334,24 +334,26 @@ class Session {
     if (!prob || !prob.buyPct) { why('block', 'Няма вероятност — малко свещи (' + arr.length + ', трябват ≥ 30)'); return; }
     if (!(info.contract > 0) || !(info.tickValue > 0) || !(info.tickSize > 0)) { why('block', 'MT5 не дава contract size / tick value за символа'); return; }
 
-    // „Реверс“ като в HERMES: решава се веднъж на затворена свещ, върху затворените свещи
-    // (без формиращата се). Нормалният вход (без отворена позиция) остава на всеки tick.
+    // „Реверс“: проверява се веднъж на всеки час, независимо от избрания период на свещта.
+    // При период ≤ 1ч — върху затворените свещи; при период > 1ч (няма затворена свещ на всеки час) —
+    // върху серията с формиращата се свещ. Нормалният вход (без отворена позиция) остава на всеки tick.
     let calcArr = arr;
     if (reversing) {
+      const hourKey = Math.floor(nowSec() / 3600);
+      if (st.revHour === hourKey) { why('info', 'Реверс: проверява се веднъж на час — следваща проверка в началото на следващия час'); return; }
       const closedT = st.lastBarTime;
-      if (st.revBar === closedT) { why('info', 'Реверс: проверява се веднъж на затворена свещ — следваща след затваряне на текущата'); return; }
-      calcArr = arr.filter(c => c.time <= closedT);
+      calcArr = iv > 3600 ? arr : arr.filter(c => c.time <= closedT);
       if (calcArr.length < 30) { why('block', 'Реверс: малко затворени свещи'); return; }
       try {
         const W = Math.max(30, this.window());
         const win = (this.P.strictWindow && calcArr.length > W) ? calcArr.slice(calcArr.length - W) : calcArr;
         const vals = models.computeModelProbCore(win, this.model, { invert: this.contra, intervalSec: iv, lookback: W, onlyLast: true, tpMult: this.P.tpMult * this.P.alpha, slMult: this.P.slMult * this.P.alpha });
         const v = vals ? vals[vals.length - 1] : null;
-        prob = v != null ? { time: closedT, buyPct: v, sellPct: 100 - v } : null;
+        prob = v != null ? { time: calcArr[calcArr.length - 1].time, buyPct: v, sellPct: 100 - v } : null;
       } catch (e) { prob = null; }
       if (!prob || !prob.buyPct) { why('block', 'Реверс: няма вероятност върху затворените свещи'); return; }
-      st.revBar = closedT;
-      probTxt = ' (затворена свещ, Buy ' + prob.buyPct.toFixed(1) + '% / Sell ' + prob.sellPct.toFixed(1) + '%)';
+      st.revHour = hourKey;
+      probTxt = ' (часова проверка, Buy ' + prob.buyPct.toFixed(1) + '% / Sell ' + prob.sellPct.toFixed(1) + '%)';
     }
     const atrArr = models.computeATR(calcArr, 14);
     const atr = atrArr[atrArr.length - 1];

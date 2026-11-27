@@ -3274,7 +3274,10 @@
                     }
                 }
 
-                if ((!legs.length || P.reversal) && i < n - 1 && marketOpen(currentSymbol, candles[i].time)) {
+                // „Реверс“ при отворена позиция се проверява веднъж на час (на бара, който затваря часа);
+                // при период ≥ 1ч — на всеки бар (по-често от бар данни няма).
+                const revHourOk = ivSec >= 3600 || Math.floor((candles[i].time + ivSec) / 3600) !== Math.floor(candles[i].time / 3600);
+                if ((!legs.length || (P.reversal && revHourOk)) && i < n - 1 && marketOpen(currentSymbol, candles[i].time)) {
                     const pr = prAvg || prScaled;
                     if (pr) {
                         const buyPct = pr.buyPct, sellPct = pr.sellPct;
