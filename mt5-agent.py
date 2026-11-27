@@ -285,9 +285,14 @@ def cmd_snapshot(p):
 def cmd_symbols(p):
     ensure_mt5()
     q = (p.get("query") or "").strip()
-    lst = mt5.symbols_get("*%s*" % q) if q else mt5.symbols_get()
+    lst = mt5.symbols_get() or []
+    if q:
+        ql = q.lower()
+        lst = [s for s in lst if ql in s.name.lower() or ql in (s.description or "").lower()]
+        # първо имената, които започват със заявката
+        lst.sort(key=lambda s: (not s.name.lower().startswith(ql), len(s.name)))
     out = []
-    for s in (lst or [])[:60]:
+    for s in lst[:60]:
         out.append({"name": s.name, "description": s.description, "path": s.path})
     return out
 

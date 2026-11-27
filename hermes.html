@@ -1740,9 +1740,20 @@
                     return;
                 }
                 const manual = `<div class="sym-item" onclick="selectHermesSymbol('${query.replace(/'/g, '')}')">Използвай „${query}“<span>ръчно</span></div>`;
+                const esc = t => String(t == null ? '' : t).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+                // MT5 (ако има свързан агент) — точните имена на брокера, с приоритет.
+                let mt5Html = '', mt5Names = new Set();
+                try {
+                    const m = await fetch('/api/mt5/symbols?query=' + encodeURIComponent(query), { credentials: 'same-origin' }).then(r => r.json());
+                    if (m && m.ok && Array.isArray(m.symbols)) {
+                        mt5Html = m.symbols.slice(0, 25).map(s => { mt5Names.add(String(s.name).toUpperCase()); return `<div class="sym-item" onclick="selectHermesSymbol('${String(s.name).replace(/['\\]/g, '')}')">${esc(s.name)}<span>MT5 · ${esc(s.description || s.path || '')}</span></div>`; }).join('');
+                    }
+                } catch (e) { }
+                if (query !== ((document.getElementById('symSearchInput') || {}).value || '').toUpperCase().trim()) return;
                 try {
                     const resp = await fetch(`/symbols?query=${encodeURIComponent(query)}`).then(r => r.json());
-                    const list = Array.isArray(resp) ? resp : [];
+                    let list = Array.isArray(resp) ? resp : [];
+                    if (mt5Names.size) { results.innerHTML = mt5Html; return; }
                     results.innerHTML = list.length
                         ? list.slice(0, 25).map(s => `<div class="sym-item" onclick="selectHermesSymbol('${String(s.canonical).replace(/'/g, '')}')">${s.canonical}<span>${s.alias && s.alias !== s.canonical ? s.alias : ''}</span></div>`).join('')
                         : manual;

@@ -162,6 +162,16 @@ async function route(req, res, url, ctx) {
   const user = ctx.user;
   if (!user) { sendJson(res, 401, { ok: false, error: 'Изисква вход' }); return true; }
   const parts = p.split('/').filter(Boolean);        // api mt5 agents [:id] [:action]
+  if (parts[2] === 'symbols' && req.method === 'GET') {
+    // Търсене в символите на MT5 през първия онлайн агент (за търсачката в HERMES).
+    const ag = listFor(user.id).find(a => a.online);
+    if (!ag) { sendJson(res, 200, { ok: false, reason: 'no_agent' }); return true; }
+    try {
+      const list = await call(ag.id, 'symbols', { query: url.searchParams.get('query') || '' });
+      sendJson(res, 200, { ok: true, symbols: list });
+    } catch (e) { sendJson(res, 200, { ok: false, reason: 'error', error: e.message }); }
+    return true;
+  }
   if (parts[2] === 'instrument' && req.method === 'GET') {
     // Параметри на символ от MT5 (мин. обем, маржин, спред) през първия онлайн агент на потребителя — за HERMES.
     const sym = (url.searchParams.get('symbol') || '').trim();

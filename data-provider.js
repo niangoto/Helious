@@ -91,6 +91,9 @@ const SYMBOL_ALIASES = {
   'BTC':     { canonical: 'BTCUSDT', sources: ['binance:BTCUSDT', 'yahoo:BTC-USD'] },
   'ETH':     { canonical: 'ETHUSDT', sources: ['binance:ETHUSDT', 'yahoo:ETH-USD'] },
   'SOL':     { canonical: 'SOLUSDT', sources: ['binance:SOLUSDT', 'yahoo:SOL-USD'] },
+  'XRP':     { canonical: 'XRPUSDT', sources: ['binance:XRPUSDT', 'yahoo:XRP-USD'] },
+  'XRPUSD':  { canonical: 'XRPUSDT', sources: ['binance:XRPUSDT', 'yahoo:XRP-USD'] },
+  'RIPPLE':  { canonical: 'XRPUSDT', sources: ['binance:XRPUSDT', 'yahoo:XRP-USD'] },
 };
 
 // Reverse lookup: alias → canonical
